@@ -1,4 +1,4 @@
-use std::fmt;
+use std::fmt::{self, Display, Formatter};
 
 use proptest::option;
 use readyset_util::fmt::fmt_with;
@@ -40,6 +40,27 @@ pub enum ShowStatement {
     ReadySetRsaPublicKey,
     /// SHOW MCP TOKENS — list all active MCP authentication tokens.
     McpTokens,
+    /// SHOW WARNINGS [LIMIT [offset,] row_count]
+    Warnings {
+        limit: Option<ShowLimit>,
+    },
+}
+
+/// The `LIMIT [offset,] row_count` clause of a SHOW statement.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub struct ShowLimit {
+    pub offset: u64,
+    pub row_count: u64,
+}
+
+impl Display for ShowLimit {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "LIMIT ")?;
+        if self.offset > 0 {
+            write!(f, "{}, ", self.offset)?;
+        }
+        write!(f, "{}", self.row_count)
+    }
 }
 
 impl DialectDisplay for ShowStatement {
@@ -114,6 +135,13 @@ impl DialectDisplay for ShowStatement {
                     write!(f, "READYSET RSA PUBLIC KEY")
                 }
                 Self::McpTokens => write!(f, "MCP TOKENS"),
+                Self::Warnings { limit } => {
+                    write!(f, "WARNINGS")?;
+                    if let Some(limit) = limit {
+                        write!(f, " {limit}")?;
+                    }
+                    Ok(())
+                }
             }
         })
     }

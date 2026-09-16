@@ -1208,6 +1208,21 @@ fn show_events() {
 }
 
 #[test]
+fn show_warnings() {
+    check_rt_mysql!("SHOW WARNINGS");
+    check_rt_mysql!("SHOW WARNINGS LIMIT 5");
+    check_rt_mysql!("SHOW WARNINGS LIMIT 2, 5");
+    assert!(
+        parse_query_with_config(
+            ParsingPreset::BothErrorOnMismatch,
+            Dialect::PostgreSQL,
+            "SHOW WARNINGS"
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn explain_domains() {
     check_parse_both!("EXPLAIN DOMAINS");
 }

@@ -1074,6 +1074,28 @@ where
     shallow_cache_allowlists: ShallowCacheAllowlists,
 }
 
+/// The result set of `SHOW WARNINGS` for a statement Readyset served itself, which raises no
+/// warnings.
+fn show_warnings() -> noria_connector::QueryResult<'static> {
+    let column = |name: &str, column_type| ColumnSchema {
+        column: ast::Column {
+            name: name.into(),
+            table: None,
+        },
+        column_type,
+        base: None,
+    };
+    let schema = SelectSchema {
+        schema: Cow::Owned(vec![
+            column("Level", DfType::DEFAULT_TEXT),
+            column("Code", DfType::UnsignedInt),
+            column("Message", DfType::DEFAULT_TEXT),
+        ]),
+        columns: Cow::Owned(vec!["Level".into(), "Code".into(), "Message".into()]),
+    };
+    noria_connector::QueryResult::from_owned(schema, vec![Results::new(Vec::new())])
+}
+
 impl<DB> BackendState<DB>
 where
     DB: UpstreamDatabase,

@@ -19,8 +19,8 @@ use readyset_client_metrics::{
 };
 use readyset_errors::{ReadySetError, internal_err, unsupported};
 use readyset_sql::ast::{
-    CacheType, DeallocateStatement, DiscardObject, ReadysetHintDirective, SetStatement, SqlQuery,
-    StatementIdentifier, TrxCachePolicy, UseStatement,
+    CacheType, DeallocateStatement, DiscardObject, ReadysetHintDirective, SetStatement,
+    ShowStatement, SqlQuery, StatementIdentifier, TrxCachePolicy, UseStatement,
 };
 use readyset_sql_passes::adapter_rewrites::{self, DfQueryParameters, QueryParameters};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent};
@@ -33,7 +33,7 @@ use super::routing::{ProxyState, SelectRouter, ShouldTrySelect};
 use super::set_handler::PendingSetState;
 use super::{
     Backend, BackendConnectors, BackendSettings, BackendState, MigrationMode, QueryInfo,
-    QueryResult, convert_or_parse_query, log_query, parse_shallow_query,
+    QueryResult, convert_or_parse_query, log_query, parse_shallow_query, show_warnings,
 };
 use crate::query_handler::UpstreamSetRewrite;
 use crate::session_mutation;
@@ -610,6 +610,27 @@ where
                     parsed_query,
                 )
                 .await
+            }
+            // SHOW WARNINGS reports on the statement before it and leaves the diagnostics area
+            // in place. The upstream connection's diagnostics area is current only when that
+            // statement ran there.
+            Ok(SqlQuery::Show(ShowStatement::Warnings { .. })) => {
+                state.preserve_last_query = true;
+                let ran_upstream = matches!(
+                    state.last_query.as_ref().map(|q| &q.destination),
+                    Some(
+                        QueryDestination::Upstream
+                            | QueryDestination::ReadysetThenUpstream(_)
+                            | QueryDestination::Both
+                    )
+                );
+                if ran_upstream {
+                    Self::query_fallback(connectors.upstream.as_mut(), query, event, None).await
+                } else {
+                    event.sql_type = SqlQueryType::Other;
+                    event.destination = Some(QueryDestination::Readyset(None));
+                    Ok(QueryResult::Noria(show_warnings()))
+                }
             }
             Ok(ref parsed_query) if parsed_query.is_readyset_extension() => {
                 Self::query_readyset_extensions(connectors, settings, state, parsed_query, event)

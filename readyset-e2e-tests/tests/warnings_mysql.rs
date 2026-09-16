@@ -1,8 +1,10 @@
 use mysql_async::prelude::Queryable;
 use mysql_async::{Conn, Row};
 use readyset_adapter::backend::MigrationMode;
+use readyset_client_metrics::QueryDestination;
+use readyset_client_test_helpers::mysql_helpers::{MySQLAdapter, last_query_info};
 use readyset_client_test_helpers::TestBuilder;
-use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
+use readyset_util::eventually;
 use test_utils::{tags, upstream};
 
 #[tokio::test(flavor = "multi_thread")]
@@ -49,6 +51,37 @@ async fn proxied_statements_report_upstream_warnings() {
         .unwrap();
     assert_eq!(result.affected_rows(), 0);
     assert_eq!(result.warnings(), 1);
+    drop(result);
+
+    // MySQL keeps the diagnostics area across SHOW WARNINGS, so repeating it reports the same
+    // warning.
+    for _ in 0..2 {
+        let warnings: Vec<(String, u32, String)> = conn.query("SHOW WARNINGS").await.unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].0, "Warning");
+        assert_eq!(warnings[0].1, 1062);
+    }
+
+    // A statement Readyset serves itself raises no warnings, even though the upstream
+    // connection's diagnostics area still holds the one from the INSERT.
+    eventually!({
+        conn.query_drop("CREATE CACHE FROM SELECT id, val FROM probe WHERE id = ?")
+            .await
+            .is_ok()
+    });
+    eventually!({
+        let rows: Vec<Row> = conn
+            .query("SELECT id, val FROM probe WHERE id = 1")
+            .await
+            .unwrap();
+        rows.len() == 1
+            && matches!(
+                last_query_info(&mut conn).await.destination,
+                QueryDestination::Readyset(_)
+            )
+    });
+    let warnings: Vec<Row> = conn.query("SHOW WARNINGS").await.unwrap();
+    assert!(warnings.is_empty());
 
     shutdown_tx.shutdown().await;
 }

@@ -12,7 +12,7 @@ use readyset_sql::ast::{
     FlushCacheStatement, ModifyUserStatement, ReadysetHintDirective, ResnapshotTableStatement,
     SelectStatement, SessionAuthorizationValue, SetEviction, SetReplicationPositionStatement,
     SetSessionAuthorization, SetStatement, ShallowCacheAllowlistChange, ShallowCacheAllowlistKind,
-    ShallowCacheQuery, SqlQuery, SqlType, TableKey, TrxCachePolicy,
+    ShallowCacheQuery, ShowLimit, ShowStatement, SqlQuery, SqlType, TableKey, TrxCachePolicy,
 };
 use readyset_sql::{Dialect, IntoDialect, TryIntoDialect};
 use readyset_util::logging::{PARSING_LOG_PARSING_MISMATCH_SQLPARSER_FAILED, rate_limit};
@@ -249,6 +249,7 @@ enum ReadysetKeyword {
     TOKENS,
     TTL,
     UPSTREAM,
+    WARNINGS,
     /// To match both Readyset and sqlparser keywords in one go, we want to be able to accept both
     /// in the same function. So here we just allow falling back to a sqlparser keyword.
     Standard(sqlparser::keywords::Keyword),
@@ -294,6 +295,7 @@ impl ReadysetKeyword {
             Self::TOKENS => "TOKENS",
             Self::TTL => "TTL",
             Self::UPSTREAM => "UPSTREAM",
+            Self::WARNINGS => "WARNINGS",
             Self::Standard(_) => panic!(
                 "Standard sqlparser keywords should only be used with `parse_keyword`, not string comparison"
             ),
@@ -1449,6 +1451,7 @@ fn parse_show_caches(
 ///     | [DEEP|SHALLOW] CACHES
 ///     | PROXIED [SUPPORTED] [DEEP|SHALLOW] QUERIES [WHERE query_id = <query_id>] [LIMIT <n>]
 ///     | REPLAY PATHS
+///     | WARNINGS [LIMIT [<offset>,] <row_count>]   (MySQL only)
 fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, ReadysetParsingError> {
     if parse_readyset_keyword(parser, ReadysetKeyword::READYSET) {
         if parser.parse_keyword(Keyword::VERSION) {
@@ -1601,6 +1604,25 @@ fn parse_show(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readyse
         ))
     } else if parse_readyset_keywords(parser, &[ReadysetKeyword::MCP, ReadysetKeyword::TOKENS]) {
         Ok(SqlQuery::Show(readyset_sql::ast::ShowStatement::McpTokens))
+    } else if dialect == Dialect::MySQL && parse_readyset_keyword(parser, ReadysetKeyword::WARNINGS)
+    {
+        let limit = if parser.parse_keyword(Keyword::LIMIT) {
+            let first = parser.parse_literal_uint()?;
+            Some(if parser.consume_token(&Token::Comma) {
+                ShowLimit {
+                    offset: first,
+                    row_count: parser.parse_literal_uint()?,
+                }
+            } else {
+                ShowLimit {
+                    offset: 0,
+                    row_count: first,
+                }
+            })
+        } else {
+            None
+        };
+        Ok(SqlQuery::Show(ShowStatement::Warnings { limit }))
     } else {
         Ok(parser.parse_show()?.try_into_dialect(dialect)?)
     }

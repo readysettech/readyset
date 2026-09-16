@@ -57,20 +57,61 @@ fn shallow_cache_entries(
     }
 }
 
-pub fn limit(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], u64> {
+fn unsigned_integer(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], u64> {
     move |i| {
-        let (i, _) = tag_no_case("limit")(i)?;
-        let (i, _) = whitespace1(i)?;
-        let (i, limit) = literal(dialect)(i)?;
-        let limit = match &limit {
-            Literal::UnsignedInteger(value) => Ok(*value),
-            Literal::Integer(value) => Ok(*value as u64),
+        let (i, value) = literal(dialect)(i)?;
+        match &value {
+            Literal::UnsignedInteger(value) => Ok((i, *value)),
+            Literal::Integer(value) => Ok((i, *value as u64)),
             _ => Err(nom::Err::Error(ParseError::from_error_kind(
                 i,
                 ErrorKind::Fail,
             ))),
-        }?;
+        }
+    }
+}
+
+pub fn limit(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], u64> {
+    move |i| {
+        let (i, _) = tag_no_case("limit")(i)?;
+        let (i, _) = whitespace1(i)?;
+        unsigned_integer(dialect)(i)
+    }
+}
+
+/// `LIMIT [offset,] row_count`
+fn show_limit(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowLimit> {
+    move |i| {
+        let (i, first) = limit(dialect)(i)?;
+        let (i, second) = opt(preceded(
+            tuple((whitespace0, tag_no_case(","), whitespace0)),
+            unsigned_integer(dialect),
+        ))(i)?;
+        let limit = match second {
+            Some(row_count) => ShowLimit {
+                offset: first,
+                row_count,
+            },
+            None => ShowLimit {
+                offset: 0,
+                row_count: first,
+            },
+        };
         Ok((i, limit))
+    }
+}
+
+fn warnings(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], ShowStatement> {
+    move |i| {
+        if dialect != Dialect::MySQL {
+            return Err(nom::Err::Error(ParseError::from_error_kind(
+                i,
+                ErrorKind::Fail,
+            )));
+        }
+        let (i, _) = tag_no_case("warnings")(i)?;
+        let (i, limit) = opt(preceded(whitespace1, show_limit(dialect)))(i)?;
+        Ok((i, ShowStatement::Warnings { limit }))
     }
 }
 
@@ -208,6 +249,7 @@ pub fn show(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u
             value(ShowStatement::Connections, tag_no_case("connections")),
             value(ShowStatement::Databases, tag_no_case("databases")),
             value(ShowStatement::McpTokens, mcp_tokens_show),
+            warnings(dialect),
         ))(i)?;
         Ok((i, statement))
     }

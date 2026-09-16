@@ -477,9 +477,10 @@ impl SqlQuery {
             | SqlQuery::AlterReadySet(_)
             | SqlQuery::DropAllProxiedQueries(_) => true,
             SqlQuery::Show(show_stmt) => match show_stmt {
-                ShowStatement::Events | ShowStatement::Tables(_) | ShowStatement::Databases => {
-                    false
-                }
+                ShowStatement::Events
+                | ShowStatement::Tables(_)
+                | ShowStatement::Databases
+                | ShowStatement::Warnings { .. } => false,
                 ShowStatement::CachedQueries(..)
                 | ShowStatement::ProxiedQueries(_)
                 | ShowStatement::ReadySetStatus
