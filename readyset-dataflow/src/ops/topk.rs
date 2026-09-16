@@ -707,7 +707,15 @@ impl Ingredient for TopK {
     }
 
     fn column_source(&self, cols: &[usize]) -> ColumnSource {
-        ColumnSource::exact_copy(self.src.as_global(), cols.into())
+        // A lookup on the columns this operator groups by maps onto the parent one for one, since
+        // each group's top-k is computed independently. Any other column does not: the top-k of
+        // the rows matching such a key is not the part of the group's top-k that matches it, so
+        // answering one needs the whole group.
+        if cols.iter().all(|col| self.group_by.contains(col)) {
+            ColumnSource::exact_copy(self.src.as_global(), cols.into())
+        } else {
+            ColumnSource::RequiresFullReplay(vec1::vec1![self.src.as_global()])
+        }
     }
 
     fn description(&self) -> String {
@@ -945,18 +953,14 @@ mod tests {
     #[test]
     fn it_resolves() {
         let (g, _) = setup(false);
-        assert_eq!(
-            g.node().resolve(0),
-            Some(vec![(g.narrow_base_id().as_global(), 0)])
-        );
+        // Only the group-by column resolves to the parent: a lookup on any other column needs the
+        // whole group, so it cannot be mapped onto one there.
+        assert_eq!(g.node().resolve(0), None);
         assert_eq!(
             g.node().resolve(1),
             Some(vec![(g.narrow_base_id().as_global(), 1)])
         );
-        assert_eq!(
-            g.node().resolve(2),
-            Some(vec![(g.narrow_base_id().as_global(), 2)])
-        );
+        assert_eq!(g.node().resolve(2), None);
     }
 
     #[test]

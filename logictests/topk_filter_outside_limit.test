@@ -1,0 +1,114 @@
+# A filter or join predicate applied outside a derived table that carries ORDER BY and LIMIT.
+# The rows the LIMIT admits must all survive the predicate (REA-6953, REA-6679).
+
+statement ok
+CREATE TABLE t (id int PRIMARY KEY, c int)
+
+statement ok
+INSERT INTO t (id, c) VALUES (1, 10), (2, 20), (3, 30), (4, 40), (5, 50), (6, 60), (7, 70), (8, 80), (9, 90), (10, 100), (11, 110), (12, 120), (13, 130), (14, 140), (15, 150), (16, 160), (17, 170), (18, 180), (19, 190), (20, 200)
+
+statement ok
+CREATE TABLE u (id int PRIMARY KEY, c int)
+
+statement ok
+INSERT INTO u (id, c) VALUES (1, 10), (2, 20), (3, 30), (4, 40), (5, 50), (6, 60), (7, 70), (8, 80), (9, 90), (10, 100), (11, 110), (12, 120), (13, 130), (14, 140), (15, 150), (16, 160), (17, 170), (18, 180), (19, 190), (20, 200)
+
+# a range filter outside a LIMIT keeps every row the LIMIT admits
+query I rowsort
+SELECT d.c FROM (SELECT c FROM t ORDER BY c ASC LIMIT 10) d WHERE d.c > 15
+----
+100
+20
+30
+40
+50
+60
+70
+80
+90
+
+# the same, with a bound that leaves one row
+query I rowsort
+SELECT d.c FROM (SELECT c FROM t ORDER BY c ASC LIMIT 10) d WHERE d.c > 95
+----
+100
+
+# a LIMIT smaller than the filtered set
+query I rowsort
+SELECT d.c FROM (SELECT c FROM t ORDER BY c ASC LIMIT 4) d WHERE d.c > 5
+----
+10
+20
+30
+40
+
+# a LIMIT larger than the table
+query I rowsort
+SELECT d.c FROM (SELECT c FROM t ORDER BY c ASC LIMIT 20) d WHERE d.c > 45
+----
+100
+110
+120
+130
+140
+150
+160
+170
+180
+190
+200
+50
+60
+70
+80
+90
+
+# a descending inner order
+query I rowsort
+SELECT d.c FROM (SELECT c FROM t ORDER BY c DESC LIMIT 10) d WHERE d.c > 15
+----
+110
+120
+130
+140
+150
+160
+170
+180
+190
+200
+
+# an upper bound rather than a lower one
+query I rowsort
+SELECT d.c FROM (SELECT c FROM t ORDER BY c ASC LIMIT 10) d WHERE d.c < 155
+----
+10
+100
+20
+30
+40
+50
+60
+70
+80
+90
+
+# a join onto the LIMITed derived table
+query I rowsort
+SELECT t.c FROM t INNER JOIN (SELECT u.c AS a FROM u ORDER BY u.c ASC LIMIT 10) AS d ON (t.c = d.a) WHERE t.c > 15
+----
+100
+20
+30
+40
+50
+60
+70
+80
+90
+
+# an equality filter, which was already correct
+query I rowsort
+SELECT d.c FROM (SELECT c FROM t ORDER BY c ASC LIMIT 10) d WHERE d.c = 60
+----
+60
