@@ -9,12 +9,12 @@ use readyset_client_test_helpers::TestBuilder;
 use readyset_client_test_helpers::mysql_helpers::{MySQLAdapter, last_query_info};
 use readyset_server::Handle;
 use readyset_util::eventually;
-use readyset_util::shutdown::ShutdownSender;
+use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 
 async fn setup_with(
     backend_builder: BackendBuilder,
-) -> (mysql_async::Opts, Handle, ShutdownSender) {
+) -> (mysql_async::Opts, Handle, TestShutdownSender<MySQLAdapter>) {
     readyset_tracing::init_test_logging();
     TestBuilder::new(backend_builder)
         .fallback(true)

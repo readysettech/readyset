@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::time::Duration;
 
 use mysql_async::Conn;
@@ -6,15 +5,12 @@ use mysql_async::params::Params;
 use mysql_async::prelude::{FromRow, Queryable};
 use readyset_adapter::backend::{MigrationMode, QueryInfo};
 use readyset_adapter::query_status_cache::{MigrationStyle, QueryStatusCache};
-use readyset_client::consensus::LocalAuthorityStore;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
-use readyset_client_test_helpers::{TestBuilder, sleep, wait_for_schema_generation_change};
-use readyset_server::{Authority, DurabilityMode, Handle, LocalAuthority};
+use readyset_client_test_helpers::{TestBuilder, TestShutdownSender, sleep, wait_for_schema_generation_change};
+use readyset_server::Handle;
 use readyset_sql_parsing::ParsingPreset;
 use readyset_util::eventually;
-use readyset_util::shutdown::ShutdownSender;
-use tempfile::TempDir;
 use test_utils::{tags, upstream};
 
 /// Run `query` until the adapter reports it served by `expected`, then hand back its rows.
@@ -93,7 +89,7 @@ async fn assert_last_target_was(rs_conn: &mut Conn, expected: QueryDestination) 
 /// Bring up an adapter over a fresh database, with `autoparameterize` deciding whether caches
 /// keep the literals their author wrote inline. Out-of-band migration keeps a plain SELECT from
 /// creating a cache of its own, so what routes a read is only ever an explicit CREATE CACHE.
-async fn adapter(db_name: &str, schema: &str) -> (Conn, Conn, Handle, ShutdownSender) {
+async fn adapter(db_name: &str, schema: &str) -> (Conn, Conn, Handle, TestShutdownSender<MySQLAdapter>) {
     adapter_with_preset(db_name, schema, ParsingPreset::for_tests()).await
 }
 
@@ -103,7 +99,7 @@ async fn adapter_with_preset(
     db_name: &str,
     schema: &str,
     preset: ParsingPreset,
-) -> (Conn, Conn, Handle, ShutdownSender) {
+) -> (Conn, Conn, Handle, TestShutdownSender<MySQLAdapter>) {
     readyset_tracing::init_test_logging();
     mysql_helpers::recreate_database(db_name).await;
 
@@ -997,64 +993,11 @@ async fn a_kept_literal_cache_survives_a_restart() {
     let db_name = "autoparam_mode_restart";
     mysql_helpers::recreate_database(db_name).await;
 
-    let storage_dir = TempDir::new().unwrap();
-    let store = Arc::new(LocalAuthorityStore::new());
-    let new_authority = || -> Arc<Authority> {
-        Arc::new(Authority::from(LocalAuthority::new_with_store(Arc::clone(
-            &store,
-        ))))
-    };
-
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(db_name));
     let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
     upstream_conn.query_drop(T).await.unwrap();
 
-    let first_authority = new_authority();
-    {
-        let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
-            .authority(Arc::clone(&first_authority))
-            .durability_mode(DurabilityMode::Permanent)
-            .storage_dir_path(storage_dir.path().to_path_buf())
-            .recreate_database(false)
-            .migration_mode(MigrationMode::OutOfBand)
-            .migration_style(MigrationStyle::Explicit)
-            .replicate_db(db_name)
-            .fallback(true)
-            .build::<MySQLAdapter>()
-            .await;
-
-        let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();
-        eventually! {
-            let rows: Vec<mysql_async::Row> = rs_conn.query("SHOW READYSET STATUS").await.unwrap();
-            rows.iter().any(|r| r.get::<String, _>(1).as_deref() == Some("Online"))
-        }
-
-        rs_conn
-            .query_drop("CREATE CACHE kept WITH (AUTOPARAM OFF) FROM SELECT v FROM t WHERE id = ? AND status = 'active'")
-            .await
-            .unwrap();
-
-        let result: Vec<i32> = eventually_readyset(
-            &mut rs_conn,
-            "SELECT v FROM t WHERE id = 1 AND status = 'active'",
-            QueryDestination::Readyset(Some("kept".into())),
-        )
-        .await;
-        assert_eq!(result, vec![10]);
-
-        drop(rs_conn);
-        shutdown_tx.shutdown().await;
-    }
-
-    eventually! {
-        Arc::strong_count(&first_authority) == 1
-    }
-    drop(first_authority);
-
-    let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
-        .authority(new_authority())
-        .durability_mode(DurabilityMode::Permanent)
-        .storage_dir_path(storage_dir.path().to_path_buf())
+    let (rs_opts, handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
         .migration_mode(MigrationMode::OutOfBand)
         .migration_style(MigrationStyle::Explicit)
@@ -1062,6 +1005,29 @@ async fn a_kept_literal_cache_survives_a_restart() {
         .fallback(true)
         .build::<MySQLAdapter>()
         .await;
+
+    let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+    eventually! {
+        let rows: Vec<mysql_async::Row> = rs_conn.query("SHOW READYSET STATUS").await.unwrap();
+        rows.iter().any(|r| r.get::<String, _>(1).as_deref() == Some("Online"))
+    }
+
+    rs_conn
+        .query_drop("CREATE CACHE kept WITH (AUTOPARAM OFF) FROM SELECT v FROM t WHERE id = ? AND status = 'active'")
+        .await
+        .unwrap();
+
+    let result: Vec<i32> = eventually_readyset(
+        &mut rs_conn,
+        "SELECT v FROM t WHERE id = 1 AND status = 'active'",
+        QueryDestination::Readyset(Some("kept".into())),
+    )
+    .await;
+    assert_eq!(result, vec![10]);
+
+    drop(rs_conn);
+
+    let (rs_opts, _handle, shutdown_tx) = shutdown_tx.restart(handle).await;
 
     let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();
     eventually! {
@@ -1240,7 +1206,7 @@ const TK: &str = "CREATE TABLE t (id int, status varchar(16), v int); \
 /// Like [`adapter`], but with the server building TopK nodes, the production default. A literal
 /// `LIMIT` under an `ORDER BY` then stays in the shape a read hashes to, while a placeholder
 /// `LIMIT` is stripped from it, so the two spellings of one query take different shapes.
-async fn topk_adapter(db_name: &str, schema: &str) -> (Conn, Conn, Handle, ShutdownSender) {
+async fn topk_adapter(db_name: &str, schema: &str) -> (Conn, Conn, Handle, TestShutdownSender<MySQLAdapter>) {
     readyset_tracing::init_test_logging();
     mysql_helpers::recreate_database(db_name).await;
 

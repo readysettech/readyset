@@ -27,7 +27,7 @@ use readyset_client_test_helpers::{
 };
 use readyset_server::Handle;
 use readyset_tracing::init_test_logging;
-use readyset_util::shutdown::ShutdownSender;
+use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -206,7 +206,7 @@ async fn seed_upstream(test_name: &str, stmts: &[&str]) {
 
 /// Build a Readyset PostgreSQL backend replicating `test_name` and connect a raw
 /// pgwire client to it. The returned handles keep the server alive for the test.
-async fn connect_backend(test_name: &str) -> (RawPgConn, Handle, ShutdownSender) {
+async fn connect_backend(test_name: &str) -> (RawPgConn, Handle, TestShutdownSender<PostgreSQLAdapter>) {
     let backend_builder = BackendBuilder::default()
         .require_authentication(false)
         .replication_enabled(false);

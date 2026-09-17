@@ -17,6 +17,7 @@ pub struct Handle {
     /// Has a valid controller handle on `new` and is set to None if the
     /// controller has been shutdown.
     pub c: Option<ReadySetHandle>,
+    authority: Arc<Authority>,
     event_tx: Option<Sender<HandleRequest>>,
     descriptor: ControllerDescriptor,
 }
@@ -40,20 +41,26 @@ impl Handle {
         event_tx: Sender<HandleRequest>,
         descriptor: ControllerDescriptor,
     ) -> Self {
-        let c = ReadySetHandle::make(authority, None, None);
+        let c = ReadySetHandle::make(authority.clone(), None, None);
         Handle {
             c: Some(c),
+            authority,
             event_tx: Some(event_tx),
             descriptor,
         }
     }
 
-    /// Returns the address of this ReadySet server.
+    /// Return the authority associated with this Readyset instance.
+    pub fn authority(&self) -> &Arc<Authority> {
+        &self.authority
+    }
+
+    /// Return the address of this ReadySet server.
     pub fn get_address(&self) -> &Url {
         &self.descriptor.controller_uri
     }
 
-    /// Waits for the back-end to return that it is ready to process queries.
+    /// Wait for the back-end to return that it is ready to process queries.
     /// Should not be used in production.
     pub async fn backend_ready(&mut self) {
         use std::time;
@@ -109,7 +116,7 @@ impl Handle {
     }
 
     #[cfg(feature = "failure_injection")]
-    /// Injects a failpoint with the provided name/action
+    /// Inject a failpoint with the provided name/action
     pub async fn set_failpoint<S: std::fmt::Display>(&mut self, name: S, action: S) {
         tracing::info!(%name, %action, "Handle::set_failpoint");
         let (tx, rx) = tokio::sync::oneshot::channel();

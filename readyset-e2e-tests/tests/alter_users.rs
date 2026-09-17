@@ -15,7 +15,7 @@ use readyset_client::consensus::{
 use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
 use readyset_client_test_helpers::TestBuilder;
 use readyset_server::Handle;
-use readyset_util::shutdown::ShutdownSender;
+use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 use tokio::sync::RwLock;
 
@@ -36,7 +36,7 @@ async fn proxy_with_users(
     auth_plugin: AuthPlugin,
     authority: Arc<Authority>,
     users: HashMap<String, String>,
-) -> (mysql_async::Opts, Handle, ShutdownSender) {
+) -> (mysql_async::Opts, Handle, TestShutdownSender<MySQLAdapter>) {
     let (rs_opts, handle, shutdown_tx) = TestBuilder::new(
         BackendBuilder::new()
             .require_authentication(true)
@@ -55,7 +55,7 @@ async fn proxy_with_users(
 async fn alter_users_proxy(
     auth_plugin: AuthPlugin,
     authority: Arc<Authority>,
-) -> (mysql_async::Opts, Handle, ShutdownSender) {
+) -> (mysql_async::Opts, Handle, TestShutdownSender<MySQLAdapter>) {
     let users = HashMap::from([(ROOT_USER.to_string(), ROOT_PASSWORD.to_string())]);
     proxy_with_users(auth_plugin, authority, users).await
 }

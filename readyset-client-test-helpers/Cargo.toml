@@ -18,6 +18,7 @@ tokio-postgres = { workspace = true, features = [
     "with-serde_json-1",
     "with-bit-vec-0_9",
 ]}
+tempfile = { workspace = true }
 tracing = { workspace = true }
 
 database-utils = { path = "../database-utils" }

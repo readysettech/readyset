@@ -171,7 +171,8 @@ mod failpoint_tests {
     use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter};
     use readyset_client_test_helpers::TestBuilder;
     use readyset_util::failpoints;
-    use readyset_util::{eventually, shutdown::ShutdownSender};
+    use readyset_client_test_helpers::TestShutdownSender;
+    use readyset_util::eventually;
     use test_utils::{tags, upstream};
     use super::row_count;
 
@@ -181,7 +182,7 @@ mod failpoint_tests {
     /// and provides connections for interacting with both ReadySet and upstream.
     struct OibFailpointHarness<'a> {
         rs_conn: tokio_postgres::Client,
-        shutdown_tx: ShutdownSender,
+        shutdown_tx: TestShutdownSender<PostgreSQLAdapter>,
         _handle: readyset_server::Handle,
         _failpoint_guard: FailScenario<'a>,
     }

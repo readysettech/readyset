@@ -47,7 +47,7 @@ use readyset_server::Handle;
 use readyset_sql::ast::SqlType;
 use readyset_sql::DialectDisplay;
 use readyset_util::eventually;
-use readyset_util::shutdown::ShutdownSender;
+use readyset_client_test_helpers::TestShutdownSender;
 use tokio_postgres::config::Host;
 use tokio_postgres::{Client, Config, NoTls, Row};
 
@@ -454,7 +454,7 @@ struct DDLTestRunContext {
     rs_host: String,
     rs_conn: Client,
     pg_conn: Client,
-    shutdown_tx: Option<ShutdownSender>, // Needs to be Option so we can move it out of the struct
+    shutdown_tx: Option<TestShutdownSender<PostgreSQLAdapter>>,
     _handle: Handle,
 }
 

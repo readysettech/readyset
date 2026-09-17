@@ -11,7 +11,7 @@ use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter};
 use readyset_client_test_helpers::{Adapter, TestBuilder, derive_test_name};
 use readyset_server::Handle;
 use readyset_tracing::init_test_logging;
-use readyset_util::shutdown::ShutdownSender;
+use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 use tokio::test;
 use tokio_postgres::{Config, NoTls, SimpleQueryMessage};
@@ -56,7 +56,7 @@ async fn proxy_with_users(
     authority: Arc<Authority>,
     test_name: &str,
     users: HashMap<String, String>,
-) -> (Config, Handle, ShutdownSender) {
+) -> (Config, Handle, TestShutdownSender<PostgreSQLAdapter>) {
     let (rs_config, handle, shutdown_tx) = TestBuilder::new(
         BackendBuilder::new()
             .require_authentication(true)

@@ -9,10 +9,10 @@ use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::{TestBuilder, sleep};
 use readyset_server::Handle;
-use readyset_util::shutdown::ShutdownSender;
+use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 
-async fn setup_fallback() -> (mysql_async::Opts, Handle, ShutdownSender) {
+async fn setup_fallback() -> (mysql_async::Opts, Handle, TestShutdownSender<MySQLAdapter>) {
     readyset_tracing::init_test_logging();
     TestBuilder::new(BackendBuilder::new().require_authentication(false))
         .fallback(true)
@@ -25,7 +25,7 @@ async fn setup_with_cache(
     fallback: bool,
     migration_mode: MigrationMode,
     set_mode: UnsupportedSetMode,
-) -> (mysql_async::Opts, Handle, ShutdownSender) {
+) -> (mysql_async::Opts, Handle, TestShutdownSender<MySQLAdapter>) {
     TestBuilder::new(
         BackendBuilder::default()
             .require_authentication(false)

@@ -15,7 +15,7 @@ use readyset_server::Handle;
 use readyset_util::eventually;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
-use readyset_util::shutdown::ShutdownSender;
+use readyset_client_test_helpers::TestShutdownSender;
 use regex::Regex;
 use test_utils::{tags, upstream};
 
@@ -23,7 +23,7 @@ use crate::common::setup_standalone_with_authority;
 use postgres_types::{FromSql, IsNull, ToSql, Type, accepts, to_sql_checked};
 use tokio_postgres::{Client, CommandCompleteContents, SimpleQueryMessage};
 
-async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
+async fn setup() -> (tokio_postgres::Config, Handle, TestShutdownSender<PostgreSQLAdapter>) {
     TestBuilder::default()
         .fallback(true)
         .build::<PostgreSQLAdapter>()
@@ -2124,7 +2124,7 @@ mod failure_injection_tests {
         tokio_postgres::Config,
         Handle,
         Arc<Authority>,
-        ShutdownSender,
+        TestShutdownSender<PostgreSQLAdapter>,
     ) {
         readyset_tracing::init_test_logging();
 

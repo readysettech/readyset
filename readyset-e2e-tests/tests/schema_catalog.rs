@@ -8,7 +8,8 @@ use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
 use readyset_client_test_helpers::wait_for_schema_generation_change;
 use readyset_server::Handle;
 use readyset_util::failpoints;
-use readyset_util::{eventually, shutdown::ShutdownSender};
+use readyset_client_test_helpers::TestShutdownSender;
+use readyset_util::eventually;
 use std::time::Duration;
 use test_utils::{tags, upstream};
 use tokio::time::sleep;
@@ -21,7 +22,7 @@ struct SchemaGenerationRace<'a> {
     /// Kept alive for the duration of the test to prevent the Readyset server from shutting down.
     _handle: Handle,
     rs_conn: mysql_async::Conn,
-    shutdown_tx: ShutdownSender,
+    shutdown_tx: TestShutdownSender<MySQLAdapter>,
     _failpoint_guard: FailScenario<'a>,
 }
 

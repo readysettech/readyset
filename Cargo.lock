@@ -6214,6 +6214,7 @@ dependencies = [
  "readyset-tracing",
  "readyset-util",
  "schema-catalog",
+ "tempfile",
  "tokio",
  "tokio-postgres",
  "tracing",

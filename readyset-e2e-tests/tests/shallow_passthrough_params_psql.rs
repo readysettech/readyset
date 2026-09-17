@@ -4,12 +4,11 @@
 use std::assert_matches;
 
 use readyset_client_metrics::QueryDestination;
-use readyset_client_test_helpers::TestBuilder;
 use readyset_client_test_helpers::psql_helpers::{
     self, BinaryParam, PostgreSQLAdapter, TextParam, last_query_info,
 };
+use readyset_client_test_helpers::{TestBuilder, TestShutdownSender};
 use readyset_server::Handle;
-use readyset_util::shutdown::ShutdownSender;
 use test_utils::{tags, upstream};
 use tokio_postgres::Client;
 use tokio_postgres::types::ToSql;
@@ -23,7 +22,7 @@ const SETUP: &str = "
 ";
 
 /// Build an adapter with fallback, the test tables, and a shallow cache on each of `queries`.
-async fn setup(queries: &[&str]) -> (Client, Handle, ShutdownSender) {
+async fn setup(queries: &[&str]) -> (Client, Handle, TestShutdownSender<PostgreSQLAdapter>) {
     readyset_tracing::init_test_logging();
     let (opts, handle, shutdown_tx) = TestBuilder::default()
         .fallback(true)

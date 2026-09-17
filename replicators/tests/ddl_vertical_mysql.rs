@@ -49,7 +49,7 @@ use readyset_sql::ast::SqlType;
 use readyset_sql::DialectDisplay;
 use readyset_util::arbitrary::arbitrary_timestamp_naive_date_time;
 use readyset_util::eventually;
-use readyset_util::shutdown::ShutdownSender;
+use readyset_client_test_helpers::TestShutdownSender;
 
 static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
 
@@ -369,7 +369,7 @@ struct DDLTestRunContext {
     rs_host: String,
     rs_conn: Conn,
     mysql_conn: Conn,
-    shutdown_tx: Option<ShutdownSender>, // Needs to be Option so we can move it out of the struct
+    shutdown_tx: Option<TestShutdownSender<MySQLAdapter>>,
     _handle: Handle,
 }
 

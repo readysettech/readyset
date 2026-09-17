@@ -24,7 +24,7 @@ use readyset_sql_parsing::ParsingPreset;
 use readyset_server::Handle;
 use readyset_tracing::init_test_logging;
 use readyset_util::eventually;
-use readyset_util::shutdown::ShutdownSender;
+use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 
 const ACL_INTERVAL: Duration = Duration::from_secs(2);
@@ -65,7 +65,7 @@ impl Roles {
 /// ACL freshness interval.
 async fn setup(
     test_name: &str,
-) -> (tokio_postgres::Config, Handle, ShutdownSender, Client, Roles) {
+) -> (tokio_postgres::Config, Handle, TestShutdownSender<PostgreSQLAdapter>, Client, Roles) {
     PostgreSQLAdapter::recreate_database(test_name).await;
     let roles = Roles::for_test(test_name);
     let Roles { alice, bob, limited } = &roles;
@@ -103,7 +103,7 @@ async fn start_readyset(
     test_name: &str,
     users: &[&String],
     interval: Duration,
-) -> (tokio_postgres::Config, Handle, ShutdownSender) {
+) -> (tokio_postgres::Config, Handle, TestShutdownSender<PostgreSQLAdapter>) {
     let users: HashMap<String, String> = users
         .iter()
         .map(|user| ((*user).clone(), "pass".to_string()))
@@ -561,7 +561,7 @@ async fn acl_cache_grants_relation() {
 /// interval is long enough that no periodic pass runs.
 async fn setup_unprivileged_role(
     test_name: &str,
-) -> (tokio_postgres::Config, Handle, ShutdownSender, Roles) {
+) -> (tokio_postgres::Config, Handle, TestShutdownSender<PostgreSQLAdapter>, Roles) {
     PostgreSQLAdapter::recreate_database(test_name).await;
     let roles = Roles::for_test(test_name);
     let Roles { alice, bob, limited } = &roles;

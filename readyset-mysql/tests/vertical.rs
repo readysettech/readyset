@@ -53,7 +53,7 @@ use readyset_data::{Collation, DfValue};
 use readyset_server::Handle;
 use readyset_util::arbitrary::arbitrary_collatable_string;
 use readyset_util::eventually;
-use readyset_util::shutdown::ShutdownSender;
+use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 
 static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
@@ -152,7 +152,7 @@ where
 struct RunContext {
     mysql: Conn,
     readyset: Conn,
-    shutdown_tx: Option<ShutdownSender>, // Needs to be Option so we can move it out of the struct
+    shutdown_tx: Option<TestShutdownSender<MySQLAdapter>>,
     _handle: Handle,
 }
 

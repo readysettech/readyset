@@ -26,7 +26,7 @@ use readyset_client_test_helpers::{
 use readyset_server::Handle;
 use readyset_sql_parsing::ParsingPreset;
 use readyset_tracing::init_test_logging;
-use readyset_util::shutdown::ShutdownSender;
+use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 use tokio::test;
 use tokio_postgres::{Client, SimpleQueryMessage};
@@ -63,7 +63,7 @@ enum Protocol {
 /// Bring up an RLS-enabled Readyset adapter replicating `test_name` and connect
 /// a client. Hold the returned `Handle` for the adapter's life and call
 /// `shutdown_tx.shutdown()` when done.
-async fn connect_rls(test_name: &str) -> (Client, Handle, ShutdownSender) {
+async fn connect_rls(test_name: &str) -> (Client, Handle, TestShutdownSender<PostgreSQLAdapter>) {
     let (rs_opts, handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
         .replicate_db(test_name)

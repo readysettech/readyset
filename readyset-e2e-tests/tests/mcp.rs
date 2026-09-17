@@ -17,7 +17,7 @@ use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_mcp::connection::{ConnectionConfig, DbType, ReadysetConnection, TlsMode};
 use readyset_mcp::server::ReadysetMcpServer;
 use readyset_tracing::init_test_logging;
-use readyset_util::shutdown::ShutdownSender;
+use readyset_client_test_helpers::TestShutdownSender;
 use serde_json::{Value, json};
 use test_utils::{tags, upstream};
 use tokio::net::TcpListener;
@@ -28,7 +28,7 @@ use tokio::test;
 async fn spawn_mcp_endpoint(
     authority: Arc<Authority>,
     sql_opts: &mysql_async::Opts,
-    shutdown_tx: &ShutdownSender,
+    shutdown_tx: &TestShutdownSender<MySQLAdapter>,
 ) -> SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

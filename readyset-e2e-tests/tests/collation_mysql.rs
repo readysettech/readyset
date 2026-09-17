@@ -22,7 +22,7 @@ use readyset_client_test_helpers::{
 use readyset_server::Handle;
 use readyset_sql_parsing::ParsingPreset;
 use readyset_util::eventually;
-use readyset_util::shutdown::ShutdownSender;
+use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 
 /// Case pairs plus a distinct high value so ORDER BY and MIN/MAX have a spread.
@@ -41,7 +41,7 @@ struct Harness {
     upstream: mysql_async::Conn,
     rs: mysql_async::Conn,
     _handle: Handle,
-    shutdown_tx: ShutdownSender,
+    shutdown_tx: TestShutdownSender<MySQLAdapter>,
 }
 
 /// Builds the `coll_t` fixture and a replicating adapter with fallback and out-of-band
@@ -1383,7 +1383,7 @@ async fn setup_shallow(
     mysql_async::Conn,
     mysql_async::Conn,
     Handle,
-    ShutdownSender,
+    TestShutdownSender<MySQLAdapter>,
 ) {
     readyset_tracing::init_test_logging();
     let (opts, handle, shutdown_tx) = TestBuilder::default()

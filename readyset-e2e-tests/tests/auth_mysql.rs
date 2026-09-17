@@ -7,7 +7,6 @@ use readyset_adapter::backend::AllowedUsers;
 use readyset_adapter::BackendBuilder;
 use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
 use readyset_client_test_helpers::TestBuilder;
-use readyset_util::shutdown::ShutdownSender;
 use rsa::RsaPublicKey;
 use rsa::pkcs8::DecodePublicKey;
 use test_utils::{tags, upstream};
@@ -49,7 +48,7 @@ fn with_auth(rs_opts: mysql_async::Opts) -> mysql_async::Opts {
 async fn e2e_sha2_connect_via_readyset() {
     readyset_tracing::init_test_logging();
 
-    let (rs_opts, _handle, shutdown_tx): (_, _, ShutdownSender) =
+    let (rs_opts, _handle, shutdown_tx) =
         auth_test_builder(AuthPlugin::Sha2(CachingSha2Password))
             .build::<MySQLAdapter>()
             .await;
@@ -69,7 +68,7 @@ async fn e2e_sha2_connect_via_readyset() {
 async fn e2e_native_connect_via_readyset() {
     readyset_tracing::init_test_logging();
 
-    let (rs_opts, _handle, shutdown_tx): (_, _, ShutdownSender) =
+    let (rs_opts, _handle, shutdown_tx) =
         auth_test_builder(AuthPlugin::Native(MysqlNativePassword))
             .build::<MySQLAdapter>()
             .await;
@@ -89,7 +88,7 @@ async fn e2e_native_connect_via_readyset() {
 async fn e2e_sha2_wrong_password() {
     readyset_tracing::init_test_logging();
 
-    let (rs_opts, _handle, shutdown_tx): (_, _, ShutdownSender) =
+    let (rs_opts, _handle, shutdown_tx) =
         auth_test_builder(AuthPlugin::Sha2(CachingSha2Password))
             .build::<MySQLAdapter>()
             .await;
@@ -114,7 +113,7 @@ async fn e2e_sha2_wrong_password() {
 async fn e2e_show_rsa_public_key() {
     readyset_tracing::init_test_logging();
 
-    let (rs_opts, _handle, shutdown_tx): (_, _, ShutdownSender) =
+    let (rs_opts, _handle, shutdown_tx) =
         auth_test_builder(AuthPlugin::Sha2(CachingSha2Password))
             .build::<MySQLAdapter>()
             .await;
@@ -145,7 +144,7 @@ async fn e2e_sha2_prepopulated_cache_skips_full_auth() {
     readyset_tracing::init_test_logging();
     let _scenario = FailScenario::setup();
 
-    let (rs_opts, _handle, shutdown_tx): (_, _, ShutdownSender) =
+    let (rs_opts, _handle, shutdown_tx) =
         auth_test_builder(AuthPlugin::Sha2(CachingSha2Password))
             .build::<MySQLAdapter>()
             .await;
@@ -184,7 +183,7 @@ async fn authenticated_upstream_uses_client_user() {
         .unwrap();
 
     let users = HashMap::from([("alice".to_string(), "secret".to_string())]);
-    let (rs_opts, _handle, shutdown_tx): (_, _, ShutdownSender) = TestBuilder::new(
+    let (rs_opts, _handle, shutdown_tx) = TestBuilder::new(
         BackendBuilder::new()
             .require_authentication(true)
             .users(Arc::new(AllowedUsers::new(users, None))),
@@ -212,7 +211,7 @@ async fn authenticated_upstream_uses_client_user() {
 #[upstream(mysql)]
 async fn unauthenticated_upstream_uses_configured_user() {
     readyset_tracing::init_test_logging();
-    let (rs_opts, _handle, shutdown_tx): (_, _, ShutdownSender) =
+    let (rs_opts, _handle, shutdown_tx) =
         TestBuilder::new(BackendBuilder::new().require_authentication(false))
             .fallback(true)
             .build::<MySQLAdapter>()

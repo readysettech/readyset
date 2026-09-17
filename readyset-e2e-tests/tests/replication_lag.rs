@@ -6,7 +6,7 @@ use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
 use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter};
 use readyset_client_test_helpers::{Adapter, TestBuilder};
 use readyset_util::eventually;
-use readyset_util::shutdown::ShutdownSender;
+use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 use tokio_postgres::SimpleQueryMessage;
 
@@ -18,7 +18,7 @@ async fn setup_mysql(
     db_name: &str,
     require_gtid: bool,
     heartbeat: bool,
-) -> (mysql_async::Conn, Box<dyn std::any::Any>, ShutdownSender) {
+) -> (mysql_async::Conn, Box<dyn std::any::Any>, TestShutdownSender<MySQLAdapter>) {
     mysql_helpers::recreate_database(db_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(db_name));
@@ -66,7 +66,7 @@ async fn setup_mysql(
 async fn setup_psql(
     db_name: &str,
     heartbeat: bool,
-) -> (tokio_postgres::Client, Box<dyn std::any::Any>, ShutdownSender) {
+) -> (tokio_postgres::Client, Box<dyn std::any::Any>, TestShutdownSender<PostgreSQLAdapter>) {
     PostgreSQLAdapter::recreate_database(db_name).await;
 
     let mut upstream_config = psql_helpers::upstream_config();

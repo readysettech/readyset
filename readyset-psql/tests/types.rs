@@ -1,10 +1,10 @@
 use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
 use readyset_server::{DurabilityMode, Handle};
-use readyset_util::shutdown::ShutdownSender;
+use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 
-async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
+async fn setup() -> (tokio_postgres::Config, Handle, TestShutdownSender<PostgreSQLAdapter>) {
     TestBuilder::default()
         .fallback(true)
         // TODO(mvzink): Switch to DeleteOnExit after fixing REA-5757

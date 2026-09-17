@@ -33,7 +33,7 @@ use readyset_server::Handle;
 use readyset_sql_parsing::ParsingPreset;
 use readyset_tracing::init_test_logging;
 use readyset_util::eventually;
-use readyset_util::shutdown::ShutdownSender;
+use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 use tokio::test;
 use tokio_postgres::{Client, SimpleQueryMessage};
@@ -202,7 +202,7 @@ async fn setup_upstream(test_name: &str) {
 /// `victim`. Authentication must be on so each client's upstream connection
 /// authenticates as them -- that is what makes upstream reject the victim's
 /// `SET ROLE service_role`.
-async fn connect_auth_rls(test_name: &str) -> (Client, Client, Handle, ShutdownSender) {
+async fn connect_auth_rls(test_name: &str) -> (Client, Client, Handle, TestShutdownSender<PostgreSQLAdapter>) {
     let admin_user = std::env::var("PGUSER").unwrap_or_else(|_| "postgres".into());
     let admin_pw = std::env::var("PGPASSWORD").unwrap_or_else(|_| "noria".into());
 

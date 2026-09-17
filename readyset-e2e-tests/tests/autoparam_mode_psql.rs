@@ -12,7 +12,7 @@ use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
 use readyset_client_test_helpers::{Adapter, TestBuilder, sleep, wait_for_schema_generation_change};
 use readyset_server::Handle;
 use readyset_util::eventually;
-use readyset_util::shutdown::ShutdownSender;
+use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 use tokio_postgres::{Client, SimpleQueryMessage};
 
@@ -52,7 +52,7 @@ fn first_column(messages: &[SimpleQueryMessage]) -> Vec<String> {
 
 /// Out-of-band migration keeps a plain SELECT from creating a cache of its own, so what routes a
 /// read is only ever the explicit CREATE CACHE.
-async fn adapter(db_name: &str) -> (Client, Handle, ShutdownSender) {
+async fn adapter(db_name: &str) -> (Client, Handle, TestShutdownSender<PostgreSQLAdapter>) {
     readyset_tracing::init_test_logging();
     PostgreSQLAdapter::recreate_database(db_name).await;
 

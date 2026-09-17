@@ -6,7 +6,6 @@ use readyset_adapter::backend::AllowedUsers;
 use readyset_adapter::BackendBuilder;
 use readyset_client_test_helpers::TestBuilder;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
-use readyset_util::shutdown::ShutdownSender;
 use test_utils::{tags, upstream};
 
 /// Verify that specifying a database in the connection URL works: the adapter should route
@@ -17,7 +16,7 @@ use test_utils::{tags, upstream};
 async fn non_default_db_in_connection_opts() {
     readyset_tracing::init_test_logging();
 
-    let (rs_opts, _handle, shutdown_tx): (_, _, ShutdownSender) =
+    let (rs_opts, _handle, shutdown_tx) =
         TestBuilder::default().build::<MySQLAdapter>().await;
 
     let db_name = rs_opts.db_name().unwrap().to_string();
@@ -46,7 +45,7 @@ async fn change_user_updates_schema_search_path() {
     let mut users = std::collections::HashMap::new();
     users.insert("root".to_string(), "noria".to_string());
 
-    let (rs_opts, _handle, shutdown_tx): (_, _, ShutdownSender) = TestBuilder::new(
+    let (rs_opts, _handle, shutdown_tx) = TestBuilder::new(
         BackendBuilder::new()
             .require_authentication(false)
             .users(Arc::new(AllowedUsers::new(users, None))),

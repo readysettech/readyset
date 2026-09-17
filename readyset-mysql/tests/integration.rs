@@ -18,13 +18,13 @@ use readyset_client_test_helpers::{sleep, TestBuilder};
 use readyset_errors::ReadySetError;
 use readyset_server::Handle;
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetryReporter};
-use readyset_util::shutdown::ShutdownSender;
+use readyset_client_test_helpers::TestShutdownSender;
 use readyset_util::{eventually, retry_with_exponential_backoff};
 use regex::Regex;
 use test_utils::skip_flaky_finder;
 use test_utils::{tags, upstream};
 
-async fn setup_with_mysql_flags<F>(set: F) -> (mysql_async::Opts, Handle, ShutdownSender)
+async fn setup_with_mysql_flags<F>(set: F) -> (mysql_async::Opts, Handle, TestShutdownSender<MySQLAdapter>)
 where
     F: Fn(TestBuilder) -> TestBuilder,
 {
@@ -41,11 +41,11 @@ where
     set(builder).build::<MySQLAdapter>().await
 }
 
-async fn setup_with_mysql() -> (mysql_async::Opts, Handle, ShutdownSender) {
+async fn setup_with_mysql() -> (mysql_async::Opts, Handle, TestShutdownSender<MySQLAdapter>) {
     setup_with_mysql_flags(std::convert::identity).await
 }
 
-async fn setup() -> (mysql_async::Opts, Handle, ShutdownSender) {
+async fn setup() -> (mysql_async::Opts, Handle, TestShutdownSender<MySQLAdapter>) {
     readyset_tracing::init_test_logging();
     TestBuilder::default()
         .replicate(false)
@@ -53,7 +53,7 @@ async fn setup() -> (mysql_async::Opts, Handle, ShutdownSender) {
         .await
 }
 
-async fn setup_telemetry() -> (TelemetryReporter, mysql_async::Opts, Handle, ShutdownSender) {
+async fn setup_telemetry() -> (TelemetryReporter, mysql_async::Opts, Handle, TestShutdownSender<MySQLAdapter>) {
     let (sender, reporter) = TelemetryInitializer::test_init();
 
     let backend = BackendBuilder::new()

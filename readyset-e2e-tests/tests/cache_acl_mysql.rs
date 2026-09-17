@@ -22,7 +22,7 @@ use readyset_server::Handle;
 use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter, last_query_info};
 use readyset_tracing::init_test_logging;
 use readyset_util::eventually;
-use readyset_util::shutdown::ShutdownSender;
+use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 
 const ACL_INTERVAL: Duration = Duration::from_secs(2);
@@ -30,7 +30,7 @@ const DB: &str = "noria";
 
 /// Provision a table `alice` and `bob` may read and start Readyset with
 /// authentication on and a short ACL freshness interval.
-async fn setup() -> (mysql_async::Opts, Handle, ShutdownSender, Conn) {
+async fn setup() -> (mysql_async::Opts, Handle, TestShutdownSender<MySQLAdapter>, Conn) {
     let mut users = HashMap::new();
     users.insert("acl_alice".to_string(), "pass".to_string());
     users.insert("acl_bob".to_string(), "pass".to_string());

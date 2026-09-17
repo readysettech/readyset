@@ -10,7 +10,7 @@ use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter}
 use readyset_client_test_helpers::{sleep, wait_for_table_id_change_and_leader_ready, TestBuilder};
 use readyset_server::Handle;
 use readyset_sql::ast::{CacheType, Relation};
-use readyset_util::shutdown::ShutdownSender;
+use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 
 pub async fn setup(
@@ -18,7 +18,7 @@ pub async fn setup(
     fallback: bool,
     migration_mode: MigrationMode,
     set_mode: UnsupportedSetMode,
-) -> (mysql_async::Opts, Handle, ShutdownSender) {
+) -> (mysql_async::Opts, Handle, TestShutdownSender<MySQLAdapter>) {
     TestBuilder::new(
         BackendBuilder::default()
             .require_authentication(false)

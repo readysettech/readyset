@@ -1,7 +1,9 @@
 //! Helpers for writing integration tests against adapters that use noria-client
 
+use std::assert_matches;
 use std::collections::HashMap;
 use std::env;
+use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
@@ -28,6 +30,7 @@ use readyset_adapter::{
     ReadySetStatusReporter, UpstreamConfig, UpstreamDatabase, ViewsSynchronizer,
 };
 use readyset_client::consensus::{Authority, AuthorityControl, LocalAuthorityStore};
+use readyset_client::status::CurrentStatus;
 use readyset_client_metrics::QueryLogMode;
 use readyset_data::upstream_system_props::{
     init_system_props, parse_upstream_timezone, UpstreamSystemProperties,
@@ -43,9 +46,10 @@ use readyset_sql::ast::Relation;
 use readyset_sql_parsing::ParsingPreset;
 use readyset_sql_passes::adapter_rewrites;
 use readyset_util::shared_cache::SharedCache;
-use readyset_util::shutdown::ShutdownSender;
+use readyset_util::shutdown::{ShutdownReceiver, ShutdownSender};
 use readyset_util::{eventually, scheduler_yield};
 use schema_catalog::{SchemaCatalogHandle, SchemaCatalogSynchronizer, SchemaGeneration};
+use tempfile::TempDir;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
 
@@ -231,6 +235,7 @@ enum FallbackBehavior {
 ///
 /// Use this struct to configure the creation of an in-process readyset-server instance and (either
 /// MySQL or PostgreSQL) adapter for use in integration tests.
+#[derive(Clone)]
 pub struct TestBuilder {
     backend_builder: BackendBuilder,
     replicate: ReplicationBehavior,
@@ -282,7 +287,7 @@ impl TestBuilder {
             migration_style: MigrationStyle::InRequestPath,
             recreate_database: true,
             query_status_cache: None,
-            durability_mode: DurabilityMode::DeleteOnExit,
+            durability_mode: DurabilityMode::Permanent,
             storage_dir_path: None,
             authority: None,
             replication_server_id: None,
@@ -487,7 +492,45 @@ impl TestBuilder {
         self
     }
 
-    pub async fn build<A>(mut self) -> (A::ConnectionOpts, Handle, ShutdownSender)
+    pub async fn build<A>(mut self) -> (A::ConnectionOpts, Handle, TestShutdownSender<A>)
+    where
+        A: Adapter + 'static,
+    {
+        let storage_dir = (matches!(self.durability_mode, DurabilityMode::Permanent)
+            && self.storage_dir_path.is_none())
+        .then(|| {
+            let dir = TempDir::new().unwrap();
+            self.storage_dir_path = Some(dir.path().to_path_buf());
+            dir
+        });
+
+        let (authority, store) = match &self.authority {
+            Some(authority) => (Arc::clone(authority), None),
+            None => {
+                let store = Arc::new(LocalAuthorityStore::new());
+                let authority = new_local_authority(&store);
+                self.authority = Some(Arc::clone(&authority));
+                (authority, Some(store))
+            }
+        };
+
+        let mut builder = self.clone();
+        builder.recreate_database = false;
+        builder.authority = None;
+
+        let (opts, handle, shutdown_tx) = self.build_inner::<A>().await;
+        let sender = TestShutdownSender {
+            shutdown_tx,
+            authority,
+            store,
+            storage_dir,
+            builder,
+            adapter: PhantomData,
+        };
+        (opts, handle, sender)
+    }
+
+    async fn build_inner<A>(mut self) -> (A::ConnectionOpts, Handle, ShutdownSender)
     where
         A: Adapter + 'static,
     {
@@ -966,6 +1009,111 @@ impl TestBuilder {
             handle,
             shutdown_tx,
         )
+    }
+}
+
+fn new_local_authority(store: &Arc<LocalAuthorityStore>) -> Arc<Authority> {
+    Arc::new(Authority::from(LocalAuthority::new_with_store(Arc::clone(
+        store,
+    ))))
+}
+
+pub struct TestShutdownSender<A> {
+    shutdown_tx: ShutdownSender,
+    authority: Arc<Authority>,
+    store: Option<Arc<LocalAuthorityStore>>,
+    storage_dir: Option<TempDir>,
+    builder: TestBuilder,
+    adapter: PhantomData<A>,
+}
+
+impl<A> TestShutdownSender<A>
+where
+    A: Adapter + 'static,
+{
+    pub async fn shutdown(self) {
+        self.shutdown_tx.shutdown().await;
+    }
+
+    pub fn subscribe(&self) -> ShutdownReceiver {
+        self.shutdown_tx.subscribe()
+    }
+
+    /// Restart using the same storage directory to simulate a restart with recovery.
+    ///
+    /// Block until all references to the authority are dropped and the next Readyset instance is
+    /// online.
+    pub async fn restart(self, handle: Handle) -> (A::ConnectionOpts, Handle, Self) {
+        self.restart_inner(handle, false).await
+    }
+
+    /// Restart using a new storage directory to simulate a format and restart.
+    ///
+    /// Block until all references to the authority are dropped and the next Readyset instance is
+    /// online.
+    pub async fn restart_clean(self, handle: Handle) -> (A::ConnectionOpts, Handle, Self) {
+        self.restart_inner(handle, true).await
+    }
+
+    async fn restart_inner(
+        mut self,
+        handle: Handle,
+        clean: bool,
+    ) -> (A::ConnectionOpts, Handle, Self) {
+        let store = self.store.take().expect(
+            "restart requires the builder-managed authority; drop the explicit `.authority(..)`",
+        );
+        assert_matches!(
+            self.builder.durability_mode,
+            DurabilityMode::Permanent,
+            "restart requires `DurabilityMode::Permanent` to keep base tables across boots"
+        );
+        assert!(
+            !clean || self.storage_dir.is_some(),
+            "restart_clean requires the builder-managed storage dir; drop the explicit \
+             `.storage_dir_path(..)`"
+        );
+
+        self.shutdown_tx.shutdown().await;
+        drop(handle);
+
+        eventually! {
+            message: "authority still referenced; drop clones of it before restarting".to_string(),
+            { Arc::strong_count(&self.authority) == 1 }
+        };
+        drop(self.authority);
+
+        let (store, storage_dir) = if clean {
+            let dir = TempDir::new().unwrap();
+            (Arc::new(LocalAuthorityStore::new()), Some(dir))
+        } else {
+            (store, self.storage_dir)
+        };
+
+        let authority = new_local_authority(&store);
+        let mut builder = self.builder.clone();
+        builder.authority = Some(Arc::clone(&authority));
+        if let Some(dir) = &storage_dir {
+            builder.storage_dir_path = Some(dir.path().to_path_buf());
+        }
+
+        let (opts, mut handle, shutdown_tx) = builder.build_inner::<A>().await;
+        if !matches!(self.builder.replicate, ReplicationBehavior::None) {
+            eventually! {
+                let status = handle.status().await;
+                status.is_ok_and(|status| status.current_status == CurrentStatus::Online)
+            }
+        }
+
+        let sender = TestShutdownSender {
+            shutdown_tx,
+            authority,
+            store: Some(store),
+            storage_dir,
+            builder: self.builder,
+            adapter: self.adapter,
+        };
+        (opts, handle, sender)
     }
 }
 

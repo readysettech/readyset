@@ -6,11 +6,10 @@ use std::panic::AssertUnwindSafe;
 
 use mysql_async::Conn;
 use mysql_async::prelude::Queryable;
-use readyset_client_test_helpers::TestBuilder;
 use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
+use readyset_client_test_helpers::{TestBuilder, TestShutdownSender};
 use readyset_server::Handle;
 use readyset_util::eventually;
-use readyset_util::shutdown::ShutdownSender;
 use test_utils::{tags, upstream};
 
 const ROWS: &str = "SELECT g, x FROM t ORDER BY g, x";
@@ -21,7 +20,7 @@ async fn rows(conn: &mut Conn) -> mysql_async::Result<Vec<(i32, i32)>> {
 
 /// Replicates `db`, whose table `t` has rows, and waits until Readyset serves them from a cache.
 /// Fallback is off, so every row Readyset returns afterwards comes from its own dataflow.
-async fn setup(db: &str) -> (Conn, Conn, Handle, ShutdownSender) {
+async fn setup(db: &str) -> (Conn, Conn, Handle, TestShutdownSender<MySQLAdapter>) {
     readyset_tracing::init_test_logging();
     mysql_helpers::recreate_database(db).await;
     let mut upstream = Conn::new(mysql_helpers::upstream_config().db_name(Some(db)))
@@ -68,7 +67,7 @@ async fn wait_for_rows_to_match_upstream(rs: &mut Conn, upstream: &mut Conn, sen
     });
 }
 
-async fn teardown(mut upstream: Conn, shutdown_tx: ShutdownSender, db: &str) {
+async fn teardown(mut upstream: Conn, shutdown_tx: TestShutdownSender<MySQLAdapter>, db: &str) {
     shutdown_tx.shutdown().await;
     upstream
         .query_drop(format!("DROP DATABASE {db}"))

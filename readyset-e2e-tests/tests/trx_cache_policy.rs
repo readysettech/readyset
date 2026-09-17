@@ -14,7 +14,7 @@ use readyset_client_test_helpers::{
 };
 use readyset_server::{CacheMode, Handle};
 use readyset_tracing::init_test_logging;
-use readyset_util::shutdown::ShutdownSender;
+use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 use tokio::test;
 
@@ -24,7 +24,7 @@ use tokio::test;
 /// dropping it shuts the controller down mid-test.
 async fn setup_shallow_adapter(
     test_name: &str,
-) -> (mysql_async::Conn, Handle, ShutdownSender) {
+) -> (mysql_async::Conn, Handle, TestShutdownSender<MySQLAdapter>) {
     mysql_helpers::recreate_database(test_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(test_name));

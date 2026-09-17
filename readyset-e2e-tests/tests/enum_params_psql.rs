@@ -5,9 +5,8 @@ use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::psql_helpers::{
     self, BinaryParam, PostgreSQLAdapter, TextParam, last_query_info,
 };
-use readyset_client_test_helpers::{Adapter, TestBuilder, sleep};
+use readyset_client_test_helpers::{Adapter, TestBuilder, TestShutdownSender, sleep};
 use readyset_server::Handle;
-use readyset_util::shutdown::ShutdownSender;
 use test_utils::{tags, upstream};
 use tokio_postgres::Client;
 use tokio_postgres::types::ToSql;
@@ -23,7 +22,7 @@ const IN: &str = "SELECT id FROM enum_events WHERE m IN ($1, $2) ORDER BY id";
 
 /// Build an adapter with fallback over a fresh database holding the enum table, with a deep
 /// cache on each of `queries`.
-async fn setup(db_name: &str, queries: &[&str]) -> (Client, Handle, ShutdownSender) {
+async fn setup(db_name: &str, queries: &[&str]) -> (Client, Handle, TestShutdownSender<PostgreSQLAdapter>) {
     readyset_tracing::init_test_logging();
     PostgreSQLAdapter::recreate_database(db_name).await;
 

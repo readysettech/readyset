@@ -15,11 +15,11 @@ use readyset_client_test_helpers::{
 use readyset_data::Dialect;
 use readyset_server::Handle;
 use readyset_util::eventually;
-use readyset_util::shutdown::ShutdownSender;
+use readyset_client_test_helpers::TestShutdownSender;
 
 use crate::common::setup_standalone_with_authority;
 
-async fn setup() -> (tokio_postgres::Config, Handle, ShutdownSender) {
+async fn setup() -> (tokio_postgres::Config, Handle, TestShutdownSender<PostgreSQLAdapter>) {
     readyset_tracing::init_test_logging();
     TestBuilder::default()
         .replicate(false)

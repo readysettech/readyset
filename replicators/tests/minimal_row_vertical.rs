@@ -55,7 +55,7 @@ use readyset_util::arbitrary::{
     arbitrary_timestamp_naive_date_time,
 };
 use readyset_util::eventually;
-use readyset_util::shutdown::ShutdownSender;
+use readyset_client_test_helpers::TestShutdownSender;
 
 /// This struct is used to generate arbitrary column specifications, both for creating tables.
 #[derive(Clone)]
@@ -441,7 +441,7 @@ struct DDLModelState {
 struct DDLTestRunContext {
     rs_conn: Conn,
     mysql_conn: Conn,
-    shutdown_tx: Option<ShutdownSender>, // Needs to be Option so we can move it out of the struct
+    shutdown_tx: Option<TestShutdownSender<MySQLAdapter>>,
     _handle: Handle,
 }
 

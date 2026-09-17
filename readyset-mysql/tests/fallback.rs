@@ -14,14 +14,14 @@ use readyset_server::Handle;
 use readyset_server::NodeIndex;
 use readyset_sql::ast::Relation;
 use readyset_util::eventually;
-use readyset_util::shutdown::ShutdownSender;
+use readyset_client_test_helpers::TestShutdownSender;
 use regex::Regex;
 use test_utils::skip_flaky_finder;
 use test_utils::{tags, upstream};
 
 async fn setup_with(
     backend_builder: BackendBuilder,
-) -> (mysql_async::Opts, Handle, ShutdownSender) {
+) -> (mysql_async::Opts, Handle, TestShutdownSender<MySQLAdapter>) {
     readyset_tracing::init_test_logging();
     TestBuilder::new(backend_builder)
         .fallback(true)
@@ -29,7 +29,7 @@ async fn setup_with(
         .await
 }
 
-async fn setup() -> (mysql_async::Opts, Handle, ShutdownSender) {
+async fn setup() -> (mysql_async::Opts, Handle, TestShutdownSender<MySQLAdapter>) {
     setup_with(BackendBuilder::new().require_authentication(false)).await
 }
 
