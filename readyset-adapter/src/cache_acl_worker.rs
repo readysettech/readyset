@@ -29,7 +29,6 @@ use metrics::{counter, gauge, histogram};
 use readyset_client::query::QueryId;
 use readyset_shallow::{CacheInfo, CacheManager};
 use readyset_sql::Dialect;
-use readyset_sql::DialectDisplay;
 use readyset_sql::ast::{Relation, SqlIdentifier};
 use readyset_sql_passes::shallow::max_placeholder_index;
 use readyset_util::logging::*;
@@ -58,9 +57,10 @@ struct ProbeTarget {
 }
 
 impl ProbeTarget {
-    fn from_cache_info(info: &CacheInfo, dialect: Dialect) -> Self {
-        let n_params = max_placeholder_index(&info.request.query);
-        let sql = info.request.query.display(dialect).to_string();
+    fn from_cache_info(info: &CacheInfo) -> Self {
+        let query = &info.request.query_orig;
+        let n_params = max_placeholder_index(query);
+        let sql = query.to_string();
         Self {
             cache: info.query_id,
             sql,
@@ -377,7 +377,7 @@ impl<DB: UpstreamDatabase + 'static> AclWorker<DB> {
         self.shallow
             .list_caches(None, None)
             .iter()
-            .map(|info| ProbeTarget::from_cache_info(info, DB::SQL_DIALECT))
+            .map(ProbeTarget::from_cache_info)
             .collect()
     }
 
@@ -616,7 +616,7 @@ impl<DB: UpstreamDatabase + 'static> AclWorker<DB> {
             .shallow
             .list_caches(Some(cache), None)
             .first()
-            .map(|info| ProbeTarget::from_cache_info(info, DB::SQL_DIALECT))
+            .map(ProbeTarget::from_cache_info)
         else {
             return;
         };

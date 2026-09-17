@@ -283,3 +283,27 @@ async fn acl_dropped_upstream_account_goes_denied_mysql() {
 
     shutdown_tx.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn acl_probe_renders_original_shallow_query() {
+    init_test_logging();
+    let (rs_opts, _handle, shutdown_tx, _upstream) = setup().await;
+    let mut alice = connect_as(&rs_opts, "acl_alice").await;
+
+    let query = "SELECT CURRENT_TIMESTAMP(4)";
+
+    alice
+        .query_drop(format!("CREATE SHALLOW CACHE FROM {query}"))
+        .await
+        .unwrap();
+    eventually!{
+        attempts: 40,
+        sleep: Duration::from_millis(250),
+        message: "alice was never served from the cache she created",
+        { is_shallow(&destination(&mut alice, query).await) }
+    }
+
+    shutdown_tx.shutdown().await;
+}
