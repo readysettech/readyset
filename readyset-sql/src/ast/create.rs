@@ -1368,7 +1368,7 @@ impl DialectDisplay for CreateCacheOptions {
 impl CreateCacheStatement {
     /// The parsing-time option bag for this statement, used to render the shared `CREATE CACHE`
     /// head via [`CreateCacheOptions`]'s `DialectDisplay`.
-    fn options(&self) -> CreateCacheOptions {
+    pub fn options(&self) -> CreateCacheOptions {
         CreateCacheOptions {
             name: self.name.clone(),
             cache_type: self.cache_type,

@@ -32,11 +32,12 @@ use readyset_shallow::CacheInfo;
 use readyset_sql::DialectDisplay;
 use readyset_sql::ast::{
     self, AddUserStatement, AlterMcpTokenStatement, AlterReadysetStatement, CacheInner, CacheType,
-    ChangeCdcStatement, ChangeUpstreamStatement, CreateCacheStatement, CreateMcpTokenStatement,
-    DropAllCachesStatement, DropMcpTokenStatement, DropUserStatement, ExplainStatement,
-    FlushCacheStatement, McpTokenExpiresChange, McpTokenScope as ParserMcpTokenScope,
-    ModifyUserStatement, ProxiedQueriesOptions, Relation, ShallowCacheAllowlistChange,
-    ShallowCacheAllowlistKind, ShowStatement, SqlQuery, TrxCachePolicy,
+    ChangeCdcStatement, ChangeUpstreamStatement, CreateCacheOptions, CreateCacheStatement,
+    CreateMcpTokenStatement, DropAllCachesStatement, DropMcpTokenStatement, DropUserStatement,
+    ExplainStatement, FlushCacheStatement, McpTokenExpiresChange,
+    McpTokenScope as ParserMcpTokenScope, ModifyUserStatement, ProxiedQueriesOptions, Relation,
+    ShallowCacheAllowlistChange, ShallowCacheAllowlistKind, ShowStatement, SqlQuery,
+    TrxCachePolicy,
 };
 use readyset_sql_passes::DetectBucketFunctions;
 use readyset_sql_passes::shallow::rewrite_shallow;
@@ -51,7 +52,8 @@ use vec1::Vec1;
 use super::noria_connector::{self, MetaVariable};
 use super::{
     Backend, BackendConnectors, BackendSettings, BackendState, UNSUPPORTED_CACHE_DDL_MSG,
-    acl_creator, readyset_version, resolve_coalesce, resolve_eviction_policy,
+    acl_creator, create_cache_statement, readyset_version, resolve_coalesce,
+    resolve_eviction_policy,
 };
 use crate::cache_acl::{AclMessage, CacheCreator, PassTrigger};
 use crate::utils::create_dummy_column;
@@ -1517,6 +1519,38 @@ where
         ))
     }
 
+    /// Construct a [`CacheDDLRequest`] from this [`CreateCacheStatement`], rewriting shallow cache
+    /// creations by query id to instead use the original query text.
+    fn cache_ddl_request(
+        connectors: &BackendConnectors<DB>,
+        create: &CreateCacheStatement,
+        shallow: &ReadySetResult<ShallowViewRequest>,
+    ) -> Option<CacheDDLRequest> {
+        let (unparsed_stmt, schema_search_path) = match (&create.inner, shallow) {
+            (CacheInner::Id(..), Ok(shallow)) => (
+                create_cache_statement(
+                    DB::SQL_DIALECT,
+                    &CreateCacheOptions {
+                        cache_type: Some(CacheType::Shallow),
+                        ..create.options()
+                    },
+                    &shallow.query_orig.to_string(),
+                ),
+                shallow.schema_search_path.clone(),
+            ),
+            _ => (
+                create.unparsed_create_cache_statement.clone()?,
+                connectors.noria.schema_search_path().to_owned(),
+            ),
+        };
+        Some(CacheDDLRequest {
+            unparsed_stmt,
+            schema_search_path,
+            dialect: DB::SQL_DIALECT.into(),
+            cache_name: None,
+        })
+    }
+
     pub(super) async fn query_readyset_extensions<'a>(
         connectors: &'a mut BackendConnectors<DB>,
         settings: &'a BackendSettings,
@@ -1569,7 +1603,7 @@ where
                     inner,
                     trx_cache_policy,
                     concurrently,
-                    unparsed_create_cache_statement,
+                    unparsed_create_cache_statement: _,
                     topk_buffer_multiplier,
                     autoparam,
                 } = create_cache_stmt;
@@ -1600,21 +1634,7 @@ where
                     trace!("No telemetry sender. not sending metric for CREATE CACHE");
                 }
 
-                let ddl_req = if let Some(unparsed_create_cache_statement) =
-                    unparsed_create_cache_statement
-                {
-                    let ddl_req = CacheDDLRequest {
-                        unparsed_stmt: unparsed_create_cache_statement.clone(),
-                        schema_search_path: connectors.noria.schema_search_path().to_owned(),
-                        dialect: settings.dialect.into(),
-                        cache_name: None,
-                    };
-                    Some(ddl_req)
-                } else {
-                    None
-                };
-                // The create paths take it; the registration below files it again after a
-                // schema change, under the name the persisted copy carries.
+                let ddl_req = Self::cache_ddl_request(connectors, create_cache_stmt, &shallow);
                 let registration_ddl = ddl_req.clone();
 
                 // Set by whichever branch builds a deep cache, so the registration below runs

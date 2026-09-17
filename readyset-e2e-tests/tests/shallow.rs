@@ -3370,7 +3370,7 @@ async fn shallow_cache_checks_support_without_excessive_parameterization_psql() 
 async fn shallow_cache_create_from_id_using_original_query_text() {
     init_test_logging();
 
-    let (readyset_opts, _readyset_handle, shutdown_tx) = TestBuilder::default()
+    let (readyset_opts, handle, shutdown_tx) = TestBuilder::default()
         .fallback(true)
         .cache_mode(readyset_client::CacheMode::Shallow)
         .migration_mode(MigrationMode::OutOfBand)
@@ -3400,6 +3400,47 @@ async fn shallow_cache_create_from_id_using_original_query_text() {
         .query_drop(format!("CREATE CACHE FROM {id}"))
         .await
         .expect("CREATE CACHE FROM <id> should succeed by probing the original query");
+
+    readyset
+        .query_drop("SELECT CURRENT_TIMESTAMP(4)")
+        .await
+        .unwrap();
+    assert_matches!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::ReadysetThenUpstream(..)
+    );
+
+    readyset
+        .query_drop("SELECT CURRENT_TIMESTAMP(4)")
+        .await
+        .unwrap();
+    assert_matches!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::ReadysetShallow(..)
+    );
+
+    drop(readyset);
+    let (readyset_opts, _handle, shutdown_tx) = shutdown_tx.restart(handle).await;
+
+    let mut readyset = mysql_async::Conn::new(readyset_opts).await.unwrap();
+
+    readyset
+        .query_drop("SELECT CURRENT_TIMESTAMP(4)")
+        .await
+        .unwrap();
+    assert_matches!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::ReadysetThenUpstream(..)
+    );
+
+    readyset
+        .query_drop("SELECT CURRENT_TIMESTAMP(4)")
+        .await
+        .unwrap();
+    assert_matches!(
+        last_query_info(&mut readyset).await.destination,
+        QueryDestination::ReadysetShallow(..)
+    );
 
     shutdown_tx.shutdown().await;
 }
