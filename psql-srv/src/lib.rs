@@ -45,7 +45,7 @@ use tokio_postgres::OwnedField;
 
 pub use crate::bytes::BytesStr;
 pub use crate::error::Error;
-pub use crate::message::{PsqlSrvRow, TransferFormat};
+pub use crate::message::{BackendMessage, ErrorPosition, ErrorSeverity, PsqlSrvRow, TransferFormat};
 pub use crate::value::PsqlValue;
 
 pub enum CredentialsNeeded {
@@ -206,7 +206,10 @@ pub enum QueryResponse<R> {
     /// The response to a SimpleQuery statement. The statement may contain one or more SQL
     /// commands (e.g., SELECT, INSERT, DELETE, etc.). The SimpleQuery protocol is distinct from
     /// the prepare/execute protocol.
-    SimpleQuery(Vec<SimpleQueryMessage>),
+    SimpleQuery {
+        messages: Vec<SimpleQueryMessage>,
+        pending_notices: Vec<BackendMessage>,
+    },
     Deallocate(DeallocateId),
 }
 

@@ -74,6 +74,29 @@ pub enum BackendMessage {
         line: Option<u32>,
         routine: Option<String>,
     },
+    /// A `NoticeResponse` wire message (`b'N'`) carrying an informational or warning
+    /// notice from the upstream database. PostgreSQL emits these for things like
+    /// `DROP TABLE IF EXISTS` on a missing table, `CREATE TABLE IF NOT EXISTS` on an
+    /// existing one, or `RAISE NOTICE` from PL/pgSQL. Clients such as PHP's
+    /// `pg_last_notice()` and psql's per-message banner rely on receiving these
+    /// messages verbatim.
+    NoticeResponse {
+        severity: String,
+        sqlstate: SqlState,
+        message: String,
+        detail: Option<String>,
+        hint: Option<String>,
+        position: Option<ErrorPosition>,
+        where_: Option<String>,
+        schema: Option<String>,
+        table: Option<String>,
+        column: Option<String>,
+        datatype: Option<String>,
+        constraint: Option<String>,
+        file: Option<String>,
+        line: Option<u32>,
+        routine: Option<String>,
+    },
     NoData,
     ParameterDescription {
         parameter_data_types: Vec<Type>,

@@ -23,6 +23,7 @@ const ID_COMMAND_COMPLETE: u8 = b'C';
 const ID_DATA_ROW: u8 = b'D';
 const ID_EMPTY_QUERY_RESPONSE: u8 = b'I';
 const ID_ERROR_RESPONSE: u8 = b'E';
+const ID_NOTICE_RESPONSE: u8 = b'N';
 const ID_PARAMETER_DESCRIPTION: u8 = b't';
 const ID_PARAMETER_STATUS: u8 = b'S';
 const ID_PARSE_COMPLETE: u8 = b'1';
@@ -69,6 +70,7 @@ const ERROR_RESPONSE_ROUTINE_FIELD: u8 = b'R';
 const ERROR_RESPONSE_SEVERITY_ERROR: &str = "ERROR";
 const ERROR_RESPONSE_SEVERITY_FATAL: &str = "FATAL";
 const ERROR_RESPONSE_SEVERITY_PANIC: &str = "PANIC";
+const NOTICE_RESPONSE_UNLOCALIZED_SEVERITY_FIELD: u8 = b'V';
 const ERROR_RESPONSE_TERMINATOR: u8 = b'\0';
 
 const BOOL_FALSE_TEXT_REP: &str = "f";
@@ -274,6 +276,96 @@ fn encode(message: BackendMessage, dst: &mut BytesMut) -> Result<(), Error> {
             put_str(severity, dst);
             put_u8(ERROR_RESPONSE_UNLOCALIZED_SEVERITY_FIELD, dst);
             put_str(severity, dst);
+            put_u8(ERROR_RESPONSE_CODE_FIELD, dst);
+            put_str(sqlstate.code(), dst);
+            put_u8(ERROR_RESPONSE_MESSAGE_FIELD, dst);
+            put_str(&message, dst);
+            if let Some(detail) = detail {
+                put_u8(ERROR_RESPONSE_DETAIL_FIELD, dst);
+                put_str(&detail, dst);
+            }
+            if let Some(hint) = hint {
+                put_u8(ERROR_RESPONSE_HINT_FIELD, dst);
+                put_str(&hint, dst);
+            }
+            if let Some(position) = position {
+                match position {
+                    ErrorPosition::Original(position) => {
+                        put_u8(ERROR_RESPONSE_POSITION_FIELD, dst);
+                        put_str(&position.to_string(), dst);
+                    }
+                    ErrorPosition::Internal { position, query } => {
+                        put_u8(ERROR_RESPONSE_INTERNAL_POSITION_FIELD, dst);
+                        put_str(&position.to_string(), dst);
+                        put_u8(ERROR_RESPONSE_INTERNAL_QUERY_FIELD, dst);
+                        put_str(&query, dst);
+                    }
+                }
+            }
+            if let Some(where_) = where_ {
+                put_u8(ERROR_RESPONSE_WHERE_FIELD, dst);
+                put_str(&where_, dst);
+            }
+            if let Some(schema) = schema {
+                put_u8(ERROR_RESPONSE_SCHEMA_NAME_FIELD, dst);
+                put_str(&schema, dst);
+            }
+            if let Some(table) = table {
+                put_u8(ERROR_RESPONSE_TABLE_NAME_FIELD, dst);
+                put_str(&table, dst);
+            }
+            if let Some(column) = column {
+                put_u8(ERROR_RESPONSE_COLUMN_NAME_FIELD, dst);
+                put_str(&column, dst);
+            }
+            if let Some(datatype) = datatype {
+                put_u8(ERROR_RESPONSE_DATA_TYPE_NAME_FIELD, dst);
+                put_str(&datatype, dst);
+            }
+            if let Some(constraint) = constraint {
+                put_u8(ERROR_RESPONSE_CONSTRAINT_NAME_FIELD, dst);
+                put_str(&constraint, dst);
+            }
+            if let Some(file) = file {
+                put_u8(ERROR_RESPONSE_FILE_FIELD, dst);
+                put_str(&file, dst);
+            }
+            if let Some(line) = line {
+                put_u8(ERROR_RESPONSE_LINE_FIELD, dst);
+                put_str(&line.to_string(), dst);
+            }
+            if let Some(routine) = routine {
+                put_u8(ERROR_RESPONSE_ROUTINE_FIELD, dst);
+                put_str(&routine, dst);
+            }
+            put_u8(ERROR_RESPONSE_TERMINATOR, dst);
+        }
+        NoticeResponse {
+            severity,
+            sqlstate,
+            message,
+            detail,
+            hint,
+            position,
+            where_,
+            schema,
+            table,
+            column,
+            datatype,
+            constraint,
+            file,
+            line,
+            routine,
+        } => {
+            // NoticeResponse ('N') uses the same field set as ErrorResponse ('E') but
+            // carries a NOTICE/WARNING/DEBUG/LOG/INFO severity rather than ERROR/FATAL/
+            // PANIC. The wire-level layout is identical otherwise.
+            put_u8(ID_NOTICE_RESPONSE, dst);
+            put_i32(LENGTH_PLACEHOLDER, dst);
+            put_u8(ERROR_RESPONSE_SEVERITY_FIELD, dst);
+            put_str(&severity, dst);
+            put_u8(NOTICE_RESPONSE_UNLOCALIZED_SEVERITY_FIELD, dst);
+            put_str(&severity, dst);
             put_u8(ERROR_RESPONSE_CODE_FIELD, dst);
             put_str(sqlstate.code(), dst);
             put_u8(ERROR_RESPONSE_MESSAGE_FIELD, dst);
@@ -1103,6 +1195,56 @@ mod tests {
         exp.extend_from_slice(b"0A000\0");
         exp.put_u8(b'M'); // field id
         exp.extend_from_slice(b"unsupported kringle\0");
+        exp.put_u8(b'\0'); // terminator
+        assert_eq!(buf, exp);
+    }
+
+
+    #[test]
+    fn test_encode_notice_response() {
+        // Verifies that NoticeResponse ('N') uses the same wire layout as ErrorResponse
+        // ('E') but with the NOTICE message id and a NOTICE/WARNING/DEBUG severity rather
+        // than ERROR/FATAL/PANIC. The downstream client uses this to surface
+        // `pg_last_notice()`-style notices that PostgreSQL sends for `DROP TABLE IF
+        // EXISTS` on a missing table, `RAISE NOTICE` from PL/pgSQL, etc.
+        let mut codec = Codec::new();
+        let mut buf = BytesMut::new();
+        codec
+            .encode(
+                NoticeResponse {
+                    severity: "NOTICE".to_string(),
+                    sqlstate: SqlState::WARNING,
+                    message: "table missing_xyz does not exist, skipping".to_string(),
+                    detail: None,
+                    hint: None,
+                    position: None,
+                    where_: None,
+                    schema: None,
+                    table: None,
+                    column: None,
+                    datatype: None,
+                    constraint: None,
+                    file: None,
+                    line: None,
+                    routine: None,
+                },
+                &mut buf,
+            )
+            .unwrap();
+
+        let mut exp = BytesMut::new();
+        exp.put_u8(b'N'); // message id (NoticeResponse)
+        // 4 (length itself) + 1+7 ('S' "NOTICE" + NUL) + 1+7 ('V' "NOTICE" + NUL)
+        // + 1+6 ('C' "01000" + NUL) + 1+41 ('M' message + NUL) + 1 (terminator)
+        exp.put_i32(4 + 1 + 7 + 1 + 7 + 1 + 6 + 1 + 41 + 1);
+        exp.put_u8(b'S'); // severity-localized field id
+        exp.extend_from_slice(b"NOTICE\0");
+        exp.put_u8(b'V'); // severity-unlocalized field id
+        exp.extend_from_slice(b"NOTICE\0");
+        exp.put_u8(b'C'); // sqlstate field id
+        exp.extend_from_slice(b"01000\0");
+        exp.put_u8(b'M'); // message field id
+        exp.extend_from_slice(b"table missing_xyz does not exist, skipping\0");
         exp.put_u8(b'\0'); // terminator
         assert_eq!(buf, exp);
     }
