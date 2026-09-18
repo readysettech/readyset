@@ -94,20 +94,20 @@ where
 
         DfType::Text(collation) => Ok(DfValue::from_str_and_collation(&val.to_string(), collation)),
 
-        DfType::VarChar(l, ..) => {
+        DfType::VarChar(l, collation) => {
             let mut val = val.to_string();
             val.truncate(l as usize);
-            Ok(val.to_string().into())
+            Ok(DfValue::from_str_and_collation(&val, collation))
         }
 
-        DfType::Char(l, ..) => {
+        DfType::Char(l, collation) => {
             let mut val = val.to_string();
             val.truncate(l as usize);
             val.extend(std::iter::repeat_n(
                 ' ',
                 (l as usize).saturating_sub(val.len()),
             ));
-            Ok(val.into())
+            Ok(DfValue::from_str_and_collation(&val, collation))
         }
 
         DfType::Blob => Ok(val.to_string().into_bytes().into()),
