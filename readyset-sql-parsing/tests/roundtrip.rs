@@ -171,7 +171,6 @@ fn test_alter_table_column_position_quoted_identifiers() {
 #[test]
 fn limit_placeholders() {
     check_rt_mysql!("select * from users limit ?");
-    check_rt_mysql!("select * from users limit $1");
     check_rt_postgres!("select * from users limit $1");
     check_rt_postgres!("select * from users limit :1");
 }

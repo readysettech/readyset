@@ -325,12 +325,19 @@ mod tests {
                 }
             }
             _ => {
-                for &dialect in Dialect::ALL {
-                    let s = lit.display(Dialect::MySQL).to_string();
-                    assert_eq!(
-                        literal(dialect)(LocatedSpan::new(s.as_bytes())).unwrap().1,
-                        lit
+                if !matches!(
+                    lit,
+                    Literal::Placeholder(
+                        ItemPlaceholder::DollarNumber(_) | ItemPlaceholder::ColonNumber(_)
                     )
+                ) {
+                    for &dialect in Dialect::ALL {
+                        let s = lit.display(Dialect::MySQL).to_string();
+                        assert_eq!(
+                            literal(dialect)(LocatedSpan::new(s.as_bytes())).unwrap().1,
+                            lit
+                        )
+                    }
                 }
                 for &dialect in Dialect::ALL {
                     let s = lit.display(Dialect::PostgreSQL).to_string();

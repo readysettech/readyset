@@ -262,7 +262,10 @@ impl DialectDisplay for Literal {
                 // E'\x...' can produce invalid UTF-8 sequences.
                 write!(f, "X'{}'", b.iter().map(|v| format!("{v:02X}")).join(""))
             }
-            Literal::Placeholder(item) => write!(f, "{item}"),
+            Literal::Placeholder(item) => match dialect {
+                Dialect::MySQL => write!(f, "?"),
+                Dialect::PostgreSQL => write!(f, "{item}"),
+            },
             Literal::BitVector(b) => {
                 write!(
                     f,
