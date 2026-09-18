@@ -35,6 +35,40 @@ async fn non_default_db_in_connection_opts() {
     shutdown_tx.shutdown().await;
 }
 
+/// Verify that dropping the selected upstream database does not leave the session unable to
+/// recreate databases through ReadySet.
+#[tokio::test]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn create_database_after_default_database_is_dropped() {
+    readyset_tracing::init_test_logging();
+
+    let (rs_opts, _handle, shutdown_tx): (_, _, ShutdownSender) =
+        TestBuilder::default().fallback(true).build::<MySQLAdapter>().await;
+
+    let db_name = rs_opts.db_name().unwrap().to_string();
+    let other_db_name = format!("{db_name}_other");
+    let opts_with_db = mysql_async::OptsBuilder::from_opts(rs_opts).db_name(Some(db_name.clone()));
+
+    let mut conn = mysql_async::Conn::new(opts_with_db).await.unwrap();
+
+    conn.query_drop(format!("DROP DATABASE `{db_name}`"))
+        .await
+        .unwrap();
+    conn.query_drop(format!("CREATE DATABASE `{other_db_name}`"))
+        .await
+        .unwrap();
+    conn.query_drop(format!("DROP DATABASE `{other_db_name}`"))
+        .await
+        .unwrap();
+    conn.query_drop(format!("CREATE DATABASE `{db_name}`"))
+        .await
+        .unwrap();
+    conn.query_drop(format!("USE `{db_name}`")).await.unwrap();
+
+    shutdown_tx.shutdown().await;
+}
+
 /// Verify that COM_CHANGE_USER with a database parameter updates ReadySet's internal
 /// schema_search_path, so subsequent unqualified queries resolve against the new database.
 #[tokio::test]
