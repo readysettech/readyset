@@ -617,6 +617,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
                         col_type: col.type_().clone(),
                         table_oid: col.table_oid(),
                         attnum: col.column_id(),
+                        type_modifier: col.type_modifier(),
                     })
                 })
                 .collect::<Result<Vec<_>, _>>()?,

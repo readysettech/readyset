@@ -3,6 +3,7 @@ use std::convert::TryFrom;
 use postgres_types::Kind;
 use readyset_data::{Collation, DfType, PgEnumMetadata};
 use readyset_errors::unsupported;
+use readyset_sql::ast::SqlType;
 use {psql_srv as ps, tokio_postgres as pgsql};
 
 use crate::Error;
@@ -43,9 +44,31 @@ impl<'a> TryFrom<NoriaSchema<'a>> for Vec<ps::Column> {
                     col_type: type_to_pgsql(&c.column_type)?,
                     table_oid: c.base.as_ref().and_then(|b| b.table_oid),
                     attnum: c.base.as_ref().and_then(|b| b.attnum),
+                    type_modifier: c
+                        .base
+                        .as_ref()
+                        .map_or(ps::ATTTYPMOD_NONE, |b| type_modifier(&b.sql_type)),
                 })
             })
             .collect()
+    }
+}
+
+/// Encode the type modifier Postgres reports for a column with the given SQL type.
+fn type_modifier(sql_type: &SqlType) -> i32 {
+    match sql_type {
+        // Postgres packs the precision into the high 16 bits and the scale into the low 16 bits.
+        // The Postgres source says the added 4 is there "for purely historical reasons".
+        SqlType::Numeric(Some((prec, scale))) => {
+            ((i32::from(*prec) << 16) | i32::from(scale.unwrap_or(0))) + 4
+        }
+        SqlType::VarChar(Some(len)) | SqlType::Char(Some(len)) => i32::from(*len) + 4,
+        // A bare `char` is `char(1)`.
+        SqlType::Char(None) => 5,
+        SqlType::Bit(Some(len)) | SqlType::VarBit(Some(len)) => i32::from(*len),
+        // A bare `bit` is `bit(1)`.
+        SqlType::Bit(None) => 1,
+        _ => ps::ATTTYPMOD_NONE,
     }
 }
 
@@ -252,5 +275,28 @@ mod tests {
             Collation::Utf8,
         )))));
         assert_eq!(type_to_pgsql(&two_d).unwrap(), Type::TEXT_ARRAY);
+    }
+
+    #[test]
+    fn type_modifier_matches_postgres() {
+        assert_eq!(
+            type_modifier(&SqlType::Numeric(Some((10, Some(2))))),
+            0x000A_0006
+        );
+        assert_eq!(
+            type_modifier(&SqlType::Numeric(Some((10, None)))),
+            0x000A_0004
+        );
+        assert_eq!(type_modifier(&SqlType::Numeric(None)), ps::ATTTYPMOD_NONE);
+        assert_eq!(type_modifier(&SqlType::VarChar(Some(20))), 0x18);
+        assert_eq!(type_modifier(&SqlType::VarChar(None)), ps::ATTTYPMOD_NONE);
+        assert_eq!(type_modifier(&SqlType::Char(Some(10))), 0x0E);
+        assert_eq!(type_modifier(&SqlType::Char(None)), 0x05);
+        assert_eq!(type_modifier(&SqlType::Bit(Some(3))), 0x03);
+        assert_eq!(type_modifier(&SqlType::Bit(None)), 0x01);
+        assert_eq!(type_modifier(&SqlType::VarBit(Some(3))), 0x03);
+        assert_eq!(type_modifier(&SqlType::VarBit(None)), ps::ATTTYPMOD_NONE);
+        assert_eq!(type_modifier(&SqlType::Text), ps::ATTTYPMOD_NONE);
+        assert_eq!(type_modifier(&SqlType::Int(None)), ps::ATTTYPMOD_NONE);
     }
 }

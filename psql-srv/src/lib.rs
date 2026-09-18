@@ -48,6 +48,9 @@ pub use crate::error::Error;
 pub use crate::message::{PsqlSrvRow, TransferFormat};
 pub use crate::value::PsqlValue;
 
+/// The type modifier Postgres reports for a column whose type takes no modifier.
+pub const ATTTYPMOD_NONE: i32 = -1;
+
 pub enum CredentialsNeeded {
     None,
     Cleartext,
@@ -160,6 +163,8 @@ pub enum Column {
         attnum: Option<i16>,
         /// The type of the column
         col_type: Type,
+        /// The type modifier of the column, which Postgres calls `atttypmod`, or `ATTTYPMOD_NONE`.
+        type_modifier: i32,
     },
     OwnedField(OwnedField),
 }
@@ -256,12 +261,14 @@ impl SizeOf for Column {
                 table_oid,
                 attnum,
                 col_type,
+                type_modifier,
             } => {
                 size_of::<Self>()
                     + name.deep_size_of()
                     + table_oid.deep_size_of()
                     + attnum.deep_size_of()
                     + size_of_val(col_type)
+                    + size_of_val(type_modifier)
             }
             Column::OwnedField(field) => {
                 size_of::<Self>() + size_of_val(field) + field.name().len()

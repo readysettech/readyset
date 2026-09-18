@@ -175,6 +175,7 @@ impl PsqlBackend for Backend {
                                 col_type: col.type_().clone(),
                                 table_oid: None,
                                 attnum: None,
+                                type_modifier: col.type_modifier(),
                             })
                             .collect(),
                     )
@@ -207,6 +208,7 @@ impl PsqlBackend for Backend {
                     col_type: c.type_().clone(),
                     table_oid: None,
                     attnum: None,
+                    type_modifier: c.type_modifier(),
                 })
                 .collect(),
         };
@@ -257,6 +259,7 @@ impl PsqlBackend for Backend {
                             col_type: col.type_().clone(),
                             table_oid: None,
                             attnum: None,
+                            type_modifier: col.type_modifier(),
                         })
                         .collect(),
                 )

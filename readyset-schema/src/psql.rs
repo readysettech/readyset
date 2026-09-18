@@ -6,7 +6,7 @@ use datafusion::arrow::datatypes::DataType;
 use datafusion::arrow::util::display::array_value_to_string;
 use tokio_postgres::types::Type;
 
-use psql_srv::{Column, PsqlValue};
+use psql_srv::{ATTTYPMOD_NONE, Column, PsqlValue};
 use readyset_data::Text;
 use readyset_sql::ast::SqlIdentifier;
 
@@ -37,6 +37,7 @@ pub fn extract_columns(result: &ReadysetSchemaResult) -> Vec<Column> {
             col_type: arrow_to_psql_type(field.data_type()),
             table_oid: None,
             attnum: None,
+            type_modifier: ATTTYPMOD_NONE,
         })
         .collect()
 }

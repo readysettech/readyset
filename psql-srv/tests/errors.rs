@@ -9,7 +9,7 @@ use postgres_protocol::Oid;
 use postgres_types::Type;
 use psql_srv::{
     run_backend, Column, Credentials, CredentialsNeeded, Error, PrepareResponse, PsqlBackend,
-    PsqlSrvRow, PsqlValue, QueryResponse, TransferFormat,
+    PsqlSrvRow, PsqlValue, QueryResponse, TransferFormat, ATTTYPMOD_NONE,
 };
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_util::redacted::RedactedString;
@@ -75,6 +75,7 @@ impl PsqlBackend for ErrorBackend {
                     table_oid: None,
                     attnum: None,
                     col_type: Type::BOOL,
+                    type_modifier: ATTTYPMOD_NONE,
                 }],
             })
         }
@@ -94,6 +95,7 @@ impl PsqlBackend for ErrorBackend {
                     table_oid: None,
                     attnum: None,
                     col_type: Type::BOOL,
+                    type_modifier: ATTTYPMOD_NONE,
                 }]),
                 resultset: stream::iter(vec![Err(Error::InternalError("factory".to_owned()))]),
             }),

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use futures::{Stream, ready};
+use itertools::izip;
 use ps::{PsqlSrvRow, PsqlValue, TransferFormat};
 use psql_srv as ps;
 use readyset_client::post_processing::ResultIterator;
@@ -79,6 +80,9 @@ pub struct Resultset {
     /// The names of the projected fields for each row (for shallow cache metadata).
     project_field_names: Vec<String>,
 
+    /// The type modifiers of the projected fields for each row (for shallow cache metadata).
+    project_field_modifiers: Vec<i32>,
+
     /// Optional cache guard for shallow cache insertion during streaming
     cache: Option<CacheInsertGuard<readyset_adapter::shallow_key::ShallowKey, CacheEntry>>,
 
@@ -90,17 +94,20 @@ impl Resultset {
     fn finalize_cache(&mut self) {
         if let Some(cache) = &mut self.cache {
             let schema = Arc::new(
-                self.project_field_names
-                    .iter()
-                    .zip(self.project_field_types.iter())
-                    .enumerate()
-                    .map(|(i, (name, col_type))| ps::Column::Column {
-                        name: name.clone().into(),
-                        col_type: col_type.clone(),
-                        table_oid: Some(0),
-                        attnum: Some(i as i16),
-                    })
-                    .collect(),
+                izip!(
+                    &self.project_field_names,
+                    self.project_field_types.iter(),
+                    &self.project_field_modifiers
+                )
+                .enumerate()
+                .map(|(i, (name, col_type, type_modifier))| ps::Column::Column {
+                    name: name.clone().into(),
+                    col_type: col_type.clone(),
+                    table_oid: Some(0),
+                    attnum: Some(i as i16),
+                    type_modifier: *type_modifier,
+                })
+                .collect(),
             );
 
             cache.set_metadata(QueryMetadata::PostgreSql(PostgreSqlMetadata {
@@ -160,6 +167,7 @@ impl Resultset {
             results: ResultsetInner::Empty,
             project_field_types: Default::default(),
             project_field_names: Vec::new(),
+            project_field_modifiers: Vec::new(),
             cache: None,
             client_formats: None,
         }
@@ -182,6 +190,7 @@ impl Resultset {
             results: ResultsetInner::ReadySet(Box::new(results.into_iter())),
             project_field_types,
             project_field_names: Vec::new(),
+            project_field_modifiers: Vec::new(),
             cache: None,
             client_formats: None,
         })
@@ -199,6 +208,11 @@ impl Resultset {
             .iter()
             .map(|c| c.name().to_string())
             .collect();
+        let modifiers = first_row
+            .columns()
+            .iter()
+            .map(|c| c.type_modifier())
+            .collect();
         Self {
             results: ResultsetInner::Stream {
                 first_row: Some(first_row),
@@ -206,6 +220,7 @@ impl Resultset {
             },
             project_field_types: Arc::new(schema),
             project_field_names: names,
+            project_field_modifiers: modifiers,
             cache,
             client_formats,
         }
@@ -223,6 +238,11 @@ impl Resultset {
             .iter()
             .map(|c| c.name().to_string())
             .collect();
+        let modifiers = first_row
+            .columns()
+            .iter()
+            .map(|c| c.type_modifier())
+            .collect();
         Self {
             results: ResultsetInner::RowStream {
                 first_row: Some(first_row),
@@ -230,6 +250,7 @@ impl Resultset {
             },
             project_field_types: Arc::new(schema),
             project_field_names: names,
+            project_field_modifiers: modifiers,
             cache,
             client_formats,
         }
@@ -247,6 +268,7 @@ impl Resultset {
             },
             project_field_types: Default::default(),
             project_field_names: Vec::new(),
+            project_field_modifiers: Vec::new(),
             cache,
             client_formats: None,
         }
@@ -258,6 +280,7 @@ impl Resultset {
             results: ResultsetInner::ReadysetSchema(result.owned_iter()),
             project_field_types,
             project_field_names: Vec::new(),
+            project_field_modifiers: Vec::new(),
             cache: None,
             client_formats: None,
         }
@@ -271,6 +294,7 @@ impl Resultset {
             results: ResultsetInner::ShallowDfValue { values, row: 0 },
             project_field_types,
             project_field_names: Vec::new(),
+            project_field_modifiers: Vec::new(),
             cache: None,
             client_formats: None,
         }

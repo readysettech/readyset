@@ -34,7 +34,6 @@ use crate::value::PsqlValue;
 use crate::QueryResponse::*;
 use crate::{Column, Credentials, PrepareResponse, PsqlBackend};
 
-const ATTTYPMOD_NONE: i32 = -1;
 const TRANSFER_FORMAT_PLACEHOLDER: TransferFormat = TransferFormat::Text;
 const TYPLEN_1: i16 = 1;
 const TYPLEN_2: i16 = 2;
@@ -1089,12 +1088,16 @@ async fn make_field_description<B: PsqlBackend>(
         Column::Column { attnum, .. } => attnum.unwrap_or(UNKNOWN_COLUMN),
         Column::OwnedField(o) => o.column_id(),
     };
-    //
     let data_type = match col {
         Column::Column { col_type, .. } => Some(col_type.clone()),
         Column::OwnedField(o) => Type::from_oid(o.type_oid()),
     }
     .ok_or_else(|| Error::InternalError("unrecognized type".to_string()))?;
+
+    let type_modifier = match col {
+        Column::Column { type_modifier, .. } => *type_modifier,
+        Column::OwnedField(o) => o.type_modifier(),
+    };
 
     Ok(FieldDescription {
         field_name,
@@ -1102,7 +1105,7 @@ async fn make_field_description<B: PsqlBackend>(
         col_id,
         data_type,
         data_type_size,
-        type_modifier: ATTTYPMOD_NONE,
+        type_modifier,
         transfer_format,
     })
 }
@@ -1116,7 +1119,8 @@ async fn data_type_size<B: PsqlBackend>(
         Column::OwnedField(o) => o.type_size(),
         Column::Column { col_type, .. } => match col_type.kind() {
             Kind::Array(_) => TYPLEN_VARLENA,
-            Kind::Enum(_) => TYPLEN_VARLENA,
+            // Postgres stores an enum value as a 4-byte OID.
+            Kind::Enum(_) => TYPLEN_4,
             // An anonymous `record` is built with `Kind::Composite`, so it never compares equal to
             // the built-in `Type::RECORD` below; matching on the kind keeps it off the
             // extended-type lookup, which queries `pg_catalog.pg_type` upstream.
@@ -1249,7 +1253,7 @@ mod tests {
     use crate::bytes::BytesStr;
     use crate::message::{ErrorSeverity, PsqlSrvRow, READY_FOR_QUERY_IDLE, READY_FOR_QUERY_TX};
     use crate::value::PsqlValue;
-    use crate::{Credentials, CredentialsNeeded, PrepareResponse, QueryResponse};
+    use crate::{Credentials, CredentialsNeeded, PrepareResponse, QueryResponse, ATTTYPMOD_NONE};
 
     fn bytes_str(s: &str) -> BytesStr {
         let mut buf = BytesMut::new();
@@ -1333,12 +1337,14 @@ mod tests {
                             table_oid: None,
                             attnum: None,
                             col_type: Type::INT4,
+                            type_modifier: ATTTYPMOD_NONE,
                         },
                         Column::Column {
                             name: "col2".into(),
                             table_oid: None,
                             attnum: None,
                             col_type: Type::FLOAT8,
+                            type_modifier: ATTTYPMOD_NONE,
                         },
                     ]),
                     resultset: stream::iter(vec![
@@ -1370,12 +1376,14 @@ mod tests {
                             table_oid: None,
                             attnum: None,
                             col_type: Type::INT4,
+                            type_modifier: ATTTYPMOD_NONE,
                         },
                         Column::Column {
                             name: "col2".into(),
                             table_oid: None,
                             attnum: None,
                             col_type: Type::FLOAT8,
+                            type_modifier: ATTTYPMOD_NONE,
                         },
                     ],
                 })
@@ -1401,12 +1409,14 @@ mod tests {
                             table_oid: None,
                             attnum: None,
                             col_type: Type::INT4,
+                            type_modifier: ATTTYPMOD_NONE,
                         },
                         Column::Column {
                             name: "col2".into(),
                             table_oid: None,
                             attnum: None,
                             col_type: Type::FLOAT8,
+                            type_modifier: ATTTYPMOD_NONE,
                         },
                     ]),
                     resultset: stream::iter(vec![
@@ -1896,13 +1906,15 @@ mod tests {
                         name: "col1".into(),
                         table_oid: None,
                         attnum: None,
-                        col_type: Type::INT4
+                        col_type: Type::INT4,
+                        type_modifier: ATTTYPMOD_NONE,
                     },
                     Column::Column {
                         name: "col2".into(),
                         table_oid: None,
                         attnum: None,
-                        col_type: Type::FLOAT8
+                        col_type: Type::FLOAT8,
+                        type_modifier: ATTTYPMOD_NONE,
                     },
                 ],
             }
