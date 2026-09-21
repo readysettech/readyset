@@ -1122,6 +1122,31 @@ impl QueryStatusCache {
         })
     }
 
+    /// Record whether the upstream accepted a proxied query.
+    pub fn update_proxied_support<Q>(&self, q: &Q, failure: Option<String>)
+    where
+        Q: QueryStatusKey,
+    {
+        let Some(current) = self.try_query_migration_state(q).1 else {
+            return;
+        };
+        if !current.is_proxied() {
+            return;
+        }
+        let desired = match failure {
+            None => MigrationState::Supported,
+            Some(reason) => MigrationState::Unsupported(reason),
+        };
+        if mem::discriminant(&current) == mem::discriminant(&desired) {
+            return;
+        }
+        self.with_mut_migration_state(q, |state| {
+            if state.is_proxied() {
+                *state = desired.clone();
+            }
+        });
+    }
+
     /// This function is called if we attempted to create an inlined migration but received an
     /// unsupported error. Updates the query status and removes pending inlined migrations.
     pub fn unsupported_inlined_migration(&self, q: &ViewCreateRequest) {
@@ -1707,6 +1732,63 @@ mod tests {
         cache.clear_shallow_auto_create_skips();
         assert!(cache.proxied_list(CacheType::Shallow).is_empty());
         assert_eq!(cache.shallow_auto_create_skip_reason(id), None);
+    }
+
+    fn assert_migration_state<Q>(cache: &QueryStatusCache, query: &Q, expected: MigrationState)
+    where
+        Q: QueryStatusKey,
+    {
+        let (id, state) = cache.try_query_migration_state(query);
+        assert!(state.is_some_and(|s| mem::discriminant(&s) == mem::discriminant(&expected)));
+        let statuses = cache.persistent_handle.statuses.read();
+        assert_eq!(
+            mem::discriminant(&statuses.peek(&id).unwrap().1.migration_state),
+            mem::discriminant(&expected)
+        );
+    }
+
+    #[test]
+    fn update_proxied_support_transitions() {
+        let cache = QueryStatusCache::new();
+        let query = ShallowCacheQuery::default();
+        let query = ShallowViewRequest::new(query.clone(), vec![], query);
+
+        cache.update_proxied_support(&query, None);
+        assert_eq!(cache.try_query_migration_state(&query).1, None);
+
+        cache.insert(query.clone());
+        assert_migration_state(&cache, &query, MigrationState::Pending);
+
+        cache.update_proxied_support(&query, None);
+        assert_migration_state(&cache, &query, MigrationState::Supported);
+
+        cache.update_proxied_support(&query, Some("boom".into()));
+        assert_migration_state(&cache, &query, MigrationState::Unsupported("".into()));
+        cache.update_proxied_support(&query, Some("other".into()));
+        assert_migration_state(&cache, &query, MigrationState::Unsupported("".into()));
+        cache.update_proxied_support(&query, None);
+        assert_migration_state(&cache, &query, MigrationState::Supported);
+
+        // A repeated result leaves the persisted statuses untouched, so holding their read lock
+        // across the call is fine.
+        let statuses = cache.persistent_handle.statuses.read();
+        cache.update_proxied_support(&query, None);
+        drop(statuses);
+        assert_migration_state(&cache, &query, MigrationState::Supported);
+
+        cache.update_query_migration_state(
+            &query,
+            MigrationState::Successful(CacheType::Shallow),
+            None,
+        );
+        let statuses = cache.persistent_handle.statuses.read();
+        cache.update_proxied_support(&query, Some("boom".into()));
+        drop(statuses);
+        assert_migration_state(
+            &cache,
+            &query,
+            MigrationState::Successful(CacheType::Shallow),
+        );
     }
 
     #[test]

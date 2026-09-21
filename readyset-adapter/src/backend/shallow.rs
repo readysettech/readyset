@@ -557,14 +557,7 @@ where
         if let Some(shallow) = shallow {
             state
                 .query_status_cache
-                .with_mut_migration_state(shallow, |state| {
-                    if state.is_proxied() {
-                        *state = match error {
-                            None => MigrationState::Supported,
-                            Some(e) => MigrationState::Unsupported(e.to_string()),
-                        }
-                    }
-                });
+                .update_proxied_support(shallow, error.map(ToString::to_string));
         }
     }
 }
