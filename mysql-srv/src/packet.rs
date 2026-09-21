@@ -270,10 +270,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PacketConn<S> {
             let Some(mut vec) = packet.into_buffer() else {
                 continue;
             };
-            // Shrink large buffers before adding to the pool to avoid wasting memory.
-            // This would occur if the buffer was reused, and the previous use was
-            // greater than `MAX_POOL_ROW_CAPACITY`, and this use is less than
-            // `MAX_POOL_ROW_CAPACITY`.
+            // A buffer that grew past `MAX_POOL_ROW_CAPACITY` (a large row) is shrunk back
+            // before pooling, so the pool never holds more than that per buffer. The data is
+            // cleared first since shrinking never goes below the length.
+            vec.clear();
             vec.shrink_to(MAX_POOL_ROW_CAPACITY);
             let idx = self
                 .preallocated
@@ -281,6 +281,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PacketConn<S> {
             self.preallocated.insert(idx, vec);
         }
         self.preallocated.truncate(MAX_POOL_BUFFERS);
+    }
+
+    /// The capacity of the largest pooled buffer, if any.
+    #[cfg(test)]
+    pub(crate) fn largest_pooled_capacity(&self) -> Option<usize> {
+        self.preallocated.last().map(Vec::capacity)
     }
 
     /// Get a buffer from the pool, with a size hint for capacity: the smallest pooled buffer
@@ -700,14 +706,18 @@ mod tests {
         let (u_out, _u_in) = tokio::net::UnixStream::pair().unwrap();
         let mut conn = PacketConn::new(u_out);
 
-        // Oversized buffers are shrunk before pooling. `shrink_to` is best effort: it never
-        // goes below the requested capacity and may stop short of it.
-        let vec: Vec<u8> = Vec::with_capacity(MAX_POOL_ROW_CAPACITY * 2);
+        // Oversized buffers are shrunk before pooling, even while still holding a large row, so
+        // a single large row does not pin its size in the pool. `shrink_to` never goes below the
+        // requested capacity.
+        let vec = vec![0u8; MAX_POOL_ROW_CAPACITY * 2];
         let before = vec.capacity();
         conn.queue.push(QueuedPacket::Plain(vec));
         conn.return_queued_to_pool();
         let shrunk = conn.preallocated[0].capacity();
-        assert!((MAX_POOL_ROW_CAPACITY..=before).contains(&shrunk));
+        assert!(
+            (MAX_POOL_ROW_CAPACITY..before).contains(&shrunk),
+            "{shrunk}"
+        );
 
         // When the pool overflows, the smallest buffers are retained.
         let mut expected = vec![shrunk];

@@ -11,7 +11,12 @@ use crate::value::ToMySqlValue;
 use crate::{Column, ErrorKind, StatementData, writers};
 
 pub(crate) const DEFAULT_ROW_CAPACITY: usize = 4096;
-pub(crate) const MAX_POOL_ROW_CAPACITY: usize = DEFAULT_ROW_CAPACITY * 4;
+/// The size past which a filled row buffer is flushed to the connection.
+pub(crate) const ROW_FLUSH_SIZE: usize = DEFAULT_ROW_CAPACITY * 4;
+/// The largest capacity the pool keeps a buffer at. A row buffer that doubles past the flush
+/// size reaches this capacity and keeps it, so later rows of up to the flush size fit without
+/// a reallocation.
+pub(crate) const MAX_POOL_ROW_CAPACITY: usize = ROW_FLUSH_SIZE * 2;
 
 /// Convenience type for responding to a client `PREPARE` command.
 ///
@@ -385,14 +390,14 @@ where
         Ok(())
     }
 
-    /// Write the packet header and enqueue the packet if it exceeds the max pool row capacity.
+    /// Write the packet header and enqueue the packet if it exceeds the flush size.
     #[inline]
     async fn finish_normal_packet(&mut self, packet_len: usize) -> io::Result<()> {
         let packet = self.row_data.as_mut().unwrap();
         let header_bytes = self.result.conn.packet_header_bytes(packet_len);
         packet[self.cur_row_header_idx..self.cur_row_header_idx + 4].copy_from_slice(&header_bytes);
 
-        if packet.len() > MAX_POOL_ROW_CAPACITY {
+        if packet.len() > ROW_FLUSH_SIZE {
             // Only take ownership when we need to enqueue
             self.result
                 .conn
@@ -402,7 +407,7 @@ where
         Ok(())
     }
 
-    /// Write the packet header and enqueue the packet if it exceeds the max pool row capacity.
+    /// Write the packet header and enqueue the packet if it exceeds the flush size.
     ///
     /// This is a bit tricky as we don't know if smaller rows have already been added to the buffer.
     /// If this is the first row inserted into the buffer, we can just send the packet (mostly) as-is
@@ -587,26 +592,62 @@ mod tests {
         packets
     }
 
+    /// A column `c` of table `t` with the given type and length.
+    fn column(coltype: ColumnType, column_length: u32) -> Column {
+        Column {
+            schema: String::new(),
+            table: "t".to_string(),
+            org_table: String::new(),
+            column: "c".to_string(),
+            org_name: String::new(),
+            coltype,
+            column_length,
+            character_set: 33,
+            colflags: ColumnFlags::empty(),
+            decimals: 0,
+        }
+    }
+
     /// Drive a one-column, one-row text result set that reports the given number of warnings.
     async fn collect_resultset(capabilities: CapabilityFlags, warnings: u16) -> Vec<Vec<u8>> {
         collect_packets(capabilities, async move |writer| {
-            let cols = [Column {
-                schema: String::new(),
-                table: "t".to_string(),
-                org_table: String::new(),
-                column: "c".to_string(),
-                org_name: String::new(),
-                coltype: ColumnType::MYSQL_TYPE_LONG,
-                column_length: 11,
-                character_set: 33,
-                colflags: ColumnFlags::empty(),
-                decimals: 0,
-            }];
+            let cols = [column(ColumnType::MYSQL_TYPE_LONG, 11)];
             let mut rw = writer.start(&cols).await.unwrap();
             rw.write_row(std::iter::once(42i32)).await.unwrap();
             rw.set_warnings(warnings).finish().await.unwrap();
         })
         .await
+    }
+
+    /// After the first flush, a connection's row buffer stays at the pooled capacity through
+    /// every fill, flush and return to the pool, so no cycle reallocates.
+    #[tokio::test]
+    async fn row_buffers_settle_at_the_pooled_capacity() {
+        collect_packets(CapabilityFlags::empty(), async move |writer| {
+            let cols = [column(ColumnType::MYSQL_TYPE_VAR_STRING, 1024)];
+            let mut rw = writer.start(&cols).await.unwrap();
+
+            // The capacity of the row buffer after each row, whether it is being filled or was
+            // just flushed and returned to the pool, where it is the largest buffer.
+            let value = "x".repeat(1000);
+            let mut flushes = 0;
+            for _ in 0..100 {
+                rw.write_row(std::iter::once(value.as_str())).await.unwrap();
+                let cap = match &rw.row_data {
+                    Some(buf) => buf.capacity(),
+                    None => {
+                        flushes += 1;
+                        rw.result.conn.largest_pooled_capacity().unwrap()
+                    }
+                };
+                if flushes > 0 {
+                    assert_eq!(cap, MAX_POOL_ROW_CAPACITY, "after {flushes} flushes");
+                }
+            }
+            assert!(flushes >= 4, "{flushes}");
+            rw.finish().await.unwrap();
+        })
+        .await;
     }
 
     /// An EOF or EOF-shaped OK terminator: leading byte 0xFE with a payload shorter than 9 bytes.
