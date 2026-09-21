@@ -840,7 +840,7 @@ impl TestBuilder {
 
                     let upstream_url =
                         match shared_upstream_config.read().await.upstream_db_url.clone() {
-                            Some(url) => Some(url.to_string()),
+                            Some(url) => Some(url.into()),
                             None => cdc_url.clone(),
                         };
                     // Probe the upstream for system properties; an unreachable upstream falls

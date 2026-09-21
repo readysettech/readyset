@@ -577,12 +577,7 @@ impl Protocol {
             }];
             messages.extend(Self::get_ready_message(backend.version()));
             backend
-                .set_auth_info(
-                    &user,
-                    self.backend_password
-                        .as_ref()
-                        .map(|password| RedactedString::from(password.to_string())),
-                )
+                .set_auth_info(&user, self.backend_password.clone())
                 .await?;
             Ok(Response::Messages(messages.into()))
         } else {

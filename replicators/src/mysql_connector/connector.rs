@@ -530,10 +530,7 @@ impl MySqlBinlogConnector {
                 config.replica_report_host.clone(),
                 config.replica_report_port,
                 config.replica_report_user.clone(),
-                config
-                    .replica_report_password
-                    .as_ref()
-                    .map(|p| p.to_string()),
+                config.replica_report_password.as_ref().map(|p| p.0.clone()),
             )
             .await?;
         let binlog_request = connector.request_binlog().await;

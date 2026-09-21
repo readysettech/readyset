@@ -1926,7 +1926,7 @@ where
             let password = password.ok_or_else(|| {
                 internal_err!("authenticated connection reached upstream setup without a password")
             })?;
-            (Some(user.to_string()), Some(password.to_string()))
+            (Some(user.to_string()), Some(password.into()))
         } else {
             (None, None)
         };

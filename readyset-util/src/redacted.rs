@@ -1,8 +1,9 @@
 //! Wrapper types which hide the contents of the wrapped types when printed with Debug and/or
-//! Display. These wrappers are intended to be used to hide user PII in logs or errors.
+//! Display. These wrappers are intended to be used to hide user PII and credentials in logs or
+//! errors.
 
 use std::convert::Infallible;
-use std::fmt::{Debug, Display};
+use std::fmt::{self, Debug, Display, Formatter};
 use std::ops::Deref;
 use std::str::FromStr;
 
@@ -17,12 +18,12 @@ where
     T: ?Sized + Display,
 {
     #[cfg(not(feature = "redact_sensitive"))]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
 
     #[cfg(feature = "redact_sensitive")]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "<redacted>")
     }
 }
@@ -32,18 +33,18 @@ where
     T: ?Sized + Debug,
 {
     #[cfg(not(feature = "redact_sensitive"))]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self.0)
     }
 
     #[cfg(feature = "redact_sensitive")]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "<redacted>")
     }
 }
 
-/// Wraps a given string, replacing its contents with "<redacted>" when debug
-/// printed if the `redact_sensitive` feature is enabled.
+/// A string that always prints as "<redacted>" with Display and Debug. The wrapped value is
+/// reachable through Deref or the public field.
 #[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RedactedString(pub String);
 
@@ -66,25 +67,13 @@ impl Deref for RedactedString {
 }
 
 impl Display for RedactedString {
-    #[cfg(not(feature = "redact_sensitive"))]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-
-    #[cfg(feature = "redact_sensitive")]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "<redacted>")
     }
 }
 
 impl Debug for RedactedString {
-    #[cfg(not(feature = "redact_sensitive"))]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.0)
-    }
-
-    #[cfg(feature = "redact_sensitive")]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "<redacted>")
     }
 }
@@ -105,5 +94,19 @@ impl From<String> for RedactedString {
 impl From<RedactedString> for String {
     fn from(s: RedactedString) -> Self {
         s.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn redacted_string_hides_value_when_formatted() {
+        let secret = RedactedString("hunter2".to_string());
+        assert_eq!(format!("{secret}"), "<redacted>");
+        assert_eq!(format!("{secret:?}"), "<redacted>");
+        assert_eq!(*secret, "hunter2");
+        assert_eq!(String::from(secret), "hunter2");
     }
 }

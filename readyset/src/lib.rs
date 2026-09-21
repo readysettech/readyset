@@ -293,7 +293,7 @@ pub struct Options {
     allowed_users_arg: Option<RedactedString>,
 
     #[clap(skip)]
-    allowed_users: OnceCell<anyhow::Result<HashMap<String, String>>>,
+    allowed_users: OnceCell<anyhow::Result<HashMap<String, RedactedString>>>,
 
     /// Enable recording and exposing Prometheus metrics
     #[arg(long, env = "PROMETHEUS_METRICS", default_value = "true", hide = true)]
@@ -532,7 +532,7 @@ pub struct Options {
         requires = "readyset_identity_file",
         env = "READYSET_IDENTITY_FILE_PASSWORD"
     )]
-    readyset_identity_file_password: Option<String>,
+    readyset_identity_file_password: Option<RedactedString>,
 
     /// Specifies the types of client connections permitted to connect to Readyset.
     ///
@@ -840,10 +840,10 @@ impl Options {
 
         let password = self
             .readyset_identity_file_password
-            .clone()
-            .unwrap_or_default();
+            .as_deref()
+            .map_or_default(String::as_str);
 
-        let tls_identity = native_tls::Identity::from_pkcs12(&identity, &password)?;
+        let tls_identity = native_tls::Identity::from_pkcs12(&identity, password)?;
 
         Ok(Some(Arc::new(TlsAcceptor::from(
             native_tls::TlsAcceptor::new(tls_identity)?,
@@ -873,7 +873,7 @@ impl Options {
         }
     }
 
-    fn build_allowed_users(&self) -> anyhow::Result<HashMap<String, String>> {
+    fn build_allowed_users(&self) -> anyhow::Result<HashMap<String, RedactedString>> {
         let upstream_url = self
             .server_worker_options
             .replicator_config
@@ -912,7 +912,7 @@ impl Options {
                         ',' if !in_quotes => {
                             if !current.is_empty() {
                                 let (user, pass) = self.process_pair(&current, &mut seen_users)?;
-                                users.insert(user, pass);
+                                users.insert(user, pass.into());
                                 current.clear();
                             }
                         }
@@ -923,7 +923,7 @@ impl Options {
                 // Process the last pair if any
                 if !current.is_empty() {
                     let (user, pass) = self.process_pair(&current, &mut seen_users)?;
-                    users.insert(user, pass);
+                    users.insert(user, pass.into());
                 }
 
                 ensure!(!in_quotes, "Unclosed quote in input");
@@ -939,7 +939,7 @@ impl Options {
         ) {
             (Some(user), Some(pass)) => {
                 if seen_users.insert(user.to_owned()) {
-                    allowed_users.insert(user.to_owned(), pass.to_owned())
+                    allowed_users.insert(user.to_owned(), pass.to_owned().into())
                 } else {
                     bail!("Duplicate user found: {user}");
                 }
@@ -964,7 +964,10 @@ impl Options {
             .allowed_users
             .get_or_init(|| self.build_allowed_users())
         {
-            Ok(users) => Ok(users.clone()),
+            Ok(users) => Ok(users
+                .iter()
+                .map(|(user, password)| (user.clone(), password.0.clone()))
+                .collect()),
             Err(e) => bail!(
                 "Failed to build authentication map from --upstream-db-url or --allowed-users. \
                  Please ensure they are present and correctly formatted as follows: \
@@ -1853,7 +1856,7 @@ where
             let upstream_url = upstream_config
                 .upstream_db_url
                 .as_ref()
-                .map(|u| u.to_string());
+                .map(|u| u.0.clone());
             let deferred_sink = Arc::new(readyset_rls::DeferredSink::new());
             let rls_config = readyset_rls::RlsConfig::default()
                 .with_poll_interval(Duration::from_secs(options.rls_poll_interval_secs));
@@ -2892,6 +2895,29 @@ mod tests {
             "postgresql://replication:rpl_pwd@mysql:3306/my_app",
         ]);
         opts.database_type().unwrap_err();
+    }
+
+    #[test]
+    fn options_debug_redacts_passwords() {
+        let opts = Options::parse_from(vec![
+            "readyset",
+            "--upstream-db-url",
+            "mysql://root:upstream_pw@mysql:3306/readyset",
+            "--cdc-db-url",
+            "mysql://replication:cdc_pw@mysql:3306/readyset",
+            "--allowed-users",
+            "alice:alice_pw",
+            "--readyset-identity-file",
+            "identity.p12",
+            "--readyset-identity-file-password",
+            "identity_pw",
+        ]);
+        opts.get_allowed_users(false).unwrap();
+        let debug = format!("{opts:?}");
+        for password in ["upstream_pw", "cdc_pw", "alice_pw", "identity_pw"] {
+            assert!(!debug.contains(password), "{password} leaked into {debug}");
+        }
+        assert!(debug.contains("<redacted>"));
     }
 
     #[test]
