@@ -1201,7 +1201,11 @@ impl<'a> NoriaAdapter<'a> {
                 }
                 self.noria.extend_recipe(changelist).await?;
             }
-            Ok(_) => {}
+            Ok(_) => forget_dropped_tables(
+                &mut self.replication_offsets.tables,
+                changelist.changes(),
+                &schema,
+            ),
         }
 
         self.replication_offsets.schema = Some(pos.clone());
@@ -1853,6 +1857,32 @@ fn filter_already_applied_ops(
     Ok((kept, skipped))
 }
 
+fn forget_dropped_tables<'a>(
+    offsets: &mut HashMap<Relation, Option<ReplicationOffset>>,
+    changes: impl IntoIterator<Item = &'a Change>,
+    schema: &str,
+) {
+    let before = offsets.len();
+    for change in changes {
+        match change {
+            Change::Drop { name, .. } => {
+                let mut name = name.clone();
+                name.schema.get_or_insert_with(|| schema.into());
+                offsets.remove(&name);
+            }
+            Change::DropSchema(dropped) => {
+                offsets.retain(|table, _| table.schema.as_ref() != Some(dropped))
+            }
+            _ => {}
+        }
+    }
+    antithesis_sdk::assert_sometimes!(
+        offsets.len() < before,
+        "Replicator forgot offsets of dropped tables",
+        &serde_json::json!({})
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use database_utils::ReplicationServerId;
@@ -1954,5 +1984,22 @@ mod tests {
         let (kept, skipped) = filter_already_applied_ops(vec![], None).unwrap();
         assert!(kept.is_empty());
         assert_eq!(skipped, 0);
+    }
+
+    #[test]
+    fn forgets_only_dropped_tables() {
+        let t = |schema: &str| Relation::new(Some(schema.into()), "t".into());
+        let drop_table = |name| Change::Drop {
+            name,
+            if_exists: false,
+        };
+        let mut offsets = HashMap::from(["db", "a", "b", "c"].map(|s| (t(s), None)));
+        let changes = [
+            drop_table("t".into()),
+            drop_table(t("a")),
+            Change::DropSchema("b".into()),
+        ];
+        forget_dropped_tables(&mut offsets, &changes, "db");
+        assert_eq!(offsets.into_keys().collect::<Vec<_>>(), [t("c")]);
     }
 }
