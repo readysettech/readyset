@@ -1426,6 +1426,7 @@ dependencies = [
  "anyhow",
  "bit-vec 0.9.1",
  "chrono",
+ "cidr",
  "eui48",
  "growable-bloom-filter",
  "mysql_async",

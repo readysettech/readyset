@@ -1771,6 +1771,7 @@ fn default_literal_for(ty: &SqlType) -> Literal {
         | Array(_)
         | MacAddr
         | Inet
+        | Cidr
         | Uuid
         | Tsvector
         | Point

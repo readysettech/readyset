@@ -276,6 +276,7 @@ impl TryFrom<ParamRef<'_>> for DfValue {
             PsqlValue::ByteArray(b) => Ok(DfValue::ByteArray(Arc::new(b.clone()))),
             PsqlValue::MacAddress(m) => Ok(DfValue::from(m.to_string(MacAddressFormat::HexString))),
             PsqlValue::Inet(ip) => Ok(DfValue::from(ip.to_string())),
+            PsqlValue::Cidr(cidr) => Ok(DfValue::from(format!("{cidr:#}"))),
             PsqlValue::Uuid(uuid) => Ok(DfValue::from(uuid.to_string())),
             PsqlValue::Json(v) | PsqlValue::Jsonb(v) => Ok(DfValue::from(v.to_string())),
             PsqlValue::Bit(bits) | PsqlValue::VarBit(bits) => Ok(DfValue::from(bits.clone())),

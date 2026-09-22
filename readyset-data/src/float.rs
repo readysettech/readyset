@@ -207,6 +207,7 @@ pub(crate) fn coerce_f64(val: f64, to_ty: &DfType, from_ty: &DfType) -> ReadySet
         DfType::Unknown
         | DfType::MacAddr
         | DfType::Inet
+        | DfType::Cidr
         | DfType::Uuid
         | DfType::Bit(_)
         | DfType::VarBit(_)
@@ -341,6 +342,7 @@ pub(crate) fn coerce_decimal(
         DfType::Unknown
         | DfType::MacAddr
         | DfType::Inet
+        | DfType::Cidr
         | DfType::Uuid
         | DfType::Bit(_)
         | DfType::VarBit(_)

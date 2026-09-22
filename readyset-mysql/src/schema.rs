@@ -272,6 +272,7 @@ pub(crate) fn convert_column(
         }
         DfType::MacAddr => unsupported!("MySQL does not support the MACADDR type"),
         DfType::Inet => unsupported!("MySQL does not support the INET type"),
+        DfType::Cidr => unsupported!("MySQL does not support the CIDR type"),
         DfType::Uuid => unsupported!("MySQL does not support the UUID type"),
         DfType::Jsonb => unsupported!("MySQL does not support the JSONB type"),
         DfType::VarBit(_) => unsupported!("MySQL does not support the bit varying type"),

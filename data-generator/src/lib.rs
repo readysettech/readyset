@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use bit_vec::BitVec;
 use chrono::{Days, Duration, FixedOffset, NaiveDate, NaiveTime, TimeZone};
+use cidr::Ipv4Cidr;
 use eui48::{MacAddress, MacAddressFormat};
 use rand::distr::uniform::SampleRange as _;
 use rand::distr::{StandardUniform, Uniform};
@@ -560,6 +561,7 @@ pub fn value_of_type(typ: &SqlType) -> DfValue {
         SqlType::Json | SqlType::Jsonb => "{}".into(),
         SqlType::MacAddr => "01:23:45:67:89:AF".into(),
         SqlType::Inet => "::beef".into(),
+        SqlType::Cidr => "::beef/128".into(),
         SqlType::Uuid => "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11".into(),
         SqlType::Bit(size_opt) => {
             DfValue::from(BitVec::with_capacity(size_opt.unwrap_or(1) as usize))
@@ -716,6 +718,15 @@ where
             ))
             .to_string(),
         ),
+        SqlType::Cidr => {
+            let prefix_len = rng.random_range(0..=32u8);
+            let host_bits = 32 - u32::from(prefix_len);
+            let addr = rng.random::<u32>() & (u32::MAX.checked_shl(host_bits).unwrap_or(0));
+            DfValue::from(format!(
+                "{:#}",
+                Ipv4Cidr::new(Ipv4Addr::from(addr), prefix_len).expect("host bits masked to zero")
+            ))
+        }
         SqlType::Uuid => {
             let mut bytes = [0_u8; 16];
             rng.fill(&mut bytes);
@@ -931,6 +942,14 @@ pub fn nth_value_of_type(typ: &SqlType, idx: u32) -> Option<DfValue> {
             let b3: u8 = ((idx >> 8) & 0xff) as u8;
             let b4: u8 = (idx & 0xff) as u8;
             DfValue::from(IpAddr::V4(Ipv4Addr::new(b1, b2, b3, b4)).to_string())
+        }
+        SqlType::Cidr => {
+            let prefix_len = 32 - idx.trailing_zeros();
+            let addr = Ipv4Addr::from(idx);
+            DfValue::from(format!(
+                "{:#}",
+                Ipv4Cidr::new(addr, prefix_len as u8).expect("host bits are zero by construction")
+            ))
         }
         SqlType::Uuid => {
             let mut bytes = [u8::MAX; 16];

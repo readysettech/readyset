@@ -12,7 +12,7 @@ use chrono::{
     Offset, TimeZone,
 };
 use chrono_tz::Tz;
-use cidr::IpInet;
+use cidr::{IpCidr, IpInet};
 use eui48::MacAddress;
 use prop::string::bytes_regex;
 use proptest::prelude::*;
@@ -309,6 +309,11 @@ pub fn arbitrary_ipinet() -> impl Strategy<Value = IpInet> {
         .prop_map(|(ip_addr, netmask)| IpInet::new(ip_addr.into(), netmask).unwrap());
 
     prop_oneof![ipv4, ipv6]
+}
+
+/// Strategy to generate an arbitrary [`IpCidr`].
+pub fn arbitrary_ipcidr() -> impl Strategy<Value = IpCidr> {
+    arbitrary_ipinet().prop_map(|inet| inet.network())
 }
 
 /// Strategy to generate an arbitrary string from a reasonable subset of UTF-8.

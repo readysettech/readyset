@@ -125,6 +125,7 @@ pub enum SqlType {
     ByteArray,
     MacAddr,
     Inet,
+    Cidr,
     Uuid,
     Bit(Option<u16>),
     VarBit(Option<u16>),
@@ -274,6 +275,8 @@ impl TryFromDialect<sqlparser::ast::DataType> for SqlType {
                             Ok(Self::Citext)
                         } else if name.eq_ignore_ascii_case("inet") {
                             Ok(Self::Inet)
+                        } else if name.eq_ignore_ascii_case("cidr") {
+                            Ok(Self::Cidr)
                         } else if name.eq_ignore_ascii_case("macaddr") {
                             Ok(Self::MacAddr)
                         } else if name.eq_ignore_ascii_case("serial") {
@@ -541,7 +544,11 @@ impl Arbitrary for SqlType {
             ]);
 
             if args.generate_unsupported {
-                variants.extend([Just(MacAddr).boxed(), Just(Inet).boxed()]);
+                variants.extend([
+                    Just(MacAddr).boxed(),
+                    Just(Inet).boxed(),
+                    Just(Cidr).boxed(),
+                ]);
             }
 
             if args.generate_json {
@@ -763,6 +770,7 @@ impl DialectDisplay for SqlType {
                 SqlType::ByteArray => write!(f, "BYTEA"),
                 SqlType::MacAddr => write!(f, "MACADDR"),
                 SqlType::Inet => write!(f, "INET"),
+                SqlType::Cidr => write!(f, "CIDR"),
                 SqlType::Uuid => write!(f, "UUID"),
                 SqlType::Bit(n) => {
                     write!(f, "BIT")?;

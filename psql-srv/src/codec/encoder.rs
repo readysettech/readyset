@@ -560,6 +560,9 @@ fn put_binary_value(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
         PsqlValue::Inet(ip) => {
             ip.to_sql(&Type::INET, dst)?;
         }
+        PsqlValue::Cidr(c) => {
+            c.to_sql(&Type::CIDR, dst)?;
+        }
         PsqlValue::Uuid(u) => {
             u.to_sql(&Type::UUID, dst)?;
         }
@@ -686,6 +689,8 @@ fn put_text_payload(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
         }
         PsqlValue::MacAddress(m) => write!(dst, "{}", m.to_string(MacAddressFormat::HexString))?,
         PsqlValue::Inet(ip) => write!(dst, "{ip}")?,
+        // Alternate form keeps the prefix length, which Postgres always shows.
+        PsqlValue::Cidr(cidr) => write!(dst, "{cidr:#}")?,
         PsqlValue::Uuid(u) => write!(dst, "{u}")?,
         PsqlValue::Json(v) => write!(dst, "{v}")?,
         PsqlValue::Jsonb(v) => write!(dst, "{v}")?,
@@ -781,11 +786,13 @@ fn put_record_binary(fields: &[PsqlValue], ty: &Type, dst: &mut BytesMut) -> Res
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
     use std::sync::Arc;
 
     use bit_vec::BitVec;
     use bytes::{BufMut, BytesMut};
     use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
+    use cidr::{IpCidr, IpInet};
     use eui48::MacAddress;
     use postgres::SimpleQueryRow;
     use postgres_protocol::message::backend::DataRowBody;
@@ -1551,6 +1558,28 @@ mod tests {
     }
 
     #[test]
+    fn test_encode_binary_inet() {
+        let mut buf = BytesMut::new();
+        let inet = IpInet::from_str("192.168.1.1/24").unwrap();
+        put_binary_value(&PsqlValue::Inet(inet), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(8);
+        inet.to_sql(&Type::INET, &mut exp).unwrap(); // add value
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_binary_cidr() {
+        let mut buf = BytesMut::new();
+        let cidr = IpCidr::from_str("192.168.1.0/24").unwrap();
+        put_binary_value(&PsqlValue::Cidr(cidr), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(8);
+        cidr.to_sql(&Type::CIDR, &mut exp).unwrap(); // add value
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
     fn test_encode_binary_uuid() {
         let mut buf = BytesMut::new();
         let uuid = Uuid::from_bytes([
@@ -1747,6 +1776,28 @@ mod tests {
         let mut exp = BytesMut::new();
         exp.put_i32(17); // length (placeholder)
         exp.extend_from_slice(b"12:34:56:ab:cd:ef");
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_text_cidr() {
+        let mut buf = BytesMut::new();
+        let cidr = IpCidr::from_str("192.168.1.0/24").unwrap();
+        put_text_value(&PsqlValue::Cidr(cidr), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(14); // length (placeholder)
+        exp.extend_from_slice(b"192.168.1.0/24");
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_text_cidr_host() {
+        let mut buf = BytesMut::new();
+        let cidr = IpCidr::from_str("192.168.1.5").unwrap();
+        put_text_value(&PsqlValue::Cidr(cidr), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(14); // length (placeholder)
+        exp.extend_from_slice(b"192.168.1.5/32");
         assert_eq!(buf, exp);
     }
 

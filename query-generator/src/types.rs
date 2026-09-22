@@ -60,7 +60,8 @@ pub fn arbitrary_postgres_min_max_arg_type() -> impl Strategy<Value = SqlType> {
         Just(Timestamp).boxed(),
         Just(TimestampTz).boxed(),
         // TODO: enum...
-        Just(Inet)
+        Just(Inet),
+        Just(Cidr)
     ]
     // TODO: arrays
     // .prop_recursive(1, 1, 1, |elem| elem.prop_map(|elem| Array(Box::new(elem))))

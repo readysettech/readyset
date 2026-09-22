@@ -9,6 +9,7 @@ edition = "2021"
 anyhow = { workspace = true }
 bit-vec = { workspace = true, features = ["serde"] }
 chrono = { workspace = true }
+cidr = { workspace = true }
 eui48 = { workspace = true }
 growable-bloom-filter = { workspace = true }
 rand = { workspace = true }

@@ -414,8 +414,11 @@ fn type_identifier_part2(i: LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], SqlType> 
             |t| SqlType::VarBinary(t.1),
         ),
         map(tag_no_case("bytea"), |_| SqlType::ByteArray),
-        map(tag_no_case("macaddr"), |_| SqlType::MacAddr),
-        map(tag_no_case("inet"), |_| SqlType::Inet),
+        alt((
+            map(tag_no_case("macaddr"), |_| SqlType::MacAddr),
+            map(tag_no_case("inet"), |_| SqlType::Inet),
+            map(tag_no_case("cidr"), |_| SqlType::Cidr),
+        )),
         map(tag_no_case("uuid"), |_| SqlType::Uuid),
         map(tag_no_case("jsonb"), |_| SqlType::Jsonb),
         map(tag_no_case("json"), |_| SqlType::Json),
@@ -805,6 +808,12 @@ mod tests {
         fn inet_type() {
             let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"inet");
             assert_eq!(res, SqlType::Inet);
+        }
+
+        #[test]
+        fn cidr_type() {
+            let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"cidr");
+            assert_eq!(res, SqlType::Cidr);
         }
 
         #[test]

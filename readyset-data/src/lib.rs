@@ -13,7 +13,7 @@ use ::serde::{Deserialize, Serialize};
 use bit_vec::BitVec;
 use bytes::BytesMut;
 use chrono::{self, DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
-use cidr::IpInet;
+use cidr::{IpCidr, IpInet};
 use enum_kinds::EnumKind;
 use eui48::{MacAddress, MacAddressFormat};
 use itertools::Itertools;
@@ -2059,6 +2059,15 @@ impl ToSql for DfValue {
                     ))
                 })
                 .and_then(|ip| ip.to_sql(ty, out)),
+            (Self::Text(_) | Self::TinyText(_), &Type::CIDR) => <&str>::try_from(self)
+                .unwrap()
+                .parse::<IpCidr>()
+                .map_err(|e| {
+                    Box::<dyn Error + Send + Sync>::from(format!(
+                        "Could not convert Text into a CIDR: {e}"
+                    ))
+                })
+                .and_then(|cidr| cidr.to_sql(ty, out)),
             (Self::Text(_) | Self::TinyText(_), &Type::UUID) => {
                 Uuid::parse_str(<&str>::try_from(self).unwrap())
                     .map_err(|e| {
@@ -2154,6 +2163,7 @@ impl<'a> FromSql<'a> for DfValue {
                     MacAddress::from_sql(ty, raw)?.to_string(MacAddressFormat::HexString),
                 )),
                 Type::INET => Ok(DfValue::from(IpInet::from_sql(ty, raw)?.to_string())),
+                Type::CIDR => Ok(DfValue::from(format!("{:#}", IpCidr::from_sql(ty, raw)?))),
                 Type::UUID => Ok(DfValue::from(Uuid::from_sql(ty, raw)?.to_string())),
                 Type::JSON | Type::JSONB => {
                     let raw = match (ty, raw) {

@@ -654,6 +654,7 @@ impl TimestampTz {
             | DfType::Jsonb
             | DfType::MacAddr
             | DfType::Inet
+            | DfType::Cidr
             | DfType::Uuid
             | DfType::Bit(_)
             | DfType::VarBit(_)

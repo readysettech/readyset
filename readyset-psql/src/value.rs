@@ -1,6 +1,6 @@
 use std::convert::{TryFrom, TryInto};
 
-use cidr::IpInet;
+use cidr::{IpCidr, IpInet};
 use eui48::MacAddress;
 use postgres_types::Kind;
 use ps::PsqlValue;
@@ -100,6 +100,12 @@ impl TryFrom<TypedDfValue<'_>> for PsqlValue {
                 <&str>::try_from(&dt)
                     .unwrap()
                     .parse::<IpInet>()
+                    .map_err(|e| ps::Error::ParseError(e.to_string()))?,
+            )),
+            (&Type::CIDR, dt @ (DfValue::Text(_) | DfValue::TinyText(_))) => Ok(PsqlValue::Cidr(
+                <&str>::try_from(&dt)
+                    .unwrap()
+                    .parse::<IpCidr>()
                     .map_err(|e| ps::Error::ParseError(e.to_string()))?,
             )),
             (&Type::UUID, DfValue::Text(u)) => Ok(PsqlValue::Uuid(

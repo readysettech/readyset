@@ -6,8 +6,8 @@ use eui48::{MacAddress, MacAddressFormat};
 use itertools::Itertools;
 use proptest::prelude::Strategy;
 use readyset_util::arbitrary::{
-    arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal_string_with_digits, arbitrary_ipinet,
-    arbitrary_json, arbitrary_naive_time, arbitrary_positive_naive_date,
+    arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal_string_with_digits, arbitrary_ipcidr,
+    arbitrary_ipinet, arbitrary_json, arbitrary_naive_time, arbitrary_positive_naive_date,
     arbitrary_timestamp_naive_date_time, arbitrary_uuid,
 };
 use readyset_util::fmt::fmt_with;
@@ -377,6 +377,9 @@ impl Literal {
                 .boxed(),
             SqlType::Inet => arbitrary_ipinet()
                 .prop_map(|v| Self::String(v.to_string()))
+                .boxed(),
+            SqlType::Cidr => arbitrary_ipcidr()
+                .prop_map(|v| Self::String(format!("{v:#}")))
                 .boxed(),
             SqlType::MacAddr => any::<[u8; 6]>()
                 .prop_map(|bytes| -> Literal {

@@ -22,7 +22,7 @@ mod types {
     use std::panic::{AssertUnwindSafe, RefUnwindSafe};
     use std::time::Duration;
 
-    use cidr::IpInet;
+    use cidr::{IpCidr, IpInet};
     use eui48::MacAddress;
     use proptest::collection::vec;
     use proptest::prelude::*;
@@ -33,7 +33,7 @@ mod types {
     use readyset_data::DfValue;
     use readyset_decimal::Decimal;
     use readyset_util::arbitrary::{
-        arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal, arbitrary_ipinet, arbitrary_json,
+        arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal, arbitrary_ipcidr, arbitrary_ipinet, arbitrary_json,
         arbitrary_json_without_f64, arbitrary_mac_address, arbitrary_naive_date,
         arbitrary_naive_time, arbitrary_systemtime, arbitrary_uuid,
     };
@@ -96,7 +96,10 @@ mod types {
 
         // - Can't compare JSON for equality in postgres
         // - bpchar equality and string equality don't match (bpchar '' == ' ')
-        if type_name != "json" && type_name != "bpchar" {
+        // - cidr has no equality operator of its own; `x = $1` resolves to
+        //   inet = inet, so Postgres infers an inet parameter that an IpCidr
+        //   cannot bind to
+        if type_name != "json" && type_name != "bpchar" && type_name != "cidr" {
             // check parameter passing and value returning when going through fallback
 
             for v in vals.iter() {
@@ -170,6 +173,7 @@ mod types {
         decimal("decimal", Decimal, arbitrary_decimal(1000, 255));
         timestamp_systemtime("timestamp", std::time::SystemTime, arbitrary_systemtime());
         inet_ipaddr("inet", IpInet, arbitrary_ipinet());
+        cidr_ipcidr("cidr", IpCidr, arbitrary_ipcidr());
         macaddr_string("macaddr", MacAddress, arbitrary_mac_address());
         uuid_string("uuid", Uuid, arbitrary_uuid());
         date_naivedate("date", chrono::NaiveDate, arbitrary_naive_date());

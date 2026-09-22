@@ -190,6 +190,9 @@ pub enum DfType {
     /// [PostgreSQL `inet`](https://www.postgresql.org/docs/current/datatype-net-types.html).
     Inet,
 
+    /// [PostgreSQL `cidr`](https://www.postgresql.org/docs/current/datatype-net-types.html).
+    Cidr,
+
     /// [PostgreSQL `uuid`](https://www.postgresql.org/docs/current/datatype-uuid.html).
     Uuid,
 
@@ -399,6 +402,7 @@ impl DfType {
             Uuid => Self::Uuid,
             MacAddr => unsupported!("Unsupported type: MacAddr"),
             Inet => unsupported!("Unsupported type: Inet"),
+            Cidr => unsupported!("Unsupported type: Cidr"),
             Citext => Self::Text(Collation::Utf8Ci),
             // we don't support the built-in geometric types for postgres, only the postgis versions.
             Point => match dialect.engine() {
@@ -471,7 +475,7 @@ impl DfType {
             | DfType::Time { .. }
             | DfType::Timestamp { .. }
             | DfType::TimestampTz { .. } => PgTypeCategory::DateTime,
-            DfType::MacAddr | DfType::Inet => PgTypeCategory::NetworkAddress,
+            DfType::MacAddr | DfType::Inet | DfType::Cidr => PgTypeCategory::NetworkAddress,
             DfType::Tsvector => PgTypeCategory::UserDefined,
             DfType::Uuid
             | DfType::Enum { .. }
@@ -804,6 +808,7 @@ impl Arbitrary for DfType {
             any::<u16>().prop_map(|subsecond_digits| DfType::TimestampTz { subsecond_digits }),
             Just(DfType::MacAddr),
             Just(DfType::Inet),
+            Just(DfType::Cidr),
             Just(DfType::Uuid),
             (
                 any_with::<EnumVariants>((".{0, 32}", (0..=20).into())),
@@ -879,6 +884,7 @@ impl TryFrom<&PGType> for DfType {
             &PGType::BYTEA => Ok(Self::Blob),
             &PGType::MACADDR => Ok(Self::MacAddr),
             &PGType::INET => Ok(Self::Inet),
+            &PGType::CIDR => Ok(Self::Cidr),
             &PGType::UUID => Ok(Self::Uuid),
             &PGType::BIT => Ok(Self::DEFAULT_BIT),
             &PGType::VARBIT => Ok(Self::VarBit(None)),
@@ -931,6 +937,7 @@ impl fmt::Display for DfType {
             | Self::VarBit(None)
             | Self::Date
             | Self::Inet
+            | Self::Cidr
             | Self::MacAddr
             | Self::Uuid
             | Self::Json

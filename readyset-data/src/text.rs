@@ -6,7 +6,7 @@ use std::num::{IntErrorKind, ParseIntError};
 use std::str;
 use std::str::FromStr;
 
-use cidr::IpInet;
+use cidr::{IpCidr, IpInet};
 use lazy_static::lazy_static;
 use readyset_decimal::Decimal;
 use readyset_errors::{ReadySetError, ReadySetResult};
@@ -717,6 +717,13 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 Ok(ip.into())
             }
 
+            DfType::Cidr => {
+                let cidr = str
+                    .parse::<IpCidr>()
+                    .map_err(|e| Self::coerce_err(to_ty, e))?;
+                Ok(format!("{cidr:#}").into())
+            }
+
             DfType::Uuid => {
                 // Since UUIDs can be represented in many ways, if we want to store them as a
                 // string, we have to at least normalize to the same representation.
@@ -1177,6 +1184,17 @@ mod tests {
                 .unwrap(),
             DfValue::from("feed::beef/32")
         );
+        // TEXT to CIDR
+        assert_eq!(
+            DfValue::from("feed:0:0::/32")
+                .coerce_to(&DfType::Cidr, &DfType::Unknown)
+                .unwrap(),
+            DfValue::from("feed::/32")
+        );
+        // TEXT to CIDR (Rejecting host bits)
+        DfValue::from("feed:0:0::beef/32")
+            .coerce_to(&DfType::Cidr, &DfType::Unknown)
+            .unwrap_err();
         // TEXT to ENUM
         let enum_type = DfType::from_enum_variants(
             ["red", "yellow", "green"].into_iter().map(Into::into),

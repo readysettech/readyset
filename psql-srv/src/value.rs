@@ -2,7 +2,7 @@ use std::error::Error;
 
 use bit_vec::BitVec;
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
-use cidr::IpInet;
+use cidr::{IpCidr, IpInet};
 use eui48::MacAddress;
 use postgres_types::{FromSql, Kind, Type};
 use readyset_data::{Array, PassThroughFormat, Text, TinyText};
@@ -34,6 +34,7 @@ pub enum PsqlValue {
     ByteArray(Vec<u8>),
     MacAddress(MacAddress),
     Inet(IpInet),
+    Cidr(IpCidr),
     Uuid(Uuid),
     Json(serde_json::Value),
     Jsonb(serde_json::Value),
@@ -89,6 +90,7 @@ impl<'a> FromSql<'a> for PsqlValue {
                 Type::BYTEA => <Vec<u8>>::from_sql(ty, raw).map(PsqlValue::ByteArray),
                 Type::MACADDR => MacAddress::from_sql(ty, raw).map(PsqlValue::MacAddress),
                 Type::INET => IpInet::from_sql(ty, raw).map(PsqlValue::Inet),
+                Type::CIDR => IpCidr::from_sql(ty, raw).map(PsqlValue::Cidr),
                 Type::UUID => Uuid::from_sql(ty, raw).map(PsqlValue::Uuid),
                 Type::JSON => serde_json::Value::from_sql(ty, raw).map(PsqlValue::Json),
                 Type::JSONB => serde_json::Value::from_sql(ty, raw).map(PsqlValue::Jsonb),

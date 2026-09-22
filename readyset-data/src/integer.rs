@@ -208,6 +208,7 @@ where
         DfType::Unknown
         | DfType::MacAddr
         | DfType::Inet
+        | DfType::Cidr
         | DfType::Uuid
         | DfType::VarBit(_)
         | DfType::Array(_)

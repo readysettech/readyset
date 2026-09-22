@@ -712,6 +712,7 @@ impl wal::TupleData {
                                 | PGType::BPCHAR
                                 | PGType::MACADDR
                                 | PGType::INET
+                                | PGType::CIDR
                                 | PGType::UUID
                                 | PGType::NAME => DfValue::from(str.as_ref()),
                                 // JSONB might rearrange the json value (like the order of the keys

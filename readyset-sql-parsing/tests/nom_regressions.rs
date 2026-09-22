@@ -1737,6 +1737,7 @@ fn types() {
     check_parse_type_postgres!("\"char\"");
     check_parse_type_both!("macaddr");
     check_parse_type_both!("inet");
+    check_parse_type_both!("cidr");
     check_parse_type_both!("uuid");
     check_parse_type_both!("jsonb");
     check_parse_type_both!("geometry(point)");

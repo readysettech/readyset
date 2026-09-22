@@ -5,7 +5,7 @@ use std::str::{self, FromStr as _};
 use bit_vec::BitVec;
 use bytes::{Buf, Bytes, BytesMut};
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
-use cidr::IpInet;
+use cidr::{IpCidr, IpInet};
 use eui48::MacAddress;
 use postgres_types::{FromSql, Kind, Type};
 use readyset_data::{
@@ -432,6 +432,7 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<PsqlValue, Error> {
             Type::BYTEA => Ok(PsqlValue::ByteArray(<Vec<u8>>::from_sql(t, buf)?)),
             Type::MACADDR => Ok(PsqlValue::MacAddress(MacAddress::from_sql(t, buf)?)),
             Type::INET => Ok(PsqlValue::Inet(IpInet::from_sql(t, buf)?)),
+            Type::CIDR => Ok(PsqlValue::Cidr(IpCidr::from_sql(t, buf)?)),
             Type::UUID => Ok(PsqlValue::Uuid(Uuid::from_sql(t, buf)?)),
             Type::JSON => Ok(PsqlValue::Json(serde_json::Value::from_sql(t, buf)?)),
             Type::JSONB => Ok(PsqlValue::Jsonb(serde_json::Value::from_sql(t, buf)?)),
@@ -569,6 +570,10 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<PsqlValue, Error> {
             .parse::<IpInet>()
             .map_err(DecodeError::InvalidTextIpAddressValue)
             .map(PsqlValue::Inet),
+        Type::CIDR => text_str
+            .parse::<IpCidr>()
+            .map_err(DecodeError::InvalidTextIpAddressValue)
+            .map(PsqlValue::Cidr),
         Type::UUID => Uuid::parse_str(text_str)
             .map_err(DecodeError::InvalidTextUuidValue)
             .map(PsqlValue::Uuid),
@@ -1323,6 +1328,30 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_binary_inet() {
+        let inet = IpInet::from_str("192.168.1.1/24").unwrap();
+        let mut buf = BytesMut::new();
+        buf.put_i32(8);
+        inet.to_sql(&Type::INET, &mut buf).unwrap(); // add value
+        assert_eq!(
+            get_binary_value(&mut buf.freeze(), &Type::INET).unwrap(),
+            PsqlValue::Inet(inet)
+        );
+    }
+
+    #[test]
+    fn test_decode_binary_cidr() {
+        let cidr = IpCidr::from_str("192.168.1.0/24").unwrap();
+        let mut buf = BytesMut::new();
+        buf.put_i32(8);
+        cidr.to_sql(&Type::CIDR, &mut buf).unwrap(); // add value
+        assert_eq!(
+            get_binary_value(&mut buf.freeze(), &Type::CIDR).unwrap(),
+            PsqlValue::Cidr(cidr)
+        );
+    }
+
+    #[test]
     fn test_decode_binary_uuid() {
         let uuid = Uuid::from_bytes([
             85, 14, 132, 0, 226, 155, 65, 212, 167, 22, 68, 102, 85, 68, 0, 0,
@@ -1654,6 +1683,28 @@ mod tests {
         assert_eq!(
             get_text_value(&mut buf.freeze(), &Type::MACADDR).unwrap(),
             PsqlValue::MacAddress(MacAddress::new([18, 52, 86, 171, 205, 239]))
+        );
+    }
+
+    #[test]
+    fn test_decode_text_inet() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(14);
+        buf.extend_from_slice(b"192.168.1.1/24");
+        assert_eq!(
+            get_text_value(&mut buf.freeze(), &Type::INET).unwrap(),
+            PsqlValue::Inet(IpInet::from_str("192.168.1.1/24").unwrap())
+        );
+    }
+
+    #[test]
+    fn test_decode_text_cidr() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(14);
+        buf.extend_from_slice(b"192.168.1.0/24");
+        assert_eq!(
+            get_text_value(&mut buf.freeze(), &Type::CIDR).unwrap(),
+            PsqlValue::Cidr(IpCidr::from_str("192.168.1.0/24").unwrap())
         );
     }
 
