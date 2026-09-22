@@ -629,12 +629,13 @@ pub fn walk_function_expr<'ast, V: Visitor<'ast>>(
         | FunctionExpr::Extract { expr, .. }
         | FunctionExpr::Lower { expr, .. }
         | FunctionExpr::Upper { expr, .. } => visitor.visit_expr(expr.as_ref()),
+        FunctionExpr::CurrentTimestamp(Some(precision)) => visitor.visit_expr(precision.as_ref()),
         FunctionExpr::CountStar
         | FunctionExpr::RowNumber
         | FunctionExpr::Rank
         | FunctionExpr::DenseRank
         | FunctionExpr::CurrentDate
-        | FunctionExpr::CurrentTimestamp(_)
+        | FunctionExpr::CurrentTimestamp(None)
         | FunctionExpr::CurrentTime
         | FunctionExpr::LocalTimestamp
         | FunctionExpr::LocalTime

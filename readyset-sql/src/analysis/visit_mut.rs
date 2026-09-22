@@ -648,12 +648,13 @@ pub fn walk_function_expr<'ast, V: VisitorMut<'ast>>(
         | FunctionExpr::Sum { expr, .. }
         | FunctionExpr::Max(expr)
         | FunctionExpr::Min(expr) => visitor.visit_expr(expr.as_mut()),
+        FunctionExpr::CurrentTimestamp(Some(precision)) => visitor.visit_expr(precision.as_mut()),
         FunctionExpr::CountStar
         | FunctionExpr::RowNumber
         | FunctionExpr::Rank
         | FunctionExpr::DenseRank
         | FunctionExpr::CurrentDate
-        | FunctionExpr::CurrentTimestamp(_)
+        | FunctionExpr::CurrentTimestamp(None)
         | FunctionExpr::CurrentTime
         | FunctionExpr::LocalTimestamp
         | FunctionExpr::LocalTime

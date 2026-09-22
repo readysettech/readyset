@@ -17,7 +17,7 @@ use readyset_client_metrics::{
     EventType, QueryDestination, QueryExecutionEvent, QueryLogMode, ReadysetExecutionEvent,
     SqlQueryType,
 };
-use readyset_errors::{ReadySetError, internal_err, unsupported};
+use readyset_errors::{ReadySetError, internal_err, invalid_query_err, unsupported};
 use readyset_sql::ast::{
     CacheType, DeallocateStatement, DiscardObject, ReadysetHintDirective, SetStatement,
     ShowStatement, SqlQuery, StatementIdentifier, TrxCachePolicy, UseStatement,
@@ -479,8 +479,11 @@ where
                 return Ok(QueryResult::ReadysetSchema(result));
             }
             if let Some((shallow, params)) = connectors.rewrite_shallow_query(Ok(shallow)) {
-                if let Some((query_id, _)) =
-                    Self::should_query_shallow(connectors, settings, state, &shallow, hint).await
+                // Nothing binds a text query's placeholders, so no cache can serve it.
+                if !params.expects_user_params()
+                    && let Some((query_id, _)) =
+                        Self::should_query_shallow(connectors, settings, state, &shallow, hint)
+                            .await
                     && !Self::acl_declines_serve(connectors, settings, state, query_id)
                 {
                     let result =
@@ -716,6 +719,16 @@ where
                     }
                     Err(e) => return Err(e.into()),
                 };
+                // Nothing binds a text query's placeholders, so no cache can serve it.
+                if params.expects_user_params() {
+                    if !connectors.has_fallback() {
+                        return Err(
+                            invalid_query_err!("Placeholders need a prepared statement").into()
+                        );
+                    }
+                    return Self::query_fallback(connectors.upstream.as_mut(), query, event, None)
+                        .await;
+                }
 
                 let view_request =
                     ViewCreateRequest::new(stmt, connectors.noria.schema_search_path().to_owned());

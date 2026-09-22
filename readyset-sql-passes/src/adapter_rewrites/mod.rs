@@ -88,6 +88,16 @@ pub struct QueryParameters {
     /// What this rewrite found at each canonical position, carried so the Readyset rewrite still
     /// knows which of the placeholders it walks were literals this one lifted.
     slots: LiteralSlots,
+    /// Whether the query arrived with placeholders, which only a bind can fill.
+    has_user_placeholders: bool,
+}
+
+impl QueryParameters {
+    /// Whether building keys needs parameters the client binds. A text-protocol query binds none,
+    /// so no cache can serve one for which this holds.
+    pub fn expects_user_params(&self) -> bool {
+        self.has_user_placeholders
+    }
 }
 
 /// Tracks an IN/NOT IN clause that becomes a single array parameter for shallow caching.
@@ -122,6 +132,8 @@ pub struct ShallowQueryParameters {
     pub(crate) auto_parameters: Vec<(usize, Literal)>,
     /// IN/NOT IN clauses that become array parameters
     pub(crate) in_array_params: Vec<InArrayParam>,
+    /// Whether the query arrived with placeholders, which only a bind can fill.
+    has_user_placeholders: bool,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -251,12 +263,13 @@ fn rewrite_equivalent_parameters(
         canonical_positions=run.slots.positions(),
     );
 
-    number_placeholders(query)?;
+    let positions = number_placeholders(query)?;
     trace!(parent: &span, pass="number_placeholders", query = %query.display(flags.dialect));
 
     Ok(QueryParameters {
         dialect: flags.dialect,
         reordered_placeholders,
+        has_user_placeholders: positions > run.params.len(),
         auto_parameters: run.params,
         slots: run.slots,
     })
@@ -463,6 +476,7 @@ pub fn rewrite_for_readyset(
         reordered_placeholders,
         auto_parameters,
         slots,
+        has_user_placeholders: _,
     } = prev;
     assert_eq!(dialect, flags.dialect);
 
@@ -731,13 +745,21 @@ impl ShallowQueryParameters {
         reordered_placeholders: Option<Vec<usize>>,
         auto_parameters: Vec<(usize, Literal)>,
         in_array_params: Vec<InArrayParam>,
+        has_user_placeholders: bool,
     ) -> Self {
         Self {
             dialect,
             reordered_placeholders,
             auto_parameters,
             in_array_params,
+            has_user_placeholders,
         }
+    }
+
+    /// Whether building keys needs parameters the client binds. A text-protocol query binds none,
+    /// so no cache can serve one for which this holds.
+    pub fn expects_user_params(&self) -> bool {
+        self.has_user_placeholders
     }
 
     /// Merge auto_parameters with user-provided params, returning the full parameter list.
@@ -1429,12 +1451,13 @@ impl<'ast> VisitorMut<'ast> for NumberPlaceholdersVisitor {
     }
 }
 
-pub fn number_placeholders(query: &mut SelectStatement) -> ReadySetResult<()> {
+/// Renumbers every placeholder in visitation order and returns how many there are.
+pub fn number_placeholders(query: &mut SelectStatement) -> ReadySetResult<usize> {
     let mut visitor = NumberPlaceholdersVisitor {
         next_param_number: 1,
     };
     visitor.visit_select_statement(query)?;
-    Ok(())
+    Ok(visitor.next_param_number as usize - 1)
 }
 
 /// Splice the given list of extracted parameters, which should be a tuple of (placeholder position,
@@ -1594,6 +1617,72 @@ mod tests {
 
     fn parse_select_statement_postgres(q: &str) -> SelectStatement {
         parse_select_statement(q, Dialect::PostgreSQL)
+    }
+
+    mod user_placeholders {
+        use super::*;
+
+        fn expects_user_params(dialect: Dialect, sql: &str) -> bool {
+            let mut query = parse_select_statement(sql, dialect);
+            rewrite_equivalent_parameters(&mut query, AdapterRewriteParams::new(dialect))
+                .unwrap()
+                .expects_user_params()
+        }
+
+        #[test]
+        fn placeholders_of_any_spelling_count() {
+            for (dialect, sql) in [
+                (Dialect::MySQL, "SELECT a FROM t WHERE b = ?"),
+                (
+                    Dialect::MySQL,
+                    "SELECT a FROM t WHERE b = 1 AND c IN (?, ?, ?)",
+                ),
+                (Dialect::MySQL, "SELECT a FROM t WHERE c IN (1, ?)"),
+                (Dialect::MySQL, "SELECT CURRENT_TIMESTAMP(?) FROM t"),
+                (Dialect::MySQL, "SELECT a FROM t LIMIT ?"),
+                (Dialect::PostgreSQL, "SELECT a FROM t WHERE b = $1"),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT a FROM t WHERE b = 1 AND c = $2 OR d = $1",
+                ),
+            ] {
+                assert!(expects_user_params(dialect, sql), "{sql}");
+            }
+        }
+
+        #[test]
+        fn question_marks_in_operators_and_literals_do_not_count() {
+            for (dialect, sql) in [
+                (Dialect::PostgreSQL, "SELECT a FROM t WHERE j ? 'k'"),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT a FROM t WHERE j ?| ARRAY['k', 'l']",
+                ),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT a FROM t WHERE j ?& ARRAY['k', 'l']",
+                ),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT a FROM t WHERE j ? 'k' AND b = 1",
+                ),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT a FROM t WHERE s = '?' AND b IN ('?', '$1')",
+                ),
+                (
+                    Dialect::MySQL,
+                    "SELECT a FROM t WHERE s = 'what?' AND b = 1",
+                ),
+                (Dialect::MySQL, "SELECT a FROM t WHERE s = '$1'"),
+                (
+                    Dialect::MySQL,
+                    "SELECT a FROM t WHERE b = 1 AND c IN (1, 2, 3)",
+                ),
+            ] {
+                assert!(!expects_user_params(dialect, sql), "{sql}");
+            }
+        }
     }
 
     mod collapse_where {

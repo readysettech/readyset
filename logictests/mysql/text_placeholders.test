@@ -1,0 +1,16 @@
+# Without an upstream, a text query's `?` is an error. The trailing query checks the connection.
+
+statement ok
+CREATE TABLE t (a INT, c INT, d INT);
+
+statement ok
+INSERT INTO t (a, c, d) VALUES (1, 1, 5), (2, 2, 6);
+
+onlyif readyset
+statement error: Placeholders need a prepared statement
+SELECT a FROM t WHERE d = 5 AND c IN (?, ?, ?)
+
+query I nosort
+SELECT a FROM t WHERE d = 6
+----
+2

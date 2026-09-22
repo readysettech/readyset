@@ -67,13 +67,15 @@ pub fn rewrite_shallow(
         placeholders = ?reordered_placeholders,
     );
 
-    let (auto_parameters, in_array_params) = fully_parameterize_query(query)?;
+    let (auto_parameters, in_array_params, has_user_placeholders) =
+        fully_parameterize_query(query)?;
     trace!(
         parent: &span,
         pass = "fully_parameterize_query",
         query = %query.display(flags.dialect),
         auto_parameters = ?auto_parameters,
         in_array_params = ?in_array_params,
+        has_user_placeholders,
     );
 
     number_placeholders(query)?;
@@ -88,6 +90,7 @@ pub fn rewrite_shallow(
         reordered_placeholders,
         auto_parameters,
         in_array_params,
+        has_user_placeholders,
     ))
 }
 
@@ -210,10 +213,14 @@ fn reorder_numbered_placeholders(query: &Query) -> Option<Vec<usize>> {
 #[allow(clippy::type_complexity)]
 fn fully_parameterize_query(
     query: &mut Query,
-) -> ReadySetResult<(Vec<(usize, Literal)>, Vec<InArrayParam>)> {
+) -> ReadySetResult<(Vec<(usize, Literal)>, Vec<InArrayParam>, bool)> {
     let mut visitor = FullyParameterizeVisitor::default();
     match VisitMut::visit(query, &mut visitor) {
-        ControlFlow::Continue(()) => Ok((visitor.out, visitor.in_array_params)),
+        ControlFlow::Continue(()) => Ok((
+            visitor.out,
+            visitor.in_array_params,
+            visitor.has_user_placeholders,
+        )),
         ControlFlow::Break(e) => Err(e),
     }
 }
@@ -265,6 +272,8 @@ struct FullyParameterizeVisitor {
     /// When post_visit_expr sees a placeholder, if this is > 0, we skip incrementing
     /// param_idx since we already accounted for it in pre_visit_expr.
     pending_auto_placeholders: usize,
+    /// Whether the query arrived with placeholders, which only a bind can fill.
+    has_user_placeholders: bool,
 }
 
 impl VisitorMut for FullyParameterizeVisitor {
@@ -290,6 +299,7 @@ impl VisitorMut for FullyParameterizeVisitor {
                     if let Expr::Value(ValueWithSpan { value, .. }) = e {
                         if matches!(value, Value::Placeholder(_)) {
                             // User-provided placeholder — don't extract as auto_param
+                            self.has_user_placeholders = true;
                             continue;
                         }
                         match sqlparser_value_to_literal(value) {
@@ -353,6 +363,7 @@ impl VisitorMut for FullyParameterizeVisitor {
             } else {
                 // User-provided placeholder - count it for correct indexing
                 self.param_idx += 1;
+                self.has_user_placeholders = true;
             }
             return ControlFlow::Continue(());
         }
@@ -1436,6 +1447,72 @@ mod tests {
         }
     }
 
+    mod user_placeholders {
+        use super::*;
+
+        fn expects_user_params(dialect: Dialect, sql: &str) -> bool {
+            let mut query = parse_query(dialect, sql);
+            rewrite_shallow(&mut query, AdapterRewriteParams::new(dialect))
+                .unwrap()
+                .expects_user_params()
+        }
+
+        #[test]
+        fn placeholders_of_any_spelling_count() {
+            for (dialect, sql) in [
+                (Dialect::MySQL, "SELECT a FROM t WHERE b = ?"),
+                (
+                    Dialect::MySQL,
+                    "SELECT a FROM t WHERE b = 1 AND c IN (?, ?, ?)",
+                ),
+                (Dialect::MySQL, "SELECT a FROM t WHERE c IN (1, ?)"),
+                (Dialect::MySQL, "SELECT CURRENT_TIMESTAMP(?) FROM t"),
+                (Dialect::MySQL, "SELECT a FROM t LIMIT ?"),
+                (Dialect::PostgreSQL, "SELECT a FROM t WHERE b = $1"),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT a FROM t WHERE b = 1 AND c = $2 OR d = $1",
+                ),
+            ] {
+                assert!(expects_user_params(dialect, sql), "{sql}");
+            }
+        }
+
+        #[test]
+        fn question_marks_in_operators_and_literals_do_not_count() {
+            for (dialect, sql) in [
+                (Dialect::PostgreSQL, "SELECT a FROM t WHERE j ? 'k'"),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT a FROM t WHERE j ?| ARRAY['k', 'l']",
+                ),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT a FROM t WHERE j ?& ARRAY['k', 'l']",
+                ),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT a FROM t WHERE j ? 'k' AND b = 1",
+                ),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT a FROM t WHERE s = '?' AND b IN ('?', '$1')",
+                ),
+                (
+                    Dialect::MySQL,
+                    "SELECT a FROM t WHERE s = 'what?' AND b = 1",
+                ),
+                (Dialect::MySQL, "SELECT a FROM t WHERE s = '$1'"),
+                (
+                    Dialect::MySQL,
+                    "SELECT a FROM t WHERE b = 1 AND c IN (1, 2, 3)",
+                ),
+            ] {
+                assert!(!expects_user_params(dialect, sql), "{sql}");
+            }
+        }
+    }
+
     mod key_recollation {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
@@ -1494,6 +1571,7 @@ mod tests {
                     None,
                     vec![(0, Literal::String(s.into()))],
                     vec![],
+                    false,
                 )
                 .make_keys(&[])
                 .unwrap()
