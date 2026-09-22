@@ -1649,7 +1649,8 @@ where
         (("t"."rownum" = "GNL"."status") AND ("t"."rs_string" = "GNL"."sn")) LEFT OUTER JOIN
         (SELECT DISTINCT 1 AS "present_", "s"."status" AS "status" FROM "s" WHERE ("s"."sn" IS NOT NULL)) AS "EP_3VL" ON
         ("t"."rownum" = "EP_3VL"."status")
-        WHERE (("GNL"."sn" IS NULL) AND (("t"."rs_string" IS NOT NULL) OR ("EP_3VL"."present_" IS NULL)))"#;
+        WHERE (("GNL"."sn" IS NULL)
+            AND CASE WHEN ("t"."rs_string" IS NOT NULL) THEN TRUE ELSE ("EP_3VL"."present_" IS NULL) END)"#;
     test_it("test54", original_text, expected_text);
 }
 
@@ -1710,8 +1711,8 @@ where
         WHERE ("NP_3VL"."sn" IS NULL)) AS "NP_3VL" ON ("t"."rownum" = "NP_3VL"."status") LEFT OUTER JOIN
         (SELECT DISTINCT 1 AS "present_", "s"."status" AS "status" FROM "s") AS "EP_3VL"
         ON ("t"."rownum" = "EP_3VL"."status")
-        WHERE (("GNL"."sn" IS NULL) AND ((("t"."rs_string" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL))
-        OR ("EP_3VL"."present_" IS NULL)))"#;
+        WHERE (("GNL"."sn" IS NULL)
+            AND CASE WHEN (("t"."rs_string" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL)) THEN TRUE ELSE ("EP_3VL"."present_" IS NULL) END)"#;
     let rewritten_stmt = rewrite_statement(original_text, schema_guard).expect("test56 rewrite ok");
     let expected_stmt =
         parse_select_with_config(PARSING_CONFIG, Dialect::PostgreSQL, expected_text)
@@ -3317,7 +3318,8 @@ fn test111() {
         (SELECT DISTINCT 1 AS "present_", "t2"."t" AS "t" FROM "test2" AS "t2") AS "EP_3VL" ON ("EP_3VL"."t" = "t1"."t")
         LEFT OUTER JOIN (SELECT DISTINCT "t2"."i" AS "i", "t2"."t" AS "t" FROM "test2" AS "t2") AS "GNL1"
         ON (("GNL1"."t" = "t1"."t") AND ("t1"."i" = "GNL1"."i"))
-        WHERE (("GNL"."i" IS NULL) AND ((("t1"."i" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL)) OR ("EP_3VL"."present_" IS NULL)))"#;
+        WHERE (("GNL"."i" IS NULL)
+            AND CASE WHEN (("t1"."i" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL)) THEN TRUE ELSE ("EP_3VL"."present_" IS NULL) END)"#;
     test_it("test111", original_text, expected_text);
 }
 
@@ -3813,7 +3815,8 @@ WHERE t1.i NOT IN (SELECT t2.i FROM test2 t2 WHERE t2.t = t1.t);"#;
         (SELECT DISTINCT 1 AS "present_", "t2"."t" AS "t" FROM "test2" AS "t2") AS "EP_3VL" ON ("EP_3VL"."t" = "t1"."t")
         LEFT OUTER JOIN (SELECT DISTINCT "t2"."i" AS "i", "t2"."t" AS "t" FROM "test2" AS "t2") AS "GNL1"
         ON (("GNL1"."t" = "t1"."t") AND ("t1"."i" = "GNL1"."i"))
-        WHERE (("GNL"."i" IS NULL) AND ((("t1"."i" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL)) OR ("EP_3VL"."present_" IS NULL)))"#;
+        WHERE (("GNL"."i" IS NULL)
+            AND CASE WHEN (("t1"."i" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL)) THEN TRUE ELSE ("EP_3VL"."present_" IS NULL) END)"#;
     test_it("test126", original_text, expected_text);
 }
 
@@ -4068,7 +4071,8 @@ ORDER BY
         GROUP BY "spj"."jn", "spj"."sn") AS "INNER") AS "INNER" WHERE ("INNER"."__rn" <= 1)) AS "NP_3VL"
         WHERE ("NP_3VL"."mx" IS NULL)) AS "NP_3VL" ON ("NP_3VL"."sn" = "s"."sn") LEFT OUTER JOIN
         (SELECT DISTINCT 1 AS "present_", "spj"."sn" AS "sn" FROM "spj" WHERE ("spj"."sn" = 'spj.sn')) AS "EP_3VL" ON ("EP_3VL"."sn" = "s"."sn")
-        WHERE (("GNL"."mx" IS NULL) AND ((("s"."pn" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL)) OR ("EP_3VL"."present_" IS NULL)))
+        WHERE (("GNL"."mx" IS NULL)
+            AND CASE WHEN (("s"."pn" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL)) THEN TRUE ELSE ("EP_3VL"."present_" IS NULL) END)
         ORDER BY 1 NULLS LAST, 2 NULLS LAST, 3 NULLS LAST, 4 NULLS LAST, 5 NULLS LAST, 6 NULLS LAST"#;
     test_it("test135", original_text, expected_text);
 }
@@ -4178,7 +4182,8 @@ WHERE s.city NOT IN (
         WHERE ("z"."rn" = 1)) AS "GNL" ON ("GNL"."city" = "s"."city") LEFT OUTER JOIN (SELECT DISTINCT 1 AS "present_", "z"."city" AS "city"
         FROM (SELECT "p"."city", ROW_NUMBER() OVER(PARTITION BY "p"."city" ORDER BY "p"."weight" DESC NULLS FIRST) AS "rn" FROM "p") AS "z"
         WHERE ("z"."rn" = 1)) AS "EP_3VL" ON ("EP_3VL"."city" = "s"."city")
-        WHERE (("GNL"."city" IS NULL) AND (("s"."city" IS NOT NULL) OR ("EP_3VL"."present_" IS NULL)))"#;
+        WHERE (("GNL"."city" IS NULL)
+            AND CASE WHEN ("s"."city" IS NOT NULL) THEN TRUE ELSE ("EP_3VL"."present_" IS NULL) END)"#;
     test_it("test139", original_text, expected_text);
 }
 
@@ -4262,7 +4267,8 @@ WHERE s.city NOT IN (
         WHERE ("NP_3VL"."city" IS NULL)) AS "NP_3VL" ON ("NP_3VL"."pn" = "s"."pn") LEFT OUTER JOIN
         (SELECT DISTINCT 1 AS "present_", "t"."pn" AS "pn" FROM (SELECT "p"."city", "p"."pn" FROM "p") AS "t" JOIN
         (SELECT "spj"."pn" FROM "spj") AS "u" ON ("u"."pn" = "t"."pn")) AS "EP_3VL" ON ("EP_3VL"."pn" = "s"."pn")
-        WHERE (("GNL"."city" IS NULL) AND ((("s"."city" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL)) OR ("EP_3VL"."present_" IS NULL)))"#;
+        WHERE (("GNL"."city" IS NULL)
+            AND CASE WHEN (("s"."city" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL)) THEN TRUE ELSE ("EP_3VL"."present_" IS NULL) END)"#;
     test_it("test142", original_text, expected_text);
 }
 
@@ -4295,7 +4301,7 @@ fn test144() {
         WHERE ("spj"."qty" IS NULL)) AS "NP_3VL" WHERE ("NP_3VL"."sn" IS NULL)) AS "NP_3VL"  LEFT OUTER JOIN
         (SELECT DISTINCT 1 AS "present_" FROM "spj" WHERE ("spj"."qty" IS NULL)) AS "EP_3VL"  WHERE
         (("GNL"."sn" IS NULL)
-        AND ((("s"."sn" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL)) OR ("EP_3VL"."present_" IS NULL)))"#;
+            AND CASE WHEN (("s"."sn" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL)) THEN TRUE ELSE ("EP_3VL"."present_" IS NULL) END)"#;
     test_it("test144", original_text, expected_text);
 }
 
@@ -4387,7 +4393,8 @@ where s.sn not in (select t.sn from spj t where t.qty is null or t.qty > 0);
         (SELECT DISTINCT "NP_3VL"."present_" AS "present_" FROM (SELECT 1 AS "present_", "t"."sn" AS "sn" FROM "spj" AS "t"
         WHERE (("t"."qty" IS NULL) OR ("t"."qty" > 0))) AS "NP_3VL" WHERE ("NP_3VL"."sn" IS NULL)) AS "NP_3VL"  LEFT OUTER JOIN
         (SELECT DISTINCT 1 AS "present_" FROM "spj" AS "t" WHERE (("t"."qty" IS NULL) OR ("t"."qty" > 0))) AS "EP_3VL" WHERE
-        (("GNL"."sn" IS NULL) AND ((("s"."sn" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL)) OR ("EP_3VL"."present_" IS NULL)))"#;
+        (("GNL"."sn" IS NULL)
+            AND CASE WHEN (("s"."sn" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL)) THEN TRUE ELSE ("EP_3VL"."present_" IS NULL) END)"#;
     test_it("test149", original_text, expected_text);
 }
 
@@ -5359,8 +5366,8 @@ SELECT s.sname FROM s WHERE s.sn NOT IN (SELECT MAX(spj.sn) OVER() FROM spj)"#;
         (SELECT 1 AS "present_", max("spj"."sn") OVER() AS "max(""spj"".""sn"") OVER()" FROM "spj") AS "NP_3VL"
         WHERE ("NP_3VL"."max(""spj"".""sn"") OVER()" IS NULL)) AS "NP_3VL"  LEFT OUTER JOIN
         (SELECT DISTINCT 1 AS "present_" FROM "spj") AS "EP_3VL"
-        WHERE (("GNL"."max(""spj"".""sn"") OVER()" IS NULL) AND ((("s"."sn" IS NOT NULL)
-        AND ("NP_3VL"."present_" IS NULL)) OR ("EP_3VL"."present_" IS NULL)))"#;
+        WHERE (("GNL"."max(""spj"".""sn"") OVER()" IS NULL)
+            AND CASE WHEN (("s"."sn" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL)) THEN TRUE ELSE ("EP_3VL"."present_" IS NULL) END)"#;
     test_it("test190", original_text, expected_text);
 }
 
@@ -6586,7 +6593,7 @@ WHERE v.x NOT IN (
     FROM (SELECT 1 AS "present_", ROW_NUMBER() OVER() AS "__rn" FROM "qa"."datatypes1" AS "d1") AS "INNER"
     WHERE ("INNER"."__rn" > 1000000)) AS "EP_3VL"
     WHERE (("GNL"."rownum" IS NULL)
-    AND ((("v"."x" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL)) OR ("EP_3VL"."present_" IS NULL)));"#;
+        AND CASE WHEN (("v"."x" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL)) THEN TRUE ELSE ("EP_3VL"."present_" IS NULL) END);"#;
     test_it("test240", original_text, expected_text);
 }
 
@@ -6623,7 +6630,8 @@ WHERE v.x NOT IN (
     (SELECT DISTINCT "INNER"."present_" AS "present_", "INNER"."test_int" AS "test_int" FROM
     (SELECT 1 AS "present_", "d1"."test_int" AS "test_int", ROW_NUMBER() OVER(PARTITION BY "d1"."test_int") AS "__rn"
     FROM "qa"."datatypes1" AS "d1") AS "INNER" WHERE ("INNER"."__rn" > 1000000)) AS "EP_3VL" ON ("EP_3VL"."test_int" = "v"."test_int")
-    WHERE (("GNL"."rownum" IS NULL) AND ((("v"."x" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL)) OR ("EP_3VL"."present_" IS NULL)))"#;
+    WHERE (("GNL"."rownum" IS NULL)
+        AND CASE WHEN (("v"."x" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL)) THEN TRUE ELSE ("EP_3VL"."present_" IS NULL) END)"#;
     test_it("test241", original_text, expected_text);
 }
 
@@ -7264,8 +7272,7 @@ WHERE s.sn NOT IN (
         WHERE ("NP_3VL"."sn" IS NULL)) AS "NP_3VL"
         LEFT OUTER JOIN (SELECT DISTINCT 1 AS "present_" FROM "spj" AS "t") AS "EP_3VL"
         WHERE (("GNL"."sn" IS NULL) AND
-        ((("s"."sn" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL)) OR
-        ("EP_3VL"."present_" IS NULL)))"#;
+        CASE WHEN (("s"."sn" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL)) THEN TRUE ELSE ("EP_3VL"."present_" IS NULL) END)"#;
     test_it(
         "test275_not_in_uncorrelated_limit_preserved",
         original_text,

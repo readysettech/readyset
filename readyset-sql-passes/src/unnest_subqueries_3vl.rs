@@ -376,17 +376,23 @@ pub(crate) fn add_3vl_for_not_in_where_subquery(
     };
 
     let lhs_not_null = construct_null_check_expr(lhs, false);
-    let check = construct_scalar_expr(
-        if rhs_ctx.is_null_free() {
-            lhs_not_null
-        } else {
-            construct_scalar_expr(lhs_not_null, BinaryOperator::And, rhs_not_null)
-        },
-        BinaryOperator::Or,
-        rhs_is_empty,
-    );
+    let lhs_matches = if rhs_ctx.is_null_free() {
+        lhs_not_null
+    } else {
+        construct_scalar_expr(lhs_not_null, BinaryOperator::And, rhs_not_null)
+    };
 
-    Ok(check)
+    // `lhs_matches OR rhs_is_empty`, spelled as a CASE. Both operands are `IS [NOT] NULL` results,
+    // so neither is ever NULL and the two spellings agree on every input, in any context. The
+    // engine mishandles the disjunctive shape over a leading derived table (REA-6929); this
+    // encoding keeps the decorrelation correct while that stands.
+    Ok(Expr::CaseWhen {
+        branches: vec![CaseWhenBranch {
+            condition: lhs_matches,
+            body: Expr::Literal(true.into()),
+        }],
+        else_expr: Some(Box::new(rhs_is_empty)),
+    })
 }
 
 fn construct_3vl_case_expr(
