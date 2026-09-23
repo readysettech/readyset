@@ -698,6 +698,21 @@ pub(crate) fn contains_select(expr: &Expr) -> bool {
     vis.yes
 }
 
+/// Whether a `SELECT` is nested anywhere in the statement: a CTE, a derived table or a subquery
+/// expression.
+pub(crate) fn contains_nested_select(stmt: &SelectStatement) -> bool {
+    /// Stops the walk at the first subquery.
+    struct FindSubquery;
+    impl<'ast> Visitor<'ast> for FindSubquery {
+        type Error = ();
+
+        fn visit_select_statement(&mut self, _: &'ast SelectStatement) -> Result<(), ()> {
+            Err(())
+        }
+    }
+    walk_select_statement(&mut FindSubquery, stmt).is_err()
+}
+
 /// Returns true if any subquery within the SELECT statement contains a LIMIT clause.
 /// Used to detect cases where LATERAL join rewriting may be unsupported.
 pub(crate) fn contain_subqueries_with_limit_clause(stmt: &SelectStatement) -> ReadySetResult<bool> {
@@ -4074,6 +4089,10 @@ pub(crate) fn get_lhs_rhs_tables_from_eq_constraint(
 pub(crate) fn normalize_having_and_group_by_for_statement(
     stmt: &mut SelectStatement,
 ) -> ReadySetResult<bool> {
+    // Only HAVING, GROUP BY and ORDER BY are normalized against the select list.
+    if stmt.having.is_none() && stmt.group_by.is_none() && stmt.order.is_none() {
+        return Ok(false);
+    }
     let mut was_rewritten = false;
 
     // Split aliased select items into two categories:

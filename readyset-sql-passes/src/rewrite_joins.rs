@@ -1201,34 +1201,37 @@ fn normalize_statement_joins_shape(
     // keeping only single LHS in `stmt.tables`
     was_rewritten |= normalize_comma_separated_lhs(stmt)?;
 
-    // Attach applicable WHERE predicates to STRAIGHT_JOIN ON constraints before reordering.
-    // SJ joins are treated as fixed barriers; their ON must be enriched first so the
-    // available_predicates pool for normalize_inner_joins_order is already SJ-clean.
-    was_rewritten |= move_applicable_where_conditions_to_straight_joins(stmt)?;
+    // The steps below only act on joins.
+    if !stmt.join.is_empty() {
+        // Attach applicable WHERE predicates to STRAIGHT_JOIN ON constraints before reordering.
+        // SJ joins are treated as fixed barriers; their ON must be enriched first so the
+        // available_predicates pool for normalize_inner_joins_order is already SJ-clean.
+        was_rewritten |= move_applicable_where_conditions_to_straight_joins(stmt)?;
 
-    // Reorder the joins using constraints from WHERE clause to attach as ON predicates.
-    // STRAIGHT_JOIN barriers are respected: only contiguous non-SJ inner-join sub-segments
-    // between barriers are reordered.
-    was_rewritten |= normalize_inner_joins_order(stmt)?;
+        // Reorder the joins using constraints from WHERE clause to attach as ON predicates.
+        // STRAIGHT_JOIN barriers are respected: only contiguous non-SJ inner-join sub-segments
+        // between barriers are reordered.
+        was_rewritten |= normalize_inner_joins_order(stmt)?;
 
-    // Detect and repair the `more than 2 tables join` issue
-    was_rewritten |= try_normalize_joins_conditions(stmt)?;
+        // Detect and repair the `more than 2 tables join` issue
+        was_rewritten |= try_normalize_joins_conditions(stmt)?;
 
-    // Canonicalize join operator and constraint syntax.
-    // This pass runs *last* to ensure syntactic determinism across semantically equivalent
-    // joins, after all semantic rewrites (reordering, repair, demotion) have completed.
-    // It rewrites ambiguous or redundant constructs (e.g., INNER JOIN ON TRUE → CROSS JOIN)
-    // into a canonical form that is minimal, stable, and engine-compliant.
-    was_rewritten |= canonicalize_join_syntax_and_predicates(stmt)?;
+        // Canonicalize join operator and constraint syntax.
+        // This pass runs *last* to ensure syntactic determinism across semantically equivalent
+        // joins, after all semantic rewrites (reordering, repair, demotion) have completed.
+        // It rewrites ambiguous or redundant constructs (e.g., INNER JOIN ON TRUE → CROSS JOIN)
+        // into a canonical form that is minimal, stable, and engine-compliant.
+        was_rewritten |= canonicalize_join_syntax_and_predicates(stmt)?;
 
-    // Guardrail to protect against:
-    // [REA-6129: Some LEFT OUTER JOINs with conditions addressing only 1 side of the JOIN execute but produce incorrect results.]
-    // (https://linear.app/readyset/issue/REA-6129/some-left-outer-joins-with-conditions-addressing-only-1-side-of-the)
-    for jc in &stmt.join {
-        if let JoinConstraint::On(join_expr) = &jc.constraint
-            && !is_supported_join_condition(join_expr)
-        {
-            unsupported!("Join expression {}", join_expr.display(Dialect::PostgreSQL))
+        // Guardrail to protect against:
+        // [REA-6129: Some LEFT OUTER JOINs with conditions addressing only 1 side of the JOIN execute but produce incorrect results.]
+        // (https://linear.app/readyset/issue/REA-6129/some-left-outer-joins-with-conditions-addressing-only-1-side-of-the)
+        for jc in &stmt.join {
+            if let JoinConstraint::On(join_expr) = &jc.constraint
+                && !is_supported_join_condition(join_expr)
+            {
+                unsupported!("Join expression {}", join_expr.display(Dialect::PostgreSQL))
+            }
         }
     }
 

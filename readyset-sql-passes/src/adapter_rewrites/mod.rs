@@ -3917,6 +3917,45 @@ mod tests {
                 assert_eq!(params.reordered_placeholders, Some(vec![1, 0]));
             }
         }
+
+        fn deep_rewritten(sql: &str, dialect: Dialect) -> SelectStatement {
+            let mut stmt = parse_select_statement(sql, dialect);
+            rewrite_equivalent_deep(&mut stmt, rewrite_params(dialect), rewrite_context(dialect))
+                .unwrap();
+            stmt
+        }
+
+        /// An always-true WHERE is dropped, so the read shares its rewritten form, and hence its
+        /// cache, with the unfiltered read.
+        #[test]
+        fn an_always_true_where_rewrites_like_no_where() {
+            for (dialect, filtered) in [
+                (Dialect::MySQL, "SELECT x FROM t WHERE 1 = 1"),
+                (Dialect::MySQL, "SELECT x FROM t WHERE TRUE"),
+                (Dialect::PostgreSQL, "SELECT x FROM t WHERE TRUE"),
+            ] {
+                assert_eq!(
+                    deep_rewritten(filtered, dialect),
+                    deep_rewritten("SELECT x FROM t", dialect),
+                    "{filtered}"
+                );
+            }
+        }
+
+        /// A statement's only `WITH` entry is inlined into a derived table, which the reshaping
+        /// passes flatten: the statement rewrites exactly as its derived-table and flattened
+        /// spellings do.
+        #[test]
+        fn a_cte_inlined_into_a_derived_table_still_reshapes() {
+            for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
+                let cte = "WITH d AS (SELECT t.x FROM t WHERE t.y = 1) SELECT d.x FROM d";
+                let from_cte = deep_rewritten(cte, dialect);
+                let derived = "SELECT d.x FROM (SELECT t.x FROM t WHERE t.y = 1) AS d";
+                assert_eq!(from_cte, deep_rewritten(derived, dialect), "{dialect:?}");
+                let flat = "SELECT t.x FROM t WHERE t.y = 1";
+                assert_eq!(from_cte, deep_rewritten(flat, dialect), "{dialect:?}");
+            }
+        }
     }
 
     mod avg_decomposition {

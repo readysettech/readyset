@@ -1,6 +1,9 @@
-use crate::derived_tables_rewrite::derived_tables_rewrite_main;
+use crate::derived_tables_rewrite::{
+    derived_tables_rewrite_main, promote_null_rejecting_outer_joins_local,
+};
 use crate::drop_redundant_join::UniqueColumnsSchema;
 use crate::hoist_parametrizable_filters::hoist_parametrizable_filters;
+use crate::rewrite_joins::normalize_joins_shape;
 use crate::unnest_subqueries::UnusedUniqueColumnsSchema;
 use readyset_sql::ast::{Column, Relation};
 use readyset_sql::{Dialect, DialectDisplay};
@@ -4683,4 +4686,50 @@ fn dtr_rhs_postagg_multi_other_rel_expression_rejects() {
         expect_text,
         &OuterIdUniqueSchema,
     );
+}
+
+/// Promotion has nothing to promote in a statement without an outer join, so it returns before
+/// deriving the statement's non-NULL columns: here that derivation would reject the unaliased
+/// derived table, which shows it did not run.
+#[test]
+fn promotion_skips_a_statement_without_outer_joins() {
+    for sql in [
+        "SELECT d.x FROM (SELECT t.x FROM t) AS d WHERE d.x = 1",
+        "SELECT d.x FROM (SELECT t.x FROM t) AS d JOIN u ON d.x = u.x",
+    ] {
+        let mut stmt = parse_select_with_config(PARSING_CONFIG, Dialect::PostgreSQL, sql).unwrap();
+        stmt.tables[0].alias = None;
+        let original = stmt.clone();
+        assert!(
+            !promote_null_rejecting_outer_joins_local(&mut stmt).unwrap(),
+            "{sql}"
+        );
+        assert_eq!(stmt, original, "{sql}");
+    }
+}
+
+/// A statement without GROUP BY, HAVING or ORDER BY skips their alias normalization: that step
+/// panics on a star projection, so `Ok` shows it did not run.
+#[test]
+fn a_statement_without_grouping_or_ordering_skips_their_normalization() {
+    let mut stmt =
+        parse_select_with_config(PARSING_CONFIG, Dialect::PostgreSQL, "SELECT * FROM t").unwrap();
+    let original = stmt.clone();
+    assert!(
+        !derived_tables_rewrite_main(&mut stmt, Dialect::PostgreSQL, &UnusedUniqueColumnsSchema)
+            .unwrap()
+    );
+    assert_eq!(stmt, original);
+}
+
+/// A statement without joins skips join normalization: that step rejects the unaliased derived
+/// table, so `Ok` shows it did not run.
+#[test]
+fn join_normalization_skips_a_statement_without_joins() {
+    let sql = "SELECT d.x FROM (SELECT t.x FROM t) AS d WHERE d.x = 1";
+    let mut stmt = parse_select_with_config(PARSING_CONFIG, Dialect::PostgreSQL, sql).unwrap();
+    stmt.tables[0].alias = None;
+    let original = stmt.clone();
+    assert!(!normalize_joins_shape(&mut stmt, Dialect::PostgreSQL).unwrap());
+    assert_eq!(stmt, original);
 }

@@ -752,13 +752,17 @@ fn derived_tables_rewrite_impl<U: UniqueColumnsSchema>(
     unique_cols_schema: &U,
 ) -> ReadySetResult<bool> {
     let mut rewritten = false;
+    let mut has_derived_table = false;
     // Recurse into each subquery
     for from_item in get_local_from_items_iter_mut!(stmt) {
-        if let Some((from_stmt, _)) = as_sub_query_with_alias_mut(from_item)
-            && derived_tables_rewrite_impl(from_stmt, false, unique_cols_schema)?
-        {
-            rewritten = true;
+        if let Some((from_stmt, _)) = as_sub_query_with_alias_mut(from_item) {
+            has_derived_table = true;
+            rewritten |= derived_tables_rewrite_impl(from_stmt, false, unique_cols_schema)?;
         }
+    }
+    // Only a derived table can be inlined.
+    if !has_derived_table {
+        return Ok(false);
     }
     // Try inlining at this level — but only if the current statement
     // has no residual subquery expressions in SELECT/WHERE/HAVING/etc.
@@ -823,6 +827,10 @@ pub(crate) fn promote_null_rejecting_outer_joins_where(
     let mut did_rewrite = false;
 
     loop {
+        if stmt.join.iter().all(|join| join.operator.is_inner_join()) {
+            break;
+        }
+
         // Columns that null-reject based on the INNER JOINs, WHERE and HAVING
         let proven_non_null = derive_from_stmt(stmt, &EmptySchema)?;
 

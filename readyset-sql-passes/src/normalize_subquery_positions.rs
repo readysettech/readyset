@@ -51,7 +51,7 @@ use std::mem;
 use crate::derived_tables_rewrite::promote_null_rejecting_outer_joins_where;
 use crate::rewrite_utils::{
     alias_for_expr, as_sub_query_with_alias, collect_local_from_items, conjoin_all_dedup,
-    contains_select, deep_columns_visitor_mut_in_set,
+    contains_nested_select, contains_select, deep_columns_visitor_mut_in_set,
     denormalize_having_and_group_by_for_statement, expect_field_as_expr,
     expect_only_subquery_from_with_alias_mut, fix_duplicate_aliases, for_each_window_function,
     is_aggregation_or_grouped, move_subquery_predicates_from_inner_join_on_to_where,
@@ -95,6 +95,10 @@ pub(crate) trait NormalizeSubqueryPositions: Sized {
 
 impl NormalizeSubqueryPositions for SelectStatement {
     fn normalize_subquery_positions(&mut self) -> ReadySetResult<HashSet<SqlIdentifier>> {
+        // This pass only moves subqueries and normalizes HAVING against the select list.
+        if self.having.is_none() && !contains_nested_select(self) {
+            return Ok(HashSet::new());
+        }
         // Precondition: `expand_stars` must have run.  The wrap projects
         // fields through `expect_field_as_expr`, which panics on
         // `FieldDefinitionExpr::All`.  Enforced in release too, so

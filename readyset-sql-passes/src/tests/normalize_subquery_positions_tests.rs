@@ -2399,3 +2399,14 @@ fn nsp_promotion_scoped_to_on_subquery_lojs() {
         rendered(&stmt)
     );
 }
+
+/// A statement with no subquery and no HAVING is returned untouched before the wildcard check:
+/// the body rejects a star projection, so `Ok` shows the pass returned early.
+#[test]
+fn a_statement_without_subquery_or_having_returns_early() {
+    let mut stmt = parse("SELECT * FROM t WHERE t.y = 1");
+    let original = stmt.clone();
+    let aliases = stmt.normalize_subquery_positions().unwrap();
+    assert!(aliases.is_empty());
+    assert_eq!(stmt, original);
+}
