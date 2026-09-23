@@ -1,3 +1,5 @@
+//! Replaying MySQL CREATE TABLE statements.
+//!
 //! MySQL binlogs CREATE TABLE IF NOT EXISTS even when the table already exists and the statement
 //! did nothing. Replaying it must leave the table Readyset already replicates untouched: the rows
 //! it serves stay equal to upstream's, and it stays replicated.
@@ -126,6 +128,28 @@ async fn create_table_if_not_exists_unsupported_engine_stays_replicated() {
         status, "Not replicated",
         "a rejected replay marked t not replicated"
     );
+
+    teardown(upstream, shutdown_tx, db).await;
+}
+
+/// The controller finishes a migration that outlives its synchronous window in the background.
+/// The replicator must wait for it before it applies the rows that follow the CREATE TABLE.
+#[cfg(feature = "failure_injection")]
+#[tokio::test]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn create_table_with_slow_migration_keeps_later_rows() {
+    let db = "create_table_with_slow_migration";
+    let (mut upstream, mut rs, _handle, shutdown_tx) = setup(db).await;
+    let _scenario = fail::FailScenario::setup();
+    // Longer than the controller's 5 s synchronous window.
+    fail::cfg(readyset_util::failpoints::EXTEND_RECIPE, "1*sleep(6000)").unwrap();
+
+    upstream.query_drop("CREATE TABLE u (x INT)").await.unwrap();
+    upstream.query_drop("INSERT INTO u VALUES (1)").await.unwrap();
+    eventually!(run_test: {
+        rs.query::<i32, _>("SELECT x FROM u").await.map_err(|e| e.to_string())
+    }, then_assert: |rows| assert_eq!(rows, Ok(vec![1])));
 
     teardown(upstream, shutdown_tx, db).await;
 }

@@ -840,14 +840,18 @@ impl ReadySetHandle {
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub async fn extend_recipe(&mut self, changes: ChangeList) -> ReadySetResult<()> {
-        let request = ExtendRecipeSpec::from(changes);
+        self.extend_recipe_and_wait(changes.into()).await
+    }
 
+    /// Send `spec`, and wait for its migration if the controller finishes it in the background.
+    async fn extend_recipe_and_wait(&mut self, spec: ExtendRecipeSpec<'_>) -> ReadySetResult<()> {
         match self
-            .rpc("extend_recipe", request, self.migration_timeout)
+            .rpc("extend_recipe", spec, self.migration_timeout)
             .await?
         {
             ExtendRecipeResult::Done => Ok(()),
             ExtendRecipeResult::Pending(migration_id) => {
+                antithesis_sdk::assert_reachable!("extend_recipe waited for a pending migration");
                 while self.migration_status(migration_id).await?.is_pending() {
                     tokio::time::sleep(EXTEND_RECIPE_POLL_INTERVAL).await;
                 }
@@ -892,8 +896,7 @@ impl ReadySetHandle {
             ..changes.into()
         };
 
-        self.rpc("extend_recipe", request, self.migration_timeout)
-            .await
+        self.extend_recipe_and_wait(request).await
     }
 
     /// Extend the existing recipe with the given set of queries and the schema replication offset
@@ -917,8 +920,7 @@ impl ReadySetHandle {
             concurrently: false,
         };
 
-        self.rpc("extend_recipe", request, self.migration_timeout)
-            .await
+        self.extend_recipe_and_wait(request).await
     }
 
     simple_request!(
