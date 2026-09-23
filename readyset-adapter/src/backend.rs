@@ -81,6 +81,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::cache_acl::{AclHandle, AclMessage, CacheCreator, Verdict};
 use crate::rls_coordinator::RlsCoordinator;
+use crate::sampler::SampleSender;
 use crate::session_context::SessionContext;
 use crate::shallow_key::ShallowKey;
 use anyhow::bail;
@@ -440,8 +441,7 @@ pub struct BackendBuilder {
     admin: bool,
     storage_dir: Option<PathBuf>,
     shutdown_request: Option<Arc<Notify>>,
-    sampler_tx:
-        Option<tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>>,
+    sampler_tx: Option<SampleSender>,
     db_version: Option<String>,
     cache_mode: CacheMode,
     default_ttl_ms: u64,
@@ -785,10 +785,7 @@ impl BackendBuilder {
     }
 
     /// Set the sender used to enqueue original queries for background sampling/verification
-    pub fn sampler_tx(
-        mut self,
-        tx: Option<tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>>,
-    ) -> Self {
+    pub fn sampler_tx(mut self, tx: Option<SampleSender>) -> Self {
         self.sampler_tx = tx;
         self
     }
@@ -1084,8 +1081,7 @@ where
     client_identity: Option<SqlIdentifier>,
     status_reporter: ReadySetStatusReporter<DB>,
     /// Optional sender to enqueue original queries for background sampling/verification
-    sampler_tx:
-        Option<tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>>,
+    sampler_tx: Option<SampleSender>,
     /// true if the backend connection is an internal connection (eg. from Query Sampler)
     is_internal_connection: bool,
     /// The adapter's shallow cache manager.

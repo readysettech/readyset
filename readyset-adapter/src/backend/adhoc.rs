@@ -182,12 +182,13 @@ where
                 if !state.is_internal_connection
                     && let Some(tx) = state.sampler_tx.as_ref()
                 {
-                    let schema_search_path = view_request.schema_search_path.clone();
-                    let _ = tx.try_send((
-                        event.clone(),
-                        original_query.to_string(),
-                        schema_search_path,
-                    ));
+                    tx.offer(|| {
+                        (
+                            event.clone(),
+                            original_query.to_string(),
+                            view_request.schema_search_path.clone(),
+                        )
+                    });
                 }
                 Ok(noria_ok.into())
             }
@@ -226,12 +227,13 @@ where
                         if !state.is_internal_connection
                             && let Some(tx) = state.sampler_tx.as_ref()
                         {
-                            let schema_search_path = view_request.schema_search_path.clone();
-                            let _ = tx.try_send((
-                                event.clone(),
-                                original_query.to_string(),
-                                schema_search_path,
-                            ));
+                            tx.offer(|| {
+                                (
+                                    event.clone(),
+                                    original_query.to_string(),
+                                    view_request.schema_search_path.clone(),
+                                )
+                            });
                         }
                         Err(noria_err.into())
                     }

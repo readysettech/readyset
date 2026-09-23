@@ -4,8 +4,8 @@
 //! same results as the upstream database for a sample of executed queries.
 //!
 //! High-level flow per sampled query:
-//! - The sampler receives `(QueryExecutionEvent, String)` from a bounded channel
-//!   and randomly accepts it based on `sample_rate`.
+//! - Each executed query is admitted with probability `sample_rate` where it runs, and only
+//!   admitted queries are copied onto a bounded channel to the sampler.
 //! - It executes the query against ReadySet without creating caches, and separately
 //!   against the upstream database.
 //! - Both result sets are converted into `Vec<Vec<DfValue>>` and normalized into a
@@ -79,7 +79,7 @@ use crate::backend::READYSET_QUERY_SAMPLER;
 /// Configuration for the background query sampler
 #[derive(Debug)]
 pub struct SamplerConfig {
-    /// Probability [0.0, 1.0] of sampling an enqueued query
+    /// Probability [0.0, 1.0] of sampling an executed query
     pub sample_rate: f64,
     /// Maximum queue size (bounded channel capacity)
     pub queue_capacity: usize,
@@ -108,7 +108,7 @@ impl Default for SamplerConfig {
 
 pub struct Sampler {
     config: SamplerConfig,
-    rx: Receiver<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>,
+    rx: SamplerRx,
     upstream_conn: Option<DatabaseConnection>,
     rs_conn: Option<DatabaseConnection>,
     upstream_config: UpstreamConfig,
@@ -133,12 +133,34 @@ struct Entry {
     schema_search_path: Vec<SqlIdentifier>,
 }
 
-/// Build a bounded channel for sampler input
-type SamplerTx = Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>;
-type SamplerRx = Receiver<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>;
+type Sample = (QueryExecutionEvent, String, Vec<SqlIdentifier>);
+type SamplerRx = Receiver<Sample>;
 
-fn build_channel(config: &SamplerConfig) -> (SamplerTx, SamplerRx) {
-    tokio::sync::mpsc::channel(config.queue_capacity)
+/// Hands executed queries to the sampler. Each query is admitted with probability `sample_rate`
+/// before the caller copies it, so the bounded queue only carries queries the sampler checks.
+#[derive(Debug, Clone)]
+pub struct SampleSender {
+    tx: Sender<Sample>,
+    sample_rate: f64,
+}
+
+impl SampleSender {
+    /// Offers a query for sampling. `sample` runs only if the query is admitted.
+    pub fn offer(&self, sample: impl FnOnce() -> Sample) {
+        if rand::random::<f64>() < self.sample_rate {
+            let _ = self.tx.try_send(sample());
+        }
+    }
+}
+
+/// Build a bounded channel for sampler input
+fn build_channel(config: &SamplerConfig) -> (SampleSender, SamplerRx) {
+    let (tx, rx) = tokio::sync::mpsc::channel(config.queue_capacity);
+    let tx = SampleSender {
+        tx,
+        sample_rate: config.sample_rate,
+    };
+    (tx, rx)
 }
 
 async fn connect_rs(config: &UpstreamConfig, rs_addr: SocketAddr) -> Option<DatabaseConnection> {
@@ -221,10 +243,7 @@ pub async fn sampler_builder(
     upstream_config: UpstreamConfig,
     shutdown_rx: ShutdownReceiver,
     rs_addr: SocketAddr,
-) -> (
-    Option<Sampler>,
-    Option<Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>>,
-) {
+) -> (Option<Sampler>, Option<SampleSender>) {
     if sampler_cfg.max_qps == 0 || sampler_cfg.sample_rate == 0.0 {
         return (None, None);
     }
@@ -542,7 +561,7 @@ impl Sampler {
         upstream_conn: Option<DatabaseConnection>,
         upstream_config: UpstreamConfig,
         shutdown_recv: ShutdownReceiver,
-        rx: Receiver<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>,
+        rx: SamplerRx,
         rs_addr: SocketAddr,
         schema_search_path: Vec<SqlIdentifier>,
     ) -> Self {
@@ -560,7 +579,7 @@ impl Sampler {
         }
     }
 
-    /// Run the sampler loop: randomly sample queries and compare Readyset vs upstream results.
+    /// Run the sampler loop: compare Readyset vs upstream results for each admitted query.
     /// Differences are logged as warnings.
     pub async fn run_sampler(&mut self) {
         info!("Starting query sampler with config: {:?}", self.config);
@@ -581,9 +600,6 @@ impl Sampler {
                 q = self.rx.recv() => {
                     gauge!(QUERY_SAMPLER_QUEUE_LEN).set(self.rx.len() as f64);
                     if let Some((event, q, schema_search_path)) = q {
-                        if rand::random::<f64>() > self.config.sample_rate {
-                            continue;
-                        }
                         // Rate limit sampled query processing
                         self.enforce_rate_limit().await;
                         let entry = Entry {
@@ -645,4 +661,35 @@ async fn set_schema_search_path(
         None => return Err(DatabaseError::UpstreamConnectionNone),
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use readyset_client_metrics::EventType;
+
+    use super::*;
+
+    fn sender(sample_rate: f64) -> (SampleSender, SamplerRx) {
+        build_channel(&SamplerConfig {
+            sample_rate,
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn offer_copies_only_admitted_queries() {
+        let (never, mut rx) = sender(0.0);
+        never.offer(|| panic!("a query the sampler skips must not be copied"));
+        assert!(rx.try_recv().is_err());
+
+        let (always, mut rx) = sender(1.0);
+        always.offer(|| {
+            (
+                QueryExecutionEvent::new(EventType::Query),
+                "SELECT 1".into(),
+                vec![],
+            )
+        });
+        assert_eq!(rx.try_recv().unwrap().1, "SELECT 1");
+    }
 }
