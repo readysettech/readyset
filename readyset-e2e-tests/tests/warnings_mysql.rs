@@ -125,19 +125,18 @@ async fn shallow_hits_replay_upstream_warnings() {
         .unwrap();
     conn.query_drop(
         "CREATE SHALLOW CACHE POLICY TTL 60 SECONDS REFRESH EVERY 2 SECONDS
-         FROM SELECT id, val, RAND() FROM probe WHERE id = ?",
+         FROM SELECT id, val + 0, RAND() FROM probe WHERE id = ?",
     )
     .await
     .unwrap();
 
-    // Comparing an INT column against a non-numeric string warns about the truncated conversion,
-    // once per evaluation, which the prepared form does twice.
-    let query = "SELECT id, val, RAND() FROM probe WHERE id = '1abc'";
+    // Adding a number to a non-numeric string warns about the truncated conversion.
+    let query = "SELECT id, val + 0, RAND() FROM probe WHERE id = 1";
     let (_, text_count) = rows_and_warnings(upstream.query_iter(query).await.unwrap()).await;
     let text_warnings = show_warnings(&mut upstream).await;
-    let prepared = "SELECT id, val, RAND() FROM probe WHERE id = ?";
+    let prepared = "SELECT id, val + 0, RAND() FROM probe WHERE id = ?";
     let (_, binary_count) =
-        rows_and_warnings(upstream.exec_iter(prepared, ("1abc",)).await.unwrap()).await;
+        rows_and_warnings(upstream.exec_iter(prepared, (1,)).await.unwrap()).await;
     let binary_warnings = show_warnings(&mut upstream).await;
     assert!(
         text_count > 0 && binary_count > 0,
@@ -169,8 +168,7 @@ async fn shallow_hits_replay_upstream_warnings() {
     let hit = rows.into_iter().next().unwrap();
 
     // The same through the binary protocol, which goes to a separate cache key.
-    let (rows, warnings) =
-        rows_and_warnings(conn.exec_iter(prepared, ("1abc",)).await.unwrap()).await;
+    let (rows, warnings) = rows_and_warnings(conn.exec_iter(prepared, (1,)).await.unwrap()).await;
     assert_eq!(rows.len(), 1);
     assert_eq!(warnings, binary_count);
     assert_eq!(show_warnings(&mut conn).await, binary_warnings);
@@ -181,8 +179,7 @@ async fn shallow_hits_replay_upstream_warnings() {
     conn.query_drop("INSERT IGNORE INTO probe VALUES (1, 'dup')")
         .await
         .unwrap();
-    let (rows, warnings) =
-        rows_and_warnings(conn.exec_iter(prepared, ("1abc",)).await.unwrap()).await;
+    let (rows, warnings) = rows_and_warnings(conn.exec_iter(prepared, (1,)).await.unwrap()).await;
     assert_eq!(rows.len(), 1);
     assert_eq!(warnings, binary_count);
     assert_eq!(show_warnings(&mut conn).await, binary_warnings);
