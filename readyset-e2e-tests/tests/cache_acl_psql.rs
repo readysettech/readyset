@@ -184,6 +184,43 @@ async fn acl_unknown_user_converges_to_allowed() {
     shutdown_tx.shutdown().await;
 }
 
+/// A query comparing an array column to an array literal is served from the shallow cache.
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn acl_probe_array_literal_against_array_column() {
+    init_test_logging();
+    let test_name = derive_test_name();
+    let (rs_opts, _handle, shutdown_tx, upstream, roles) = setup(&test_name).await;
+    upstream
+        .simple_query(&format!(
+            "CREATE TABLE user_roles (user_id int PRIMARY KEY, role_ids int[]);
+             INSERT INTO user_roles VALUES (2, ARRAY[1, 2]);
+             GRANT SELECT ON user_roles TO {};",
+            roles.alice
+        ))
+        .await
+        .unwrap();
+
+    let query = "SELECT (role_ids @> ARRAY[1, 2]) AS has_access FROM user_roles WHERE user_id = $1";
+    let alice = connect_as(&rs_opts, &test_name, &roles.alice).await;
+    alice
+        .simple_query(&format!("CREATE SHALLOW CACHE FROM {query}"))
+        .await
+        .unwrap();
+    eventually!(
+        attempts: 40,
+        sleep: Duration::from_millis(250),
+        message: "alice was never served from the cache she created",
+        {
+            alice.query(query, &[&2i32]).await.unwrap();
+            is_shallow(&last_query_info(&alice).await.destination)
+        }
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
 /// A REVOKE followed by ALTER READYSET FLUSH PRIVILEGES stops serving the
 /// revoked user within one pass: their reads route to upstream, which rejects
 /// them, while the still-granted user keeps their hit rate.
