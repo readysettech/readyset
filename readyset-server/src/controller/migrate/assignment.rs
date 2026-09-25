@@ -96,7 +96,9 @@ fn assign_inner(
                     .filter(move |&p| prime(&graph[p]))
                     .collect();
                 while let Some(p) = stack.pop() {
-                    if graph[p].is_graph_root() {
+                    // The graph root and deferred Constants (pass 2 below) carry no domain yet
+                    // and cannot form an a-b-a path.
+                    if graph[p].is_graph_root() || !graph[p].has_domain() {
                         continue;
                     }
                     if check(&graph[p]) {
@@ -363,6 +365,61 @@ mod tests {
             graph[v].domain(),
             graph[j].domain(),
             "Constant must inherit the consuming Join's domain, not get its own",
+        );
+    }
+
+    /// A deferred Constant can sit two levels above a node being assigned in pass 1: the
+    /// a-b-a path check walks a parent's ancestors and must skip nodes that have no domain yet
+    /// rather than read one, which panicked with `asked for unset index`.
+    #[test]
+    fn deferred_constant_grandparent_does_not_break_assignment() {
+        use dataflow::ops::identity::Identity;
+
+        let (mut graph, source) = graph_with_source();
+
+        let t = graph.add_node(Node::new(
+            "t",
+            make_columns(&["id"]),
+            node::special::Base::new(),
+        ));
+        let v = graph.add_node(Node::new(
+            "v",
+            make_columns(&["x"]),
+            node::special::Constant::new(vec![vec![DfValue::from(1)]]),
+        ));
+        graph.add_edge(source, t, ());
+        graph.add_edge(source, v, ());
+
+        // A projection over the Constant: assigned in pass 1 (new domain, since its only parent
+        // is still unassigned), so it is a primed parent of the join below with the Constant as
+        // its own parent.
+        let p_op: NodeOperator = Identity::new(v).into();
+        let p = graph.add_node(Node::new("p", make_columns(&["x"]), p_op));
+        graph.add_edge(v, p, ());
+
+        let join: NodeOperator = Join::new(
+            t,
+            p,
+            JoinType::Inner,
+            vec![(0, 0)],
+            vec![(Side::Left, 0), (Side::Right, 0)],
+            false,
+            None,
+        )
+        .into();
+        let j = graph.add_node(Node::new("j", make_columns(&["id"]), join));
+        // Incoming neighbors iterate newest edge first, so the base is the domain candidate and
+        // the a-b-a check climbs from the projection into the Constant.
+        graph.add_edge(p, j, ());
+        graph.add_edge(t, j, ());
+
+        let mut ndomains = 0;
+        assign_inner(&mut graph, &mut ndomains, &[t, v, p, j]).unwrap();
+
+        assert_eq!(
+            graph[v].domain(),
+            graph[p].domain(),
+            "Constant must inherit its consuming projection's domain",
         );
     }
 }
