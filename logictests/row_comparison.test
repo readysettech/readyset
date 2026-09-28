@@ -49,9 +49,16 @@ SELECT id FROM t WHERE (a, b) = (c, d)
 statement error
 SELECT id FROM t WHERE (a, b) != ('x', 1, 'z')
 
-# A partly parameterizable row comparison is not allowed.
-statement error
+# Only a row of columns compared to literals is parameterized. A column among the literals keeps
+# them inline, so the comparison caches as a filter.
+statement ok
 CREATE CACHE row_mixed FROM SELECT id FROM t WHERE (a, b) = ('x', d)
+
+query I rowsort
+SELECT id FROM t WHERE (a, b) = ('x', d)
+----
+1
+2
 
 # A prepared row comparison binds one parameter per position.
 query I rowsort

@@ -59,9 +59,40 @@ SELECT id FROM t WHERE (a, b) < ('y', '2')
 statement error
 SELECT id FROM t WHERE (a, b) != ('x', 1, 'z')
 
-# A partly parameterizable row comparison is not allowed.
-statement error
+# Only a row of columns compared to literals is parameterized. A column among the literals keeps
+# them inline, so the comparison caches as a filter.
+statement ok
 CREATE CACHE row_mixed FROM SELECT id FROM t WHERE (a, b) = ('x', d)
+
+query I rowsort
+SELECT id FROM t WHERE (a, b) = ('x', d)
+----
+1
+2
+
+# So does a literal among the columns, and the filter compares every position, the all-literal
+# ones included.
+statement ok
+CREATE CACHE row_literal_left FROM SELECT count(*) FROM t WHERE ('', a) = ('A', 'x')
+
+query I nosort
+SELECT count(*) FROM t WHERE ('', a) = ('A', 'x')
+----
+0
+
+query I rowsort
+SELECT id FROM t WHERE (a, '') = ('x', '')
+----
+1
+2
+5
+
+query I rowsort
+SELECT id FROM t WHERE (a, '') IN (('x', ''), ('z', 'q'))
+----
+1
+2
+5
 
 # A prepared row comparison binds one parameter per position.
 query I rowsort

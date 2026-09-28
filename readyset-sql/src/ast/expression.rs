@@ -3511,6 +3511,12 @@ impl Expr {
         }
     }
 
+    /// Returns true if this expression is a [`Placeholder`](Literal::Placeholder) literal
+    #[must_use]
+    pub fn is_placeholder(&self) -> bool {
+        matches!(self, Expr::Literal(Literal::Placeholder(_)))
+    }
+
     /// Returns true if any variables are present in the expression
     pub fn contains_vars(&self) -> bool {
         match self {

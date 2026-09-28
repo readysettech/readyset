@@ -1195,13 +1195,7 @@ impl<'ast> VisitorMut<'ast> for CollapseWhereInVisitor {
 
             if list.iter().any(|l| match l {
                 Expr::Literal(Literal::Placeholder(_)) => true,
-                Expr::Row { exprs, .. }
-                    if exprs
-                        .iter()
-                        .all(|e| matches!(e, Expr::Literal(Literal::Placeholder(_)))) =>
-                {
-                    true
-                }
+                Expr::Row { exprs, .. } if exprs.iter().all(Expr::is_placeholder) => true,
                 _ => false,
             }) {
                 // If the list contains placeholders, flatten them. `where_in_to_placeholders` takes

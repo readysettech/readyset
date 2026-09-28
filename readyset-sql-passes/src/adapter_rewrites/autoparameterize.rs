@@ -235,6 +235,19 @@ struct AutoParameterizeVisitor {
     cap_predicates: HashSet<Expr>,
 }
 
+/// Whether the literals a row is compared against, by `=` or in an `IN` list, can be
+/// parameterized: each lifted literal keys the lookup on the column it faces, so every position of
+/// the row has to be one.
+fn is_row_of_columns(exprs: &[Expr]) -> bool {
+    exprs.iter().all(|e| matches!(e, Expr::Column(_)))
+}
+
+/// Whether a row equality can be parameterized: its left is all columns and its right all
+/// literals, so that every position becomes a column keyed by a placeholder.
+fn is_parameterizable_row_equality(lhs: &[Expr], rhs: &[Expr]) -> bool {
+    is_row_of_columns(lhs) && rhs.iter().all(|e| matches!(e, Expr::Literal(_)))
+}
+
 /// Replace a `Literal::Preserved(inner)` marker with its inner literal, in place. No-op for any
 /// other literal.
 fn unwrap_preserved(literal: &mut Literal) {
@@ -302,7 +315,9 @@ impl AutoParameterizeVisitor {
             match expression {
                 Expr::BinaryOp { lhs, op, rhs } => match (lhs.as_mut(), op, rhs.as_mut()) {
                     (Expr::Column(_), BinaryOperator::Equal, Expr::Literal(Literal::Placeholder(_))) => {}
-                    (Expr::Row { .. }, BinaryOperator::Equal, Expr::Row { exprs, .. }) => {
+                    (Expr::Row { exprs: lhs_exprs, .. }, BinaryOperator::Equal, Expr::Row { exprs, .. })
+                        if is_parameterizable_row_equality(lhs_exprs, exprs) =>
+                    {
                         for expr in exprs {
                             if let Expr::Literal(lit) = expr {
                                 match lit {
@@ -373,8 +388,8 @@ impl AutoParameterizeVisitor {
                     }
 
                     // Case 2: Tuple IN ((a, b) IN ((1,2), (3,4)))
-                    Expr::Row { .. }
-                        if exprs.iter().all(|e| {
+                    Expr::Row { exprs: lhs_exprs, .. }
+                        if is_row_of_columns(lhs_exprs) && exprs.iter().all(|e| {
                             match e {
                                 Expr::Row { exprs, .. } => exprs.iter().all(
                                     |e| matches!(e, Expr::Literal(lit) if !matches!(lit, Literal::Placeholder(_))),
@@ -569,7 +584,9 @@ impl<'ast> VisitorMut<'ast> for AnalyzeLiteralsVisitor {
                         }
                         return Ok(());
                     }
-                    (Expr::Row { .. }, BinaryOperator::Equal, Expr::Row { exprs, .. }) => {
+                    (Expr::Row { exprs: lhs_exprs, .. }, BinaryOperator::Equal, Expr::Row { exprs, .. })
+                        if is_parameterizable_row_equality(lhs_exprs, exprs) =>
+                    {
                         self.contains_equal = true;
                         for expr in exprs {
                             if let Expr::Literal(Literal::Placeholder(_)) = expr {
@@ -641,6 +658,9 @@ impl<'ast> VisitorMut<'ast> for AnalyzeLiteralsVisitor {
                 }) && !self.has_aggregates =>
                 {
                     match lhs.as_ref() {
+                        Expr::Row { exprs, .. } if !is_row_of_columns(exprs) => {
+                            self.in_supported_position = false
+                        }
                         Expr::Column(_) | Expr::Row { .. } => {
                             self.contains_equal = true;
                             return Ok(());
@@ -1621,6 +1641,27 @@ mod tests {
                 "SELECT id FROM users WHERE (name, age) = ('Bob', 27) AND score > ?",
                 vec![],
             );
+        }
+
+        /// A lifted literal keys a lookup on the column it faces, so only a row of columns compared
+        /// to literals is parameterized. Any other keeps its literals inline, and is not an
+        /// equality that competes with the query's ranges for the parameter mode.
+        #[test]
+        fn row_that_cannot_key_a_lookup_keeps_its_literals_inline() {
+            for query in [
+                "SELECT id FROM users WHERE ('', name) = ('A', 's')",
+                "SELECT id FROM users WHERE (name, '') = ('A', 's')",
+                "SELECT id FROM users WHERE (name, age) = ('Bob', score)",
+                "SELECT id FROM users WHERE (name, '') IN (('A', ''), ('B', 'x'))",
+            ] {
+                test_auto_parameterize_mysql(query, query, vec![]);
+                let with_range = format!("{query} AND score > 5");
+                test_auto_parameterize_mysql(
+                    &with_range,
+                    &with_range.replace("> 5", "> ?"),
+                    vec![(0, 5.into())],
+                );
+            }
         }
     }
 

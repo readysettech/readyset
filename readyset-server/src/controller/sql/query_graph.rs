@@ -494,17 +494,12 @@ where
     new_ces
 }
 
-/// Whether either operand of a binary predicate is a placeholder, looking inside a `Row` so that
-/// row-wise comparisons are covered too.
+/// Whether a placeholder appears anywhere in either operand's expression tree, so that row-wise
+/// comparisons and the expressions inside their positions are covered too.
 fn contains_placeholder(lhs: &Expr, rhs: &Expr) -> bool {
-    fn is_placeholder(expr: &Expr) -> bool {
-        match expr {
-            Expr::Literal(Literal::Placeholder(_)) => true,
-            Expr::Row { exprs, .. } => exprs.iter().any(is_placeholder),
-            _ => false,
-        }
-    }
-    is_placeholder(lhs) || is_placeholder(rhs)
+    [lhs, rhs]
+        .into_iter()
+        .any(|e| e.is_placeholder() || e.recursive_subexpressions().any(Expr::is_placeholder))
 }
 
 /// Whether a row comparison can become lookup parameters: an equality pairing a column with a
@@ -517,9 +512,7 @@ fn row_becomes_parameters(op: BinaryOperator, lhs: &[Expr], rhs: &[Expr]) -> boo
     op == BinaryOperator::Equal
         && lhs.len() == rhs.len()
         && lhs.iter().all(|e| matches!(e, Expr::Column(_)))
-        && rhs
-            .iter()
-            .all(|e| matches!(e, Expr::Literal(Literal::Placeholder(_))))
+        && rhs.iter().all(Expr::is_placeholder)
 }
 
 /// Whether an operand is a NULL literal, which is what separates `IS [NOT] NULL` from a null-safe
@@ -679,10 +672,11 @@ fn classify_conditionals(
                         unsupported!("row comparison with unequal arity");
                     }
 
-                    // A row comparison that is only partly parameterizable can be handled
-                    // neither way: taking the parameter path below would silently drop the
-                    // positions it cannot convert, and a placeholder cannot be lowered into a
-                    // filter expression. Send the query to fallback instead of answering it wrong.
+                    // A row that mixes placeholders with other expressions is only partly
+                    // parameterizable, and can be handled neither way: taking the parameter path
+                    // below would silently drop the positions it cannot convert, and a
+                    // placeholder cannot be lowered into a filter expression. Send the query to
+                    // fallback instead of answering it wrong.
                     (
                         Expr::Row {
                             exprs: lhs_exprs, ..
@@ -690,14 +684,30 @@ fn classify_conditionals(
                         Expr::Row {
                             exprs: rhs_exprs, ..
                         },
-                    ) if lhs_exprs.len() == rhs_exprs.len()
-                        && !row_becomes_parameters(*op, lhs_exprs, rhs_exprs)
-                        && lhs_exprs
-                            .iter()
-                            .chain(rhs_exprs.iter())
-                            .any(|e| matches!(e, Expr::Literal(Literal::Placeholder(_)))) =>
+                    ) if [lhs_exprs, rhs_exprs].into_iter().any(|row| {
+                        row.iter().any(Expr::is_placeholder)
+                            && !row.iter().all(Expr::is_placeholder)
+                    }) =>
                     {
                         unsupported!("row comparison mixing placeholders with other expressions");
+                    }
+
+                    // A placeholder can only key a lookup, so a row comparison that holds one
+                    // anywhere, even inside an expression at one of its positions, but cannot take
+                    // the parameter path below has no way to evaluate it.
+                    (
+                        Expr::Row {
+                            exprs: lhs_exprs, ..
+                        },
+                        Expr::Row {
+                            exprs: rhs_exprs, ..
+                        },
+                    ) if !row_becomes_parameters(*op, lhs_exprs, rhs_exprs)
+                        && contains_placeholder(lhs, rhs) =>
+                    {
+                        unsupported!(
+                            "row comparison with placeholders other than (columns) = (placeholders)"
+                        );
                     }
 
                     // Row equality: A Row of Columns compared to a Row of Placeholders.
@@ -2037,6 +2047,29 @@ mod tests {
                 err.to_string()
                     .contains("IS [NOT] DISTINCT FROM against a placeholder"),
                 "`{sql}` should be refused by the placeholder guard, got: {err}"
+            );
+        }
+    }
+
+    /// A row comparison holding a placeholder it cannot key a lookup with is refused by the guard
+    /// naming why. The guard's own message is matched rather than any error, since a shape both
+    /// guards miss still fails later, with an error that names neither the row nor the reason.
+    #[test]
+    fn row_placeholders_are_refused_by_the_guard_naming_why() {
+        let mixing = "mixing placeholders with other expressions";
+        let unpaired = "placeholders other than (columns) = (placeholders)";
+        for (sql, reason) in [
+            ("SELECT id FROM t WHERE (a, b) = ($1, 'x')", mixing),
+            ("SELECT id FROM t WHERE (a, b) = ($1, c)", mixing),
+            ("SELECT id FROM t WHERE ('', a) = ($1, $2)", unpaired),
+            ("SELECT id FROM t WHERE ($1, $2) = (a, b)", unpaired),
+            ("SELECT id FROM t WHERE (a, b) < ($1, $2)", unpaired),
+            ("SELECT id FROM t WHERE (b, d) = ($1 + 0, 1)", unpaired),
+        ] {
+            let err = query_graph_postgres(sql).expect_err("should be unsupported");
+            assert!(
+                err.to_string().contains(reason),
+                "`{sql}` should be refused as {reason:?}, got: {err}"
             );
         }
     }

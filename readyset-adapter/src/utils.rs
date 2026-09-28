@@ -227,10 +227,7 @@ impl<'ast> Visitor<'ast> for BinopsParameterColumnsVisitor<'ast> {
                 lhs,
                 rhs: InValue::List(exprs),
                 negated,
-            } if exprs
-                .iter()
-                .all(|expr| matches!(expr, Expr::Literal(Literal::Placeholder(_)))) =>
-            {
+            } if exprs.iter().all(Expr::is_placeholder) => {
                 if let Expr::Column(c) = lhs.as_ref() {
                     let op = if *negated {
                         BinaryOperator::NotEqual
