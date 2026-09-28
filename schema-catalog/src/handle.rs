@@ -10,10 +10,10 @@ use async_trait::async_trait;
 use failpoint_macros::set_failpoint;
 use futures_util::StreamExt;
 use metrics::{counter, gauge, histogram};
+use parking_lot::RwLock;
 use readyset_errors::{ReadySetResult, internal_err};
 use readyset_util::{retry_with_exponential_backoff, shutdown::ShutdownReceiver};
 use tokio::select;
-use tokio::sync::RwLock;
 use tracing::{Instrument, debug, error, info, info_span, trace, warn};
 
 use crate::{SchemaCatalog, SchemaCatalogUpdate, SchemaChangeHandler, SchemaChanges};
@@ -191,7 +191,7 @@ impl<P: SchemaCatalogProvider + Send + 'static> SchemaCatalogSynchronizer<P> {
             trace!("Failpoint: passed SCHEMA_CATALOG_SYNCHRONIZER_DELAY");
         }
 
-        let mut cache = self.handle.inner.write().await;
+        let mut cache = self.handle.inner.write();
         if cache.as_deref() != Some(&catalog) {
             if let Some(ref current) = *cache {
                 let generation_advanced = current.generation < catalog.generation;
@@ -364,7 +364,7 @@ impl SchemaCatalogHandle {
     /// Returns an error if the catalog has not been populated yet (e.g., the SSE stream from the
     /// server has not delivered the initial catalog update).
     pub async fn get_catalog(&self) -> ReadySetResult<Arc<SchemaCatalog>> {
-        self.inner.read().await.clone().ok_or_else(|| {
+        self.inner.read().clone().ok_or_else(|| {
             trace!("SchemaCatalog requested but not yet initialized; SSE stream may not have delivered the initial update");
             internal_err!("SchemaCatalog not initialized")
         })
@@ -391,7 +391,7 @@ impl SchemaCatalogHandle {
 
     /// Check if a schema catalog is currently cached
     pub async fn has_catalog(&self) -> bool {
-        let cache = self.inner.read().await;
+        let cache = self.inner.read();
         cache.is_some()
     }
 }
@@ -471,7 +471,7 @@ mod tests {
 
         // Set a catalog in the cache
         {
-            let mut cache = handle.inner.write().await;
+            let mut cache = handle.inner.write();
             *cache = Some(Arc::new(SchemaCatalog::new()));
         }
 

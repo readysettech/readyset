@@ -7657,6 +7657,7 @@ dependencies = [
  "futures-util",
  "metric",
  "metrics",
+ "parking_lot",
  "readyset-data",
  "readyset-errors",
  "readyset-sql",
