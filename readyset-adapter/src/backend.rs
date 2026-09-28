@@ -172,6 +172,8 @@ pub(crate) const CACHE_CREATE_IN_READYSET_SCHEMA_MSG: &str = "Cache creation is 
     while the Readyset schema is the session's database. Connect with a database selected to \
     create caches.";
 
+const ADMIN_READYSET_SCHEMA_ONLY_MSG: &str = "Admin connections serve only the Readyset schema";
+
 /// Placeholder username for connections that have not yet authenticated
 const UNAUTHENTICATED_USER: &str = "unauthenticated";
 
@@ -434,6 +436,7 @@ pub struct BackendBuilder {
     placeholder_inlining: bool,
     connections: Option<Arc<SkipSet<ConnectionInfo>>>,
     allow_cache_ddl: bool,
+    admin: bool,
     sampler_tx:
         Option<tokio::sync::mpsc::Sender<(QueryExecutionEvent, String, Vec<SqlIdentifier>)>>,
     db_version: Option<String>,
@@ -486,6 +489,7 @@ impl Default for BackendBuilder {
             placeholder_inlining: false,
             connections: None,
             allow_cache_ddl: true,
+            admin: false,
             sampler_tx: None,
             db_version: None,
             cache_mode: CacheMode::Deep,
@@ -510,7 +514,7 @@ impl BackendBuilder {
     #[allow(clippy::too_many_arguments)]
     pub async fn build<DB: UpstreamDatabase + 'static, Handler: 'static>(
         self,
-        noria: NoriaConnector,
+        mut noria: NoriaConnector,
         authority: Arc<Authority>,
         query_status_cache: &'static QueryStatusCache,
         schema_handle: SchemaCatalogHandle,
@@ -524,16 +528,25 @@ impl BackendBuilder {
         counter!(metric::CLIENT_CONNECTIONS_OPENED).increment(1);
 
         // This session proxies to an upstream iff one is configured with a URL. The connection
-        // itself is opened later, at auth, by `connect_upstream`.
+        // itself is opened later, at auth, by `connect_upstream`. Admin sessions never open one
+        // and never proxy.
         let upstream_configured = match &self.upstream_config {
             Some(config) => config.read().await.upstream_db_url.is_some(),
             None => false,
         };
-        let proxy_state = if upstream_configured {
+        let proxy_state = if upstream_configured && !self.admin {
             ProxyState::Fallback
         } else {
             ProxyState::Never
         };
+
+        let mut readyset_schema_route_all = false;
+        if self.admin
+            && let Some(readyset_schema) = &self.readyset_schema
+        {
+            noria.set_schema_search_path(vec![readyset_schema.name().into()]);
+            readyset_schema_route_all = true;
+        }
 
         if let Some(connections) = &self.connections {
             connections.insert(ConnectionInfo::new(
@@ -591,7 +604,7 @@ impl BackendBuilder {
                 authority,
                 adapter_start_time,
                 readyset_schema: self.readyset_schema,
-                readyset_schema_route_all: false,
+                readyset_schema_route_all,
                 shallow_cache_allowlists: self.shallow_cache_allowlists,
             },
             settings: BackendSettings {
@@ -609,6 +622,7 @@ impl BackendBuilder {
                 default_coalesce_ms: self.default_coalesce_ms,
                 replication_enabled: self.replication_enabled,
                 allow_cache_ddl: self.allow_cache_ddl,
+                admin: self.admin,
                 shallow_cache_eligibility: self.shallow_cache_eligibility,
             },
             _query_handler: PhantomData,
@@ -689,6 +703,11 @@ impl BackendBuilder {
     /// their caches.
     pub fn allow_cache_ddl(mut self, allow_cache_ddl: bool) -> Self {
         self.allow_cache_ddl = allow_cache_ddl;
+        self
+    }
+
+    pub fn admin(mut self, admin: bool) -> Self {
+        self.admin = admin;
         self
     }
 
@@ -1395,15 +1414,21 @@ where
         ))
     }
 
+    fn is_readyset_schema_path(&self, search_path: &[SqlIdentifier]) -> bool {
+        match &self.readyset_schema {
+            Some(readyset_schema) => [SqlIdentifier::from(readyset_schema.name())] == search_path,
+            None => false,
+        }
+    }
+
     /// Update our tracking of whether to route all queries to the Readyset schema.
     ///
     /// Returns true if we should route all queries to the Readyset schema.
     fn update_readyset_schema_routing(&mut self, search_path: &[SqlIdentifier]) -> bool {
-        let Some(readyset_schema) = &self.readyset_schema else {
+        if self.readyset_schema.is_none() {
             return false;
-        };
-        let readyset_schema = SqlIdentifier::from(readyset_schema.name());
-        self.readyset_schema_route_all = [readyset_schema] == search_path;
+        }
+        self.readyset_schema_route_all = self.is_readyset_schema_path(search_path);
         self.readyset_schema_route_all
     }
 
@@ -1490,6 +1515,9 @@ struct BackendSettings {
     /// received will instead return an error prompting the user to use Readyset cloud to manage
     /// their caches.
     allow_cache_ddl: bool,
+    /// Admin session: bound to the Readyset schema for its lifetime and never connected to the
+    /// upstream database.
+    admin: bool,
     /// Per-category opt-ins for shallow-cache auto-creation eligibility. Adapter-local config
     /// (from CLI flags), consulted by the in-request-path auto-create filter.
     shallow_cache_eligibility: ShallowCacheEligibility,
@@ -1837,20 +1865,30 @@ where
     /// If we should stop processing the current query, returns a result to be immediately returned
     /// to the client.
     fn check_readyset_schema_routing<'a>(
+        settings: &BackendSettings,
         state: &mut BackendState<DB>,
         query: &ReadySetResult<SqlQuery>,
-    ) -> Option<QueryResult<'a, DB>> {
-        state.readyset_schema.as_ref()?;
+    ) -> ReadySetResult<Option<QueryResult<'a, DB>>> {
+        if state.readyset_schema.is_none() {
+            return Ok(None);
+        }
 
         let search_path = match query {
-            Ok(SqlQuery::Set(s)) => Handler::handle_set_statement(s).set_search_path?,
+            Ok(SqlQuery::Set(s)) => match Handler::handle_set_statement(s).set_search_path {
+                Some(search_path) => search_path,
+                None => return Ok(None),
+            },
             Ok(SqlQuery::Use(UseStatement { database })) => vec![database.into()],
-            Ok(..) | Err(..) => return None,
+            Ok(..) | Err(..) => return Ok(None),
         };
 
-        state
+        if settings.admin && !state.is_readyset_schema_path(&search_path) {
+            unsupported!("{ADMIN_READYSET_SCHEMA_ONLY_MSG}");
+        }
+
+        Ok(state
             .update_readyset_schema_routing(search_path.as_slice())
-            .then(|| QueryResult::Noria(noria_connector::QueryResult::Empty))
+            .then(|| QueryResult::Noria(noria_connector::QueryResult::Empty)))
     }
 
     /// Get a session to the Readyset schema (backed by DataFusion).
@@ -1915,6 +1953,9 @@ where
         .into()));
 
         Self::check_routing(&self.connectors, &mut self.state).await?;
+        if self.settings.admin && !self.state.is_readyset_schema_path(&[db.into()]) {
+            unsupported!("{ADMIN_READYSET_SCHEMA_ONLY_MSG}");
+        }
         if self.state.update_readyset_schema_routing(&[db.into()]) {
             return Ok(());
         }
@@ -1974,6 +2015,10 @@ where
             self.update_connection_username(user);
         }
 
+        if self.settings.admin {
+            return Ok(());
+        }
+
         let Some(config) = &self.state.upstream_config else {
             return Ok(());
         };
@@ -2018,6 +2063,10 @@ where
         database: &str,
     ) -> Result<(), DB::Error> {
         Self::check_routing(&self.connectors, &mut self.state).await?;
+
+        if self.settings.admin {
+            unsupported!("CHANGE USER is not supported on admin connections");
+        }
 
         if let Some(readyset_schema) = &self.state.readyset_schema
             && readyset_schema.name() == database
@@ -2291,6 +2340,10 @@ where
 
     pub fn does_require_authentication(&self) -> bool {
         self.settings.require_authentication
+    }
+
+    pub fn is_admin(&self) -> bool {
+        self.settings.admin
     }
 
     /// Whether anything downstream consumes a query execution event: the query logger, the

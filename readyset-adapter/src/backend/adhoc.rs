@@ -535,7 +535,7 @@ where
             session_mutation::apply(&template, &[], session, registry);
         }
 
-        if let Some(result) = Self::check_readyset_schema_routing(state, &parsed) {
+        if let Some(result) = Self::check_readyset_schema_routing(settings, state, &parsed)? {
             return Ok(result);
         }
 

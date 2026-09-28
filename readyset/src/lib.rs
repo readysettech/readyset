@@ -11,8 +11,9 @@ use std::fs::remove_dir_all;
 use std::future::Future;
 use std::io::Read;
 use std::marker::Send;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
+use std::net::{AddrParseError, IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
@@ -25,7 +26,7 @@ use crossbeam_skiplist::SkipSet;
 use database_utils::{DatabaseType, DatabaseURL, TlsMode, UpstreamConfig};
 use failpoint_macros::set_failpoint;
 use futures_util::future::FutureExt;
-use futures_util::stream::{SelectAll, StreamExt};
+use futures_util::stream::{BoxStream, SelectAll, StreamExt};
 use health_reporter::{HealthReporter as AdapterHealthReporter, State as AdapterState};
 use metrics::{counter, gauge};
 use tokio::net;
@@ -38,7 +39,7 @@ use tracing::{debug, debug_span, error, info, span, warn, Level};
 use tracing_futures::Instrument;
 
 use readyset_adapter::backend::noria_connector::NoriaConnector;
-use readyset_adapter::backend::{AllowedUsers, MigrationMode, UnsupportedSetMode};
+use readyset_adapter::backend::{AllowedUsers, MigrationMode, UnsupportedSetMode, UsersSync};
 use readyset_adapter::cache_acl::{AclHandle, AclMatrix, ACL_QUEUE_CAPACITY};
 use readyset_adapter::cache_acl_worker::AclWorker;
 use readyset_adapter::cache_grants_vrel::AclCacheGrants;
@@ -129,6 +130,52 @@ pub trait ConnectionHandler {
     fn users_sync(&self) -> Option<Arc<dyn readyset_adapter::backend::UsersSync>> {
         None
     }
+}
+
+/// One `--admin-address` value: a bind address or `disabled`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AdminAddress {
+    Disabled,
+    Addr(SocketAddr),
+}
+
+impl FromStr for AdminAddress {
+    type Err = AddrParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.eq_ignore_ascii_case("disabled") {
+            Ok(Self::Disabled)
+        } else {
+            s.parse().map(Self::Addr)
+        }
+    }
+}
+
+/// [`UsersSync`] wrapper that merges the admin credentials into every fast-auth refresh, so
+/// `ALTER READYSET ... USER` cannot evict the admin user. Admin credentials take precedence on
+/// a username collision.
+#[derive(Debug)]
+struct AdminUsersSync {
+    inner: Arc<dyn UsersSync>,
+    admin: AllowedUsersMap,
+}
+
+impl UsersSync for AdminUsersSync {
+    fn refresh(&self, users: &AllowedUsersMap) {
+        let mut merged = users.clone();
+        merged.extend(self.admin.iter().map(|(k, v)| (k.clone(), v.clone())));
+        self.inner.refresh(&merged);
+    }
+}
+
+/// A listener's accepted sockets, each tagged with whether the listener serves admin connections.
+type TaggedListener = BoxStream<'static, io::Result<(bool, net::TcpStream)>>;
+
+/// Tagged at bind time; an accepted socket's local_addr never matches a wildcard bind.
+fn tag_listener(listener: net::TcpListener, is_admin: bool) -> TaggedListener {
+    TcpListenerStream::new(listener)
+        .map(move |s| s.map(|s| (is_admin, s)))
+        .boxed()
 }
 
 /// Parse and normalize the given string as an [`IpAddr`]
@@ -292,6 +339,20 @@ pub struct Options {
     /// behind a TLS-terminating proxy — the endpoint speaks plaintext HTTP.
     #[arg(long, env = "MCP_ADDRESS", default_value = "127.0.0.1:6035")]
     mcp_address: SocketAddr,
+
+    /// IP:PORT list for the admin SQL port, which serves the Readyset schema without an
+    /// upstream connection.  Pass `disabled` to turn the port off.
+    #[arg(
+        long,
+        env = "ADMIN_ADDRESS",
+        value_delimiter = ',',
+        default_value = "127.0.0.1:6036"
+    )]
+    admin_address: Vec<AdminAddress>,
+
+    /// <user>:<password> to authenticate connections to the admin SQL port with.
+    #[arg(long, env = "ADMIN_CREDENTIALS", default_value = "admin:admin")]
+    admin_credentials: RedactedString,
 
     /// Comma list of allowed usernames:passwords to authenticate database connections with.
     /// If not set, the username and password in --upstream-db-url will be used.
@@ -1009,6 +1070,29 @@ impl Options {
             ),
         }
     }
+
+    /// Admin-port bind addresses; empty when `--admin-address disabled` is passed.
+    fn admin_addresses(&self) -> anyhow::Result<Vec<SocketAddr>> {
+        let addresses: Vec<SocketAddr> = self
+            .admin_address
+            .iter()
+            .filter_map(|address| match address {
+                AdminAddress::Addr(addr) => Some(*addr),
+                AdminAddress::Disabled => None,
+            })
+            .collect();
+        ensure!(
+            addresses.len() == self.admin_address.len() || addresses.is_empty(),
+            "--admin-address 'disabled' cannot be combined with addresses"
+        );
+        Ok(addresses)
+    }
+
+    /// The `(user, password)` from `--admin-credentials`.
+    fn get_admin_credentials(&self) -> anyhow::Result<(String, String)> {
+        self.process_pair(&self.admin_credentials)
+            .map_err(|e| anyhow!("--admin-credentials: {e}"))
+    }
 }
 
 async fn connect_upstream<U>(upstream_config: UpstreamConfig) -> Result<Option<U>, U::Error>
@@ -1324,12 +1408,16 @@ where
             !listen_addresses.is_empty(),
             "No listen address configured; pass --address or set a default"
         );
+        let admin_addresses = options.admin_addresses()?;
+        let admin_credentials = (!admin_addresses.is_empty())
+            .then(|| options.get_admin_credentials())
+            .transpose()?;
         let mut all_listeners = SelectAll::new();
         for listen_address in listen_addresses {
             let listener = rt
                 .block_on(tokio::net::TcpListener::bind(listen_address))
                 .map_err(|e| anyhow!("Failed to bind listener on {listen_address}: {e}"))?;
-            all_listeners.push(TcpListenerStream::new(listener));
+            all_listeners.push(tag_listener(listener, false));
             info!(%listen_address, "Listening for new connections");
         }
         // Safe: ensured non-empty above.  Used as the address the query sampler
@@ -1340,7 +1428,15 @@ where
         if let Some(ref ddl_addr) = options.cache_ddl_address {
             info!(%ddl_addr, "Listening for cache ddl connections");
             let cache_ddl_listener = rt.block_on(tokio::net::TcpListener::bind(ddl_addr))?;
-            all_listeners.push(TcpListenerStream::new(cache_ddl_listener));
+            all_listeners.push(tag_listener(cache_ddl_listener, false));
+        }
+
+        for admin_address in &admin_addresses {
+            let listener = rt
+                .block_on(tokio::net::TcpListener::bind(admin_address))
+                .map_err(|e| anyhow!("Failed to bind admin listener on {admin_address}: {e}"))?;
+            all_listeners.push(tag_listener(listener, true));
+            info!(%admin_address, "Listening for admin connections");
         }
 
         let auto_increments: Arc<RwLock<HashMap<Relation, AtomicUsize>>> = Arc::default();
@@ -1378,11 +1474,24 @@ where
                 adapter_authority.load_or_init_allowed_users(self.database_type.into(), bootstrap),
             )?
         };
-        let users = Arc::new(AllowedUsers::new(
-            resolved_users,
-            self.connection_handler.users_sync(),
-        ));
+        let admin_users_map = admin_credentials.as_ref().map(|(user, password)| {
+            HashMap::from([(user.clone(), UserCredentials::new(password.clone()))])
+        });
+        let users_sync = match (self.connection_handler.users_sync(), &admin_users_map) {
+            (Some(inner), Some(admin_users_map)) => Some(Arc::new(AdminUsersSync {
+                inner,
+                admin: admin_users_map.clone(),
+            }) as Arc<dyn UsersSync>),
+            (users_sync, _) => users_sync,
+        };
+        let users = Arc::new(AllowedUsers::new(resolved_users, users_sync));
         self.connection_handler.warm_up(&users.read());
+
+        let mut admin_users = None;
+        if let Some(admin_users_map) = admin_users_map {
+            self.connection_handler.warm_up(&admin_users_map);
+            admin_users = Some(Arc::new(AllowedUsers::new(admin_users_map, None)));
+        }
 
         let adapter_rewrite_params = AdapterRewriteParams {
             dialect: self.database_type.into(),
@@ -2188,7 +2297,7 @@ where
         }
         let connection_shards = ConnectionShards::new(&shard_runtimes);
 
-        while let Some(Ok(s)) = rt.block_on(listener.next()) {
+        while let Some(Ok((is_admin, s))) = rt.block_on(listener.next()) {
             let client_addr = s.peer_addr()?;
             let connection = debug_span!("connection", addr = %client_addr);
             connection.in_scope(|| debug!("Accepted new connection"));
@@ -2214,7 +2323,6 @@ where
             let rls_coordinator = rls_coordinator.clone();
             let shallow_refresh_pool = shallow_refresh_pool.clone();
             let cache_acl = cache_acl.clone();
-            // If cache_ddl_address is not set, allow cache ddl from all addresses.
             let local_addr = s.local_addr()?;
             // Last use of the registered stream: hand the socket to its shard unregistered so the
             // shard's own I/O driver takes over readiness for it. See [`ClientSocket`].
@@ -2222,18 +2330,28 @@ where
                 None => ClientSocket::Registered(s),
                 Some(_) => ClientSocket::Unregistered(s.into_std()?),
             };
-            let allow_cache_ddl = options
-                .cache_ddl_address
-                .as_ref()
-                .map(|cache_ddl_addr| local_addr == *cache_ddl_addr)
-                .unwrap_or(true);
+            // Unset cache_ddl_address allows cache ddl everywhere; admin sessions always allow it.
+            let allow_cache_ddl = is_admin
+                || options
+                    .cache_ddl_address
+                    .as_ref()
+                    .map(|cache_ddl_addr| local_addr == *cache_ddl_addr)
+                    .unwrap_or(true);
+            let users = if is_admin {
+                admin_users
+                    .clone()
+                    .expect("admin listener accepted a connection without admin credentials")
+            } else {
+                users.clone()
+            };
             let backend_builder = BackendBuilder::new()
                 .client_addr(client_addr)
                 .slowlog(options.log_slow)
-                .users(users.clone())
+                .users(users)
                 .cache_acl(cache_acl.clone())
                 .allow_cache_ddl(allow_cache_ddl)
-                .require_authentication(!options.allow_unauthenticated_connections)
+                .admin(is_admin)
+                .require_authentication(is_admin || !options.allow_unauthenticated_connections)
                 .dialect(self.parse_dialect)
                 .parsing_preset(parsing_preset)
                 .query_log_sender(qlog_sender.clone())
@@ -3118,5 +3236,42 @@ mod tests {
                 .contains("does not support password rotation"),
             "unexpected error: {err}"
         );
+    }
+
+    /// Parse [`Options`] from `args` plus the required upstream URL.
+    fn opts(args: &[&str]) -> Options {
+        let mut argv = vec![
+            "readyset",
+            "--upstream-db-url",
+            "mysql://root:password@mysql:3306/readyset",
+        ];
+        argv.extend(args);
+        Options::parse_from(argv)
+    }
+
+    #[test]
+    fn admin_addresses() {
+        assert_eq!(
+            opts(&[]).admin_addresses().unwrap(),
+            vec!["127.0.0.1:6036".parse::<SocketAddr>().unwrap()]
+        );
+        assert_eq!(
+            opts(&["--admin-address", "0.0.0.0:6036,[::1]:7000"])
+                .admin_addresses()
+                .unwrap(),
+            vec![
+                "0.0.0.0:6036".parse::<SocketAddr>().unwrap(),
+                "[::1]:7000".parse().unwrap()
+            ]
+        );
+        assert_eq!(
+            opts(&["--admin-address", "Disabled"])
+                .admin_addresses()
+                .unwrap(),
+            vec![]
+        );
+        opts(&["--admin-address", "disabled,127.0.0.1:6036"])
+            .admin_addresses()
+            .unwrap_err();
     }
 }
