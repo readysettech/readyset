@@ -214,6 +214,51 @@ async fn set_search_path_runs_readyset_commands_psql() {
 #[tokio::test]
 #[tags(serial)]
 #[upstream(mysql)]
+async fn create_cache_denied_in_readyset_schema_mysql() {
+    init_test_logging();
+    let test_name = derive_test_name();
+    MySQLAdapter::recreate_database(&test_name).await;
+
+    let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .replicate_db(&test_name)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+
+    let mut conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+    conn.query_drop("CREATE TABLE create_denial (a INT)")
+        .await
+        .unwrap();
+
+    // Creation works with a database selected.
+    conn.query_drop("CREATE SHALLOW CACHE FROM SELECT a FROM create_denial WHERE a = 1")
+        .await
+        .unwrap();
+
+    // The same statements are denied once the session's database is the Readyset schema.
+    conn.query_drop("USE readyset").await.unwrap();
+    for stmt in [
+        "CREATE CACHE FROM SELECT a FROM create_denial WHERE a = ?",
+        "CREATE SHALLOW CACHE FROM SELECT a FROM create_denial WHERE a = 1",
+        "EXPLAIN CREATE CACHE FROM SELECT a FROM create_denial WHERE a = ?",
+    ] {
+        let err = conn.query_drop(stmt).await.unwrap_err();
+        assert!(err.to_string().contains("Readyset schema"), "{stmt}: {err}");
+    }
+
+    // Selecting a database again lifts the denial.
+    conn.query_drop(format!("USE {test_name}")).await.unwrap();
+    conn.query_drop("CREATE SHALLOW CACHE FROM SELECT a FROM create_denial WHERE a = 1")
+        .await
+        .unwrap();
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test]
+#[tags(serial)]
+#[upstream(mysql)]
 async fn readyset_schema_session_with_unreachable_upstream_mysql() {
     init_test_logging();
     let test_name = derive_test_name();

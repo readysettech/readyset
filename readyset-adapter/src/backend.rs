@@ -168,6 +168,10 @@ pub const READYSET_ACL_POOLER: &str = "READYSET_ACL_POOLER";
 
 const UNSUPPORTED_CACHE_DDL_MSG: &str = "This instance has been provisioned through Readyset Cloud. Please use the Readyset Cloud UI to manage caches. You may continue to use the SQL interface to run other 'read' commands.";
 
+pub(crate) const CACHE_CREATE_IN_READYSET_SCHEMA_MSG: &str = "Cache creation is not supported \
+    while the Readyset schema is the session's database. Connect with a database selected to \
+    create caches.";
+
 /// Placeholder username for connections that have not yet authenticated
 const UNAUTHENTICATED_USER: &str = "unauthenticated";
 

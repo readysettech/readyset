@@ -53,9 +53,9 @@ use vec1::Vec1;
 
 use super::noria_connector::{self, MetaVariable};
 use super::{
-    Backend, BackendConnectors, BackendSettings, BackendState, UNSUPPORTED_CACHE_DDL_MSG,
-    acl_creator, create_cache_statement, readyset_version, resolve_coalesce,
-    resolve_eviction_policy,
+    Backend, BackendConnectors, BackendSettings, BackendState, CACHE_CREATE_IN_READYSET_SCHEMA_MSG,
+    UNSUPPORTED_CACHE_DDL_MSG, acl_creator, create_cache_statement, readyset_version,
+    resolve_coalesce, resolve_eviction_policy,
 };
 use crate::cache_acl::{AclMessage, CacheCreator, PassTrigger};
 use crate::utils::create_dummy_column;
@@ -1581,11 +1581,17 @@ where
                     .await
             }
             SqlQuery::Explain(explain @ ExplainStatement::CreateCache { .. }) => {
+                if state.readyset_schema_route_all {
+                    unsupported!("{CACHE_CREATE_IN_READYSET_SCHEMA_MSG}");
+                }
                 Self::explain_create_cache(connectors, settings, state, explain).await
             }
             SqlQuery::CreateCache(create_cache_stmt) => {
                 if !settings.allow_cache_ddl {
-                    unsupported!("{}", UNSUPPORTED_CACHE_DDL_MSG);
+                    unsupported!("{UNSUPPORTED_CACHE_DDL_MSG}");
+                }
+                if state.readyset_schema_route_all {
+                    unsupported!("{CACHE_CREATE_IN_READYSET_SCHEMA_MSG}");
                 }
 
                 create_cache_stmt.detect_and_validate_bucket_always()?;
