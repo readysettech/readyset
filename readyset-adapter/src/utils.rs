@@ -180,11 +180,30 @@ struct BinopsParameterColumnsVisitor<'ast> {
     parameter_cols: Vec<(&'ast Column, BinaryOperator)>,
 }
 
-impl BinopsParameterColumnsVisitor<'_> {
+impl<'ast> BinopsParameterColumnsVisitor<'ast> {
     fn new() -> Self {
         Self {
             parameter_cols: Vec::new(),
         }
+    }
+
+    /// Records the column a placeholder is compared to, whichever side each is on, and returns
+    /// whether `lhs` and `rhs` were such a pair.
+    fn push_parameter_column(
+        &mut self,
+        lhs: &'ast Expr,
+        rhs: &'ast Expr,
+        binop: BinaryOperator,
+    ) -> bool {
+        let pair = match (lhs, rhs) {
+            (Expr::Column(c), Expr::Literal(Literal::Placeholder(_))) => (c, binop),
+            (Expr::Literal(Literal::Placeholder(_)), Expr::Column(c)) => {
+                (c, binop.flip_ordering_comparison().unwrap_or(binop))
+            }
+            _ => return false,
+        };
+        self.parameter_cols.push(pair);
+        true
     }
 }
 
@@ -199,30 +218,21 @@ impl<'ast> Visitor<'ast> for BinopsParameterColumnsVisitor<'ast> {
                 lhs,
                 rhs,
                 op: binop,
-            } => match (lhs.as_ref(), rhs.as_ref()) {
-                (Expr::Column(c), Expr::Literal(Literal::Placeholder(_))) => {
-                    self.parameter_cols.push((c, *binop));
-                    return Ok(());
-                }
-                (Expr::Literal(Literal::Placeholder(_)), Expr::Column(c)) => {
-                    self.parameter_cols
-                        .push((c, binop.flip_ordering_comparison().unwrap_or(*binop)));
+            } => {
+                if self.push_parameter_column(lhs, rhs, *binop) {
                     return Ok(());
                 }
                 // A row comparison takes one parameter per position pairing a column with a
                 // placeholder.
-                (Expr::Row { exprs: lhs, .. }, Expr::Row { exprs: rhs, .. }) => {
+                if let (Expr::Row { exprs: lhs, .. }, Expr::Row { exprs: rhs, .. }) =
+                    (lhs.as_ref(), rhs.as_ref())
+                {
                     for (lhs, rhs) in lhs.iter().zip(rhs) {
-                        if let (Expr::Column(c), Expr::Literal(Literal::Placeholder(_))) =
-                            (lhs, rhs)
-                        {
-                            self.parameter_cols.push((c, *binop));
-                        }
+                        self.push_parameter_column(lhs, rhs, *binop);
                     }
                     return Ok(());
                 }
-                _ => (),
-            },
+            }
             Expr::In {
                 lhs,
                 rhs: InValue::List(exprs),

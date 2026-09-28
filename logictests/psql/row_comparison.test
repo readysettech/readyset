@@ -102,6 +102,15 @@ $2 = 1
 ----
 1
 
+# Placeholders on the left of a row of columns are turned around to face them, each still binding
+# the column at its own position.
+query I rowsort
+SELECT id FROM t WHERE ($1, $2) = (b, d)
+$1 = 1
+$2 = 2
+----
+5
+
 # A literal beside the placeholder is lifted, so the client binds one value and the pass supplies
 # the other. The lifted one takes the position after the placeholder, not the placeholder's own.
 query I rowsort

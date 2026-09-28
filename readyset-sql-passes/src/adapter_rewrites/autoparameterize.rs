@@ -349,6 +349,13 @@ impl AutoParameterizeVisitor {
                         mem::swap(lhs, rhs);
                         return self.visit_expr(expression);
                     }
+                    (Expr::Row { exprs: lhs_exprs, .. }, BinaryOperator::Equal, Expr::Row { exprs: rhs_exprs, .. })
+                        if is_parameterizable_row_equality(rhs_exprs, lhs_exprs) =>
+                    {
+                        // for (lit, ..) = (col, ..), swap the rows first then revisit
+                        mem::swap(lhs, rhs);
+                        return self.visit_expr(expression);
+                    }
                     (Expr::Literal(_), op, Expr::Column(_)) if op.is_ordering_comparison() => {
                         // for lit <ordering op> col, swap operands and flip operator, then revisit
                         mem::swap(lhs, rhs);
@@ -607,6 +614,13 @@ impl<'ast> VisitorMut<'ast> for AnalyzeLiteralsVisitor {
                     }
                     (Expr::Literal(_), BinaryOperator::Equal | BinaryOperator::NotEqual, Expr::Column(_)) => {
                         // for lit = col and lit != col, swap the equality first then revisit
+                        mem::swap(lhs, rhs);
+                        return self.visit_expr(expression);
+                    }
+                    (Expr::Row { exprs: lhs_exprs, .. }, BinaryOperator::Equal, Expr::Row { exprs: rhs_exprs, .. })
+                        if is_parameterizable_row_equality(rhs_exprs, lhs_exprs) =>
+                    {
+                        // for (lit, ..) = (col, ..), swap the rows first then revisit
                         mem::swap(lhs, rhs);
                         return self.visit_expr(expression);
                     }
@@ -1662,6 +1676,31 @@ mod tests {
                     vec![(0, 5.into())],
                 );
             }
+        }
+
+        /// A row of literals compared to a row of columns is turned around first, as a scalar
+        /// comparison is, so its literals key the lookup on the columns they face and count as an
+        /// equality when choosing the parameter mode. A row that would still not key a lookup
+        /// turned around stays as written.
+        #[test]
+        fn row_equality_with_literals_on_the_left_is_turned_around() {
+            test_auto_parameterize_mysql(
+                "SELECT id FROM users WHERE ('Bob', 27) = (name, age)",
+                "SELECT id FROM users WHERE (name, age) = (?, ?)",
+                vec![(0, "Bob".into()), (1, 27.into())],
+            );
+            test_auto_parameterize_mysql(
+                "SELECT id FROM users WHERE (?, 27) = (name, age)",
+                "SELECT id FROM users WHERE (name, age) = (?, ?)",
+                vec![(1, 27.into())],
+            );
+            test_auto_parameterize_mysql(
+                "SELECT id FROM users WHERE ('Bob', 27) = (name, age) AND score > 5",
+                "SELECT id FROM users WHERE (name, age) = (?, ?) AND score > 5",
+                vec![(0, "Bob".into()), (1, 27.into())],
+            );
+            let kept = "SELECT id FROM users WHERE (name, 'x') = (age, score)";
+            test_auto_parameterize_mysql(kept, kept, vec![]);
         }
     }
 
