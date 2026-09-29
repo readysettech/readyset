@@ -1848,6 +1848,52 @@ async fn large_packet_query_response_seq() {
     .await;
 }
 
+/// Cached column definitions also start the response after every segment of a multi-packet
+/// command, as in `large_packet_query_response_seq`.
+#[tokio::test]
+async fn large_packet_query_cached_columns_response_seq() {
+    let padding = "x".repeat(17_000_000);
+    let query = format!("SELECT a /* {padding} */");
+
+    TestingShim::new(
+        |_, w| {
+            let cols = [Column {
+                schema: String::new(),
+                table: String::new(),
+                org_table: String::new(),
+                column: "a".to_owned(),
+                org_name: String::new(),
+                coltype: myc::constants::ColumnType::MYSQL_TYPE_SHORT,
+                column_length: 6,
+                colflags: myc::constants::ColumnFlags::empty(),
+                character_set: DEFAULT_CHARACTER_SET,
+                decimals: 0,
+            }];
+            let cached: Arc<[u8]> =
+                mysql_srv::prepare_column_definitions(&cols, Encoding::Utf8).into();
+            Box::pin(async move {
+                let mut w = w.start_with_cache(&cols, cached).await?;
+                w.write_col(1i16)?;
+                w.finish().await
+            })
+        },
+        |_| 0,
+        |_, _, _| unreachable!(),
+        |_| unreachable!(),
+        move |_, _, _| unreachable!(),
+    )
+    .test_with_opts(
+        move |db| {
+            Box::pin(async move {
+                let rows: Vec<i16> = db.query(&query).await.unwrap();
+                assert_eq!(rows, vec![1]);
+            })
+        },
+        "max_allowed_packet=67108864",
+    )
+    .await;
+}
+
 fn ensure_auth_keys() {
     let _ = AuthKeys::initialize(None);
 }

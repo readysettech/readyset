@@ -299,6 +299,12 @@ pub(crate) async fn column_definitions_cached<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    // The cached bytes number their packets from 1, so a response that starts later, after a
+    // command split across packets, writes the definitions fresh.
+    if conn.seq != 1 {
+        return column_definitions(columns, conn).await;
+    }
+
     // Enqueue the cached column definitions, then advance past the column-count and column
     // definition packets whose sequence ids are baked into the cached bytes.
     conn.enqueue_raw(cached);
