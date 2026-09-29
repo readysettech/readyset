@@ -98,6 +98,10 @@ extern crate readyset_alloc;
 /// Retry interval to use when attempting to connect to the upstream database
 const UPSTREAM_CONNECTION_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 
+/// Share of the memory limit given to the shallow cache when `--shallow-memory-percent` is not set
+/// and deep caches can use the same memory.
+const DEFAULT_SHALLOW_MEMORY_PERCENT_WITH_DEEP: f64 = 50.0;
+
 pub trait ConnectionHandler {
     type UpstreamDatabase: UpstreamDatabase;
     type Handler: QueryHandler;
@@ -396,7 +400,8 @@ pub struct Options {
     fallback_recovery_seconds: u64,
 
     /// Percentage of memory-limit to allocate for shallow cache (0.0-100.0).
-    /// Only applies when memory-limit is set. If not specified, shallow cache has no memory limit.
+    /// Only applies when memory-limit is not 0. If not specified, shallow cache gets the whole
+    /// memory limit in `shallow` cache mode and half of it in the other modes.
     #[arg(
         long,
         env = "SHALLOW_MEMORY_PERCENT",
@@ -1103,6 +1108,23 @@ where
             }
         }
     }
+}
+
+/// Resolves the shallow cache capacity in bytes, or `None` for unbounded. A memory limit of 0 means
+/// unlimited, so the shallow cache is unbounded too.
+fn shallow_max_capacity(
+    memory_limit: usize,
+    percent: Option<f64>,
+    cache_mode: CacheMode,
+) -> Option<u64> {
+    if memory_limit == 0 {
+        return None;
+    }
+    let percent = percent.unwrap_or(match cache_mode {
+        CacheMode::Shallow => 100.0,
+        CacheMode::Deep | CacheMode::DeepThenShallow => DEFAULT_SHALLOW_MEMORY_PERCENT_WITH_DEEP,
+    });
+    Some((memory_limit as f64 * percent / 100.0) as u64)
 }
 
 /// Resolves worker threads per connection shard, defaulting to `available_parallelism / shards` so
@@ -1852,14 +1874,11 @@ where
                     runtime.shutdown_background();
                 })?;
         }
-        let shallow_max_capacity = options
-            .shallow_memory_percent
-            .filter(|_| memory_limit > 0)
-            .map(|percent| (memory_limit as f64 * percent / 100.0) as u64)
-            .or_else(|| {
-                (memory_limit > 0 && options.cache_mode == CacheMode::Shallow)
-                    .then_some(memory_limit as u64)
-            });
+        let shallow_max_capacity = shallow_max_capacity(
+            memory_limit,
+            options.shallow_memory_percent,
+            options.cache_mode,
+        );
         info!("Total Shallow memory: {:?}", shallow_max_capacity);
         let shallow_max_entry_bytes =
             (options.shallow_max_entry_bytes > 0).then_some(options.shallow_max_entry_bytes);
@@ -2460,6 +2479,42 @@ mod tests {
 
     // Certain clap things, like `requires`, only ever throw an error at runtime, not at
     // compile-time - this tests that none of those happen
+    #[test]
+    fn shallow_capacity_unbounded_without_memory_limit() {
+        for mode in [
+            CacheMode::Shallow,
+            CacheMode::Deep,
+            CacheMode::DeepThenShallow,
+        ] {
+            assert_eq!(shallow_max_capacity(0, None, mode), None);
+            assert_eq!(shallow_max_capacity(0, Some(25.0), mode), None);
+        }
+    }
+
+    #[test]
+    fn shallow_capacity_defaults_by_cache_mode() {
+        assert_eq!(
+            shallow_max_capacity(1000, None, CacheMode::Shallow),
+            Some(1000)
+        );
+        assert_eq!(shallow_max_capacity(1000, None, CacheMode::Deep), Some(500));
+        assert_eq!(
+            shallow_max_capacity(1000, None, CacheMode::DeepThenShallow),
+            Some(500)
+        );
+    }
+
+    #[test]
+    fn shallow_capacity_uses_explicit_percent() {
+        for mode in [
+            CacheMode::Shallow,
+            CacheMode::Deep,
+            CacheMode::DeepThenShallow,
+        ] {
+            assert_eq!(shallow_max_capacity(1000, Some(25.0), mode), Some(250));
+        }
+    }
+
     #[test]
     fn arg_parsing_noria_standalone() {
         let opts = Options::parse_from(vec![
