@@ -1645,7 +1645,7 @@ where
        select s.sn from s where t.rownum = s.status and s.sn is not null
    );"#;
     let expected_text = r#"SELECT "t"."rownum" FROM "rsdatatypesnull" AS "t" LEFT OUTER JOIN
-        (SELECT "s"."sn" AS "sn", "s"."status" AS "status" FROM "s" WHERE ("s"."sn" IS NOT NULL)) AS "GNL" ON
+        (SELECT DISTINCT "s"."sn" AS "sn", "s"."status" AS "status" FROM "s" WHERE ("s"."sn" IS NOT NULL)) AS "GNL" ON
         (("t"."rownum" = "GNL"."status") AND ("t"."rs_string" = "GNL"."sn")) LEFT OUTER JOIN
         (SELECT DISTINCT 1 AS "present_", "s"."status" AS "status" FROM "s" WHERE ("s"."sn" IS NOT NULL)) AS "EP_3VL" ON
         ("t"."rownum" = "EP_3VL"."status")
@@ -1704,7 +1704,7 @@ where
        select s.sn from s where t.rownum = s.status
    );"#;
     let expected_text = r#"SELECT "t"."rownum" FROM "rsdatatypesnull" AS "t" LEFT OUTER JOIN
-        (SELECT "s"."sn" AS "sn", "s"."status" AS "status" FROM "s") AS "GNL"
+        (SELECT DISTINCT "s"."sn" AS "sn", "s"."status" AS "status" FROM "s") AS "GNL"
         ON (("t"."rownum" = "GNL"."status") AND ("t"."rs_string" = "GNL"."sn")) LEFT OUTER JOIN
         (SELECT DISTINCT "NP_3VL"."present_" AS "present_", "NP_3VL"."status" AS "status"
         FROM (SELECT 1 AS "present_", "s"."sn" AS "sn", "s"."status" AS "status" FROM "s") AS "NP_3VL"
@@ -3311,7 +3311,7 @@ fn test111() {
     let expected_text = r#"SELECT CASE WHEN ("GNL1"."i" IS NOT NULL) THEN TRUE
         WHEN (("t1"."i" IS NULL) AND ("EP_3VL"."present_" IS NOT NULL)) THEN NULL
         WHEN ("NP_3VL"."present_" IS NOT NULL) THEN NULL ELSE FALSE END AS "in1" FROM "test1" AS "t1" LEFT OUTER JOIN
-        (SELECT "t2"."i" AS "i", "t2"."t" AS "t" FROM "test2" AS "t2") AS "GNL" ON (("GNL"."t" = "t1"."t") AND ("t1"."i" = "GNL"."i"))
+        (SELECT DISTINCT "t2"."i" AS "i", "t2"."t" AS "t" FROM "test2" AS "t2") AS "GNL" ON (("GNL"."t" = "t1"."t") AND ("t1"."i" = "GNL"."i"))
         LEFT OUTER JOIN (SELECT DISTINCT "NP_3VL"."present_" AS "present_", "NP_3VL"."t" AS "t" FROM
         (SELECT 1 AS "present_", "t2"."i" AS "i", "t2"."t" AS "t" FROM "test2" AS "t2") AS "NP_3VL"
         WHERE ("NP_3VL"."i" IS NULL)) AS "NP_3VL" ON ("NP_3VL"."t" = "t1"."t") LEFT OUTER JOIN
@@ -3807,7 +3807,7 @@ WHERE t1.i NOT IN (SELECT t2.i FROM test2 t2 WHERE t2.t = t1.t);"#;
     let expected_text = r#"SELECT CASE WHEN ("GNL1"."i" IS NOT NULL) THEN TRUE
         WHEN (("t1"."i" IS NULL) AND ("EP_3VL"."present_" IS NOT NULL)) THEN NULL
         WHEN ("NP_3VL"."present_" IS NOT NULL) THEN NULL ELSE FALSE END AS "in1" FROM "test1" AS "t1" LEFT OUTER JOIN
-        (SELECT "t2"."i" AS "i", "t2"."t" AS "t" FROM "test2" AS "t2") AS "GNL"
+        (SELECT DISTINCT "t2"."i" AS "i", "t2"."t" AS "t" FROM "test2" AS "t2") AS "GNL"
         ON (("GNL"."t" = "t1"."t") AND ("t1"."i" = "GNL"."i")) LEFT OUTER JOIN
         (SELECT DISTINCT "NP_3VL"."present_" AS "present_", "NP_3VL"."t" AS "t" FROM
         (SELECT 1 AS "present_", "t2"."i" AS "i", "t2"."t" AS "t" FROM "test2" AS "t2") AS "NP_3VL"
@@ -4059,7 +4059,7 @@ WHERE
    )
 ORDER BY
    1, 2, 3, 4, 5, 6;"#;
-    let expected_text = r#"SELECT "s"."sname" FROM "s" LEFT OUTER JOIN (SELECT "INNER"."mx" AS "mx", "INNER"."sn" AS "sn" FROM
+    let expected_text = r#"SELECT "s"."sname" FROM "s" LEFT OUTER JOIN (SELECT DISTINCT "INNER"."mx" AS "mx", "INNER"."sn" AS "sn" FROM
         (SELECT "INNER"."mx" AS "mx", "INNER"."sn" AS "sn", ROW_NUMBER() OVER(PARTITION BY "INNER"."sn" ORDER BY "INNER"."mx" ASC NULLS LAST) AS "__rn"
         FROM (SELECT max("spj"."pn") AS "mx", "spj"."sn" AS "sn" FROM "spj" WHERE ("spj"."sn" = 'spj.sn') GROUP BY "spj"."jn", "spj"."sn") AS "INNER") AS "INNER"
         WHERE ("INNER"."__rn" <= 1)) AS "GNL" ON (("GNL"."sn" = "s"."sn") AND ("s"."pn" = "GNL"."mx")) LEFT OUTER JOIN
@@ -4177,7 +4177,7 @@ WHERE s.city NOT IN (
   ) AS z
   WHERE z.rn = 1 AND z.city = s.city
 );"#;
-    let expected_text = r#"SELECT "s"."sn" FROM "s" LEFT OUTER JOIN (SELECT "z"."city" AS "city" FROM
+    let expected_text = r#"SELECT "s"."sn" FROM "s" LEFT OUTER JOIN (SELECT DISTINCT "z"."city" AS "city" FROM
         (SELECT "p"."city", ROW_NUMBER() OVER(PARTITION BY "p"."city" ORDER BY "p"."weight" DESC NULLS FIRST) AS "rn" FROM "p") AS "z"
         WHERE ("z"."rn" = 1)) AS "GNL" ON ("GNL"."city" = "s"."city") LEFT OUTER JOIN (SELECT DISTINCT 1 AS "present_", "z"."city" AS "city"
         FROM (SELECT "p"."city", ROW_NUMBER() OVER(PARTITION BY "p"."city" ORDER BY "p"."weight" DESC NULLS FIRST) AS "rn" FROM "p") AS "z"
@@ -4258,7 +4258,7 @@ WHERE s.city NOT IN (
   WHERE t.pn = s.pn
 );"#;
     let expected_text = r#"SELECT "s"."sn" FROM "s" LEFT OUTER JOIN
-        (SELECT CASE WHEN (1 = 1) THEN NULL ELSE "t"."city" END AS "city", "t"."pn" AS "pn" FROM
+        (SELECT DISTINCT CASE WHEN (1 = 1) THEN NULL ELSE "t"."city" END AS "city", "t"."pn" AS "pn" FROM
         (SELECT "p"."city", "p"."pn" FROM "p") AS "t" JOIN (SELECT "spj"."pn" FROM "spj") AS "u" ON ("u"."pn" = "t"."pn")) AS "GNL"
         ON (("GNL"."pn" = "s"."pn") AND ("s"."city" = "GNL"."city")) LEFT OUTER JOIN
         (SELECT DISTINCT "NP_3VL"."present_" AS "present_", "NP_3VL"."pn" AS "pn" FROM
@@ -4295,7 +4295,7 @@ fn test144() {
         SELECT s.sn
         FROM s
         WHERE s.sn NOT IN (SELECT spj.sn FROM spj WHERE spj.qty IS NULL);"#;
-    let expected_text = r#"SELECT "s"."sn" FROM "s" LEFT OUTER JOIN (SELECT "spj"."sn" AS "sn" FROM "spj"
+    let expected_text = r#"SELECT "s"."sn" FROM "s" LEFT OUTER JOIN (SELECT DISTINCT "spj"."sn" AS "sn" FROM "spj"
         WHERE ("spj"."qty" IS NULL)) AS "GNL" ON ("s"."sn" = "GNL"."sn") LEFT OUTER JOIN
         (SELECT DISTINCT "NP_3VL"."present_" AS "present_" FROM (SELECT 1 AS "present_", "spj"."sn" AS "sn" FROM "spj"
         WHERE ("spj"."qty" IS NULL)) AS "NP_3VL" WHERE ("NP_3VL"."sn" IS NULL)) AS "NP_3VL"  LEFT OUTER JOIN
@@ -4388,7 +4388,7 @@ select s.sn
 from s
 where s.sn not in (select t.sn from spj t where t.qty is null or t.qty > 0);
 "#;
-    let expected_text = r#"SELECT "s"."sn" FROM "s" LEFT OUTER JOIN (SELECT "t"."sn" AS "sn" FROM "spj" AS "t"
+    let expected_text = r#"SELECT "s"."sn" FROM "s" LEFT OUTER JOIN (SELECT DISTINCT "t"."sn" AS "sn" FROM "spj" AS "t"
         WHERE (("t"."qty" IS NULL) OR ("t"."qty" > 0))) AS "GNL" ON ("s"."sn" = "GNL"."sn") LEFT OUTER JOIN
         (SELECT DISTINCT "NP_3VL"."present_" AS "present_" FROM (SELECT 1 AS "present_", "t"."sn" AS "sn" FROM "spj" AS "t"
         WHERE (("t"."qty" IS NULL) OR ("t"."qty" > 0))) AS "NP_3VL" WHERE ("NP_3VL"."sn" IS NULL)) AS "NP_3VL"  LEFT OUTER JOIN
@@ -5360,7 +5360,7 @@ fn test190() {
     let original_text = r#"
 SELECT s.sname FROM s WHERE s.sn NOT IN (SELECT MAX(spj.sn) OVER() FROM spj)"#;
     let expected_text = r#"SELECT "s"."sname" FROM "s" LEFT OUTER JOIN
-        (SELECT max("spj"."sn") OVER() AS "max(""spj"".""sn"") OVER()" FROM "spj") AS "GNL" ON
+        (SELECT DISTINCT max("spj"."sn") OVER() AS "max(""spj"".""sn"") OVER()" FROM "spj") AS "GNL" ON
         ("s"."sn" = "GNL"."max(""spj"".""sn"") OVER()") LEFT OUTER JOIN
         (SELECT DISTINCT "NP_3VL"."present_" AS "present_" FROM
         (SELECT 1 AS "present_", max("spj"."sn") OVER() AS "max(""spj"".""sn"") OVER()" FROM "spj") AS "NP_3VL"
@@ -6583,7 +6583,7 @@ WHERE v.x NOT IN (
     "#;
     let expected_text = r#"SELECT count(*) AS "should_equal_baseline" FROM (SELECT "dt"."rownum",
     nullif("dt"."rownum", "dt"."rownum") AS "x" FROM "qa"."datatypes" AS "dt") AS "v" LEFT OUTER JOIN
-    (SELECT "INNER"."rownum" AS "rownum" FROM (SELECT "d1"."rownum" AS "rownum", ROW_NUMBER() OVER() AS "__rn"
+    (SELECT DISTINCT "INNER"."rownum" AS "rownum" FROM (SELECT "d1"."rownum" AS "rownum", ROW_NUMBER() OVER() AS "__rn"
     FROM "qa"."datatypes1" AS "d1") AS "INNER" WHERE ("INNER"."__rn" > 1000000)) AS "GNL"
     ON ("v"."x" = "GNL"."rownum") LEFT OUTER JOIN (SELECT DISTINCT "NP_3VL"."present_" AS "present_"
     FROM (SELECT "INNER"."present_" AS "present_", "INNER"."rownum" AS "rownum" FROM
@@ -6617,7 +6617,7 @@ WHERE v.x NOT IN (
 "#;
     let expected_text = r#"SELECT count(*) AS "should_equal_baseline" FROM
     (SELECT "dt"."rownum", "dt"."test_int", nullif("dt"."rownum", "dt"."rownum") AS "x" FROM "qa"."datatypes" AS "dt") AS "v"
-    LEFT OUTER JOIN (SELECT "INNER"."rownum" AS "rownum", "INNER"."test_int" AS "test_int" FROM
+    LEFT OUTER JOIN (SELECT DISTINCT "INNER"."rownum" AS "rownum", "INNER"."test_int" AS "test_int" FROM
     (SELECT "d1"."rownum" AS "rownum", "d1"."test_int" AS "test_int", ROW_NUMBER() OVER(PARTITION BY "d1"."test_int") AS "__rn"
     FROM "qa"."datatypes1" AS "d1") AS "INNER" WHERE (("INNER"."__rn" > 1000000) AND ("INNER"."__rn" <= 1000010))) AS "GNL"
     ON (("GNL"."test_int" = "v"."test_int") AND ("v"."x" = "GNL"."rownum")) LEFT OUTER JOIN
@@ -7263,7 +7263,7 @@ WHERE s.sn NOT IN (
   LIMIT 4
 );"#;
     let expected_text = r#"SELECT "s"."sn" FROM "s" AS "s" LEFT OUTER JOIN
-        (SELECT "INNER"."sn" AS "sn" FROM
+        (SELECT DISTINCT "INNER"."sn" AS "sn" FROM
         (SELECT "t"."sn" AS "sn" FROM "spj" AS "t" ORDER BY "t"."qty" DESC NULLS FIRST LIMIT 4) AS "INNER")
         AS "GNL" ON ("s"."sn" = "GNL"."sn") LEFT OUTER JOIN
         (SELECT DISTINCT "NP_3VL"."present_" AS "present_" FROM

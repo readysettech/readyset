@@ -1,0 +1,186 @@
+# A correlated NOT IN keeps its entry as its own node so the base table does not reach several
+# inputs of one join. The trigger is deleting the row an outer row matched on, where the outer
+# column is nullable: the existence probe reads every row of the group, so one delete reaches
+# both sides of the join and the row comes back twice (REA-7072).
+#
+# Emptying the group does it too, and on its own. It goes first because the harness stops at the
+# first failure, so a case ordered after another trigger can never be the one that fails.
+
+statement ok
+create table s0 (sn int, pn int);
+
+statement ok
+insert into s0 (sn, pn) values (1, 100), (2, 200), (3, 300);
+
+statement ok
+create table t0 (id int primary key, sn int, pn int);
+
+statement ok
+insert into t0 (id, sn, pn) values (1, 1, 100), (2, 1, 777), (3, 2, 888), (4, 3, 300);
+
+query I nosort
+SELECT s0.sn FROM s0 WHERE s0.pn NOT IN (SELECT t0.pn FROM t0 WHERE t0.sn = s0.sn) ORDER BY s0.sn;
+----
+2
+
+# The only write: group 3 empties, so sn=3 newly qualifies. Without the fix it came back twice.
+statement ok
+delete from t0 where id = 4;
+
+query I nosort
+SELECT s0.sn FROM s0 WHERE s0.pn NOT IN (SELECT t0.pn FROM t0 WHERE t0.sn = s0.sn) ORDER BY s0.sn;
+----
+2
+3
+
+statement ok
+create table s (sn int, pn int);
+
+statement ok
+insert into s (sn, pn) values (1, 100), (2, 200), (3, 300);
+
+statement ok
+create table t (id int primary key, sn int, pn int);
+
+statement ok
+insert into t (id, sn, pn) values (1, 1, 100), (2, 1, 777), (3, 2, 888), (4, 3, 300);
+
+# Baseline. This one holds without the fix too: it pins 3VL semantics, not the shape.
+# Only sn=2 qualifies: groups 1 and 3 contain a matching row.
+query I nosort
+SELECT s.sn FROM s WHERE s.pn NOT IN (SELECT t.pn FROM t WHERE t.sn = s.sn) ORDER BY s.sn;
+----
+2
+
+# The trigger: sn=1 loses its match but its group still holds 777, so it newly qualifies.
+statement ok
+delete from t where id = 1;
+
+query I nosort
+SELECT s.sn FROM s WHERE s.pn NOT IN (SELECT t.pn FROM t WHERE t.sn = s.sn) ORDER BY s.sn;
+----
+1
+2
+
+# The same again, emptying the group rather than leaving a row behind.
+statement ok
+delete from t where id = 4;
+
+query I nosort
+SELECT s.sn FROM s WHERE s.pn NOT IN (SELECT t.pn FROM t WHERE t.sn = s.sn) ORDER BY s.sn;
+----
+1
+2
+3
+
+# A NULL in the group makes the answer unknown, so sn=2 drops out.
+statement ok
+insert into t (id, sn, pn) values (5, 2, NULL);
+
+query I nosort
+SELECT s.sn FROM s WHERE s.pn NOT IN (SELECT t.pn FROM t WHERE t.sn = s.sn) ORDER BY s.sn;
+----
+1
+3
+
+# Re-adding the match takes sn=1 back out.
+statement ok
+insert into t (id, sn, pn) values (6, 1, 100);
+
+query I nosort
+SELECT s.sn FROM s WHERE s.pn NOT IN (SELECT t.pn FROM t WHERE t.sn = s.sn) ORDER BY s.sn;
+----
+3
+
+# Uncorrelated NOT IN reaches the same anti-join path. This baseline also holds without
+# the fix; the delete below it is the discriminator.
+statement ok
+create table u (id int primary key, pn int);
+
+statement ok
+insert into u (id, pn) values (1, 100), (2, 777);
+
+query I nosort
+SELECT s.sn FROM s WHERE s.pn NOT IN (SELECT u.pn FROM u) ORDER BY s.sn;
+----
+2
+3
+
+statement ok
+delete from u where id = 1;
+
+query I nosort
+SELECT s.sn FROM s WHERE s.pn NOT IN (SELECT u.pn FROM u) ORDER BY s.sn;
+----
+1
+2
+3
+
+# An empty right side makes NOT IN true for every row.
+statement ok
+delete from u where id = 2;
+
+query I nosort
+SELECT s.sn FROM s WHERE s.pn NOT IN (SELECT u.pn FROM u) ORDER BY s.sn;
+----
+1
+2
+3
+
+# A NULL on the right makes every answer unknown.
+statement ok
+insert into u (id, pn) values (3, NULL);
+
+query I nosort
+SELECT s.sn FROM s WHERE s.pn NOT IN (SELECT u.pn FROM u) ORDER BY s.sn;
+----
+
+# Duplicate outer rows must both survive. NOT IN is a filter, so set semantics on the entry
+# must not dedupe the outer side.
+statement ok
+create table d (sn int, pn int);
+
+statement ok
+insert into d (sn, pn) values (1, 100), (1, 100), (2, 200);
+
+statement ok
+create table dt (id int primary key, sn int, pn int);
+
+statement ok
+insert into dt (id, sn, pn) values (1, 2, 200);
+
+query I nosort
+SELECT d.sn FROM d WHERE d.pn NOT IN (SELECT dt.pn FROM dt WHERE dt.sn = d.sn) ORDER BY d.sn;
+----
+1
+1
+
+# Two correlated NOT INs over one table. Without the fix the delete below aborts the domain,
+# so the write fails rather than the read.
+statement ok
+create table s7 (sn int, pn int, jn int);
+
+statement ok
+insert into s7 (sn, pn, jn) values (1,100,7), (2,200,8), (3,300,9);
+
+statement ok
+create table t7 (id int primary key, sn int, pn int, jn int);
+
+statement ok
+insert into t7 (id, sn, pn, jn) values (1,1,100,7), (2,1,777,7), (3,2,888,8), (4,3,300,9);
+
+query I nosort
+SELECT s7.sn FROM s7 WHERE s7.pn NOT IN (SELECT t7.pn FROM t7 WHERE t7.sn = s7.sn)
+  AND s7.jn NOT IN (SELECT t7.jn FROM t7 WHERE t7.pn = s7.pn) ORDER BY s7.sn;
+----
+2
+
+statement ok
+delete from t7 where id = 1;
+
+query I nosort
+SELECT s7.sn FROM s7 WHERE s7.pn NOT IN (SELECT t7.pn FROM t7 WHERE t7.sn = s7.sn)
+  AND s7.jn NOT IN (SELECT t7.jn FROM t7 WHERE t7.pn = s7.pn) ORDER BY s7.sn;
+----
+1
+2

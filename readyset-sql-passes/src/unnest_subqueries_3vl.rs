@@ -337,7 +337,7 @@ pub(crate) fn add_3vl_for_not_in_where_subquery(
     preserved_rhs_stmt: SelectStatement,
     rhs_ctx: RhsContext,
     probes: &mut ProbeRegistry,
-) -> ReadySetResult<Expr> {
+) -> ReadySetResult<(Expr, EmittedProbes)> {
     // We only need NP unless LHS can be NULL (EP used only then).
     let need_np = !rhs_ctx.is_null_free();
     let need_ep = false;
@@ -363,7 +363,7 @@ pub(crate) fn add_3vl_for_not_in_where_subquery(
 
     // If LHS is provably non-null, the guard is just `rhs_not_null`
     if is_lhs_null_free {
-        return Ok(rhs_not_null);
+        return Ok((rhs_not_null, EmittedProbes { existence: false }));
     }
 
     // Otherwise we also need EP for the (… OR is_empty) branch — upgrade lazily.
@@ -386,13 +386,25 @@ pub(crate) fn add_3vl_for_not_in_where_subquery(
     // so neither is ever NULL and the two spellings agree on every input, in any context. The
     // engine mishandles the disjunctive shape over a leading derived table (REA-6929); this
     // encoding keeps the decorrelation correct while that stands.
-    Ok(Expr::CaseWhen {
-        branches: vec![CaseWhenBranch {
-            condition: lhs_matches,
-            body: Expr::Literal(true.into()),
-        }],
-        else_expr: Some(Box::new(rhs_is_empty)),
-    })
+    Ok((
+        Expr::CaseWhen {
+            branches: vec![CaseWhenBranch {
+                condition: lhs_matches,
+                body: Expr::Literal(true.into()),
+            }],
+            else_expr: Some(Box::new(rhs_is_empty)),
+        },
+        EmittedProbes { existence: true },
+    ))
+}
+
+/// Which probes a guard put in the statement, for a caller that has to know what now reads the
+/// same table the subquery does.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct EmittedProbes {
+    /// The existence probe reads every row of the group, so it reads the rows the entry feeding
+    /// the anti-join reads.  The null-present probe is filtered to the NULLs and does not.
+    pub(crate) existence: bool,
 }
 
 fn construct_3vl_case_expr(
