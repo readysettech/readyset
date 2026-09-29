@@ -250,7 +250,14 @@ impl State for MemoryState {
     fn mark_hole(&mut self, key: &KeyComparison, tag: Tag) {
         debug_assert!(!self.state.is_empty(), "filling uninitialized index");
         let index = self.by_tag[&tag];
-        let freed_bytes = self.state[index].mark_hole(key);
+        // Every copy of a removed row leaves the weak indices too, unless another strict index
+        // still holds it.
+        let mut freed_bytes = 0;
+        for (row, count) in self.state[index].mark_hole(key) {
+            for _ in 0..count {
+                freed_bytes += self.handle_evicted_row(&row, index);
+            }
+        }
         self.mem_size = self
             .mem_size
             .saturating_sub(freed_bytes + base_row_bytes_from_comparison(key));
@@ -1202,6 +1209,41 @@ mod tests {
             }
         }
 
+        /// A key marked a hole again leaves no copy of its rows in the weak index, except a row
+        /// another strict index still holds.
+        #[test]
+        fn mark_hole_takes_every_copy_out_of_the_weak_index() {
+            let mut state = MemoryState::default();
+            state.add_index(Index::hash_map(vec![0]), Some(vec![Tag::new(0)]));
+            state.add_index(Index::hash_map(vec![1]), Some(vec![Tag::new(1)]));
+            state.add_weak_index(Index::hash_map(vec![0]));
+            let x = KeyComparison::Equal(vec1![DfValue::from("x")]);
+            state.mark_filled(KeyComparison::Equal(vec1![2.into()]), Tag::new(0));
+            state.mark_filled(x.clone(), Tag::new(1));
+            let weak_rows = |state: &MemoryState, k: i32| -> Vec<Vec<DfValue>> {
+                state
+                    .lookup_weak(&[0], &PointKey::Single(k.into()))
+                    .map(|rows| rows.into_iter().map(|row| row.to_vec()).collect())
+                    .unwrap_or_default()
+            };
+            let only_x: Vec<DfValue> = vec![1.into(), "x".into()];
+            let also_2: Vec<DfValue> = vec![2.into(), "x".into()];
+            let mut records: Records = vec![
+                (only_x.clone(), true),
+                (only_x.clone(), true),
+                (also_2.clone(), true),
+            ]
+            .into();
+            state.process_records(&mut records, None, None).unwrap();
+            assert_eq!(weak_rows(&state, 1), vec![only_x.clone(), only_x]);
+
+            state.mark_hole(&x, Tag::new(1));
+            let at_x = state.lookup(&[1], &PointKey::Single("x".into()));
+            assert!(matches!(at_x, LookupResult::Missing));
+            assert_eq!(weak_rows(&state, 1), Vec::<Vec<DfValue>>::new());
+            assert_eq!(weak_rows(&state, 2), vec![also_2]);
+        }
+
         /// Regression test for REA-3336: when multiple strict indexes have overlapping rows and
         /// distinct rows that share the same weak index key, the weak index must contain all
         /// unique rows without duplicates.
@@ -1405,6 +1447,7 @@ mod tests {
             DeleteRow(TestRow),
             ReplayKey(Tag, Vec<u8>),
             EvictKey(Tag, Vec<u8>),
+            MarkHole(Tag, Vec<u8>),
             CreateStrictIndex(Vec<usize>, Tag),
             CreateWeakIndex(Vec<usize>),
         }
@@ -1448,6 +1491,14 @@ mod tests {
                             ((tag, key) in sample::select(filled))
                             -> Operation {
                 Operation::EvictKey(tag, key)
+            }
+        }
+
+        prop_compose! {
+            fn gen_mark_hole(filled: Vec<(Tag, Vec<u8>)>)
+                            ((tag, key) in sample::select(filled))
+                            -> Operation {
+                Operation::MarkHole(tag, key)
             }
         }
 
@@ -1522,7 +1573,8 @@ mod tests {
                     })
                     .collect();
                 if !filled.is_empty() {
-                    ops.push(gen_evict_key(filled).boxed());
+                    ops.push(gen_evict_key(filled.clone()).boxed());
+                    ops.push(gen_mark_hole(filled).boxed());
                 }
 
                 ops
@@ -1545,7 +1597,7 @@ mod tests {
                         })
                     }
                     Operation::DeleteRow(row) => self.rows.contains(row),
-                    Operation::EvictKey(tag, key) => {
+                    Operation::EvictKey(tag, key) | Operation::MarkHole(tag, key) => {
                         self.strict_indexes.get(tag).is_some_and(|index| {
                             self.filled_holes
                                 .get(index)
@@ -1571,7 +1623,7 @@ mod tests {
                             .or_default()
                             .push(key.clone());
                     }
-                    Operation::EvictKey(tag, key) => {
+                    Operation::EvictKey(tag, key) | Operation::MarkHole(tag, key) => {
                         let index = &self.strict_indexes[tag];
                         if let Some(filled) = self.filled_holes.get_mut(index) {
                             filled.retain(|k| k != key);
@@ -1633,6 +1685,15 @@ mod tests {
                             .unwrap(),
                         );
                         ctxt.evict_keys(*tag, &[key_comparison]);
+                    }
+                    Operation::MarkHole(tag, key) => {
+                        let key_comparison = KeyComparison::Equal(
+                            Vec1::try_from_vec(
+                                key.iter().map(|v| DfValue::Int(*v as i64)).collect(),
+                            )
+                            .unwrap(),
+                        );
+                        ctxt.mark_hole(&key_comparison, *tag);
                     }
                     Operation::CreateStrictIndex(columns, tag) => {
                         let index = Index::new(IndexType::HashMap, columns.clone());

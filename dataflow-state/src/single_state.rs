@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use common::IndexType;
 use itertools::Either;
 use rand::distr::Uniform;
@@ -7,7 +5,6 @@ use rand::RngExt;
 use readyset_client::internal::Index;
 use readyset_client::KeyComparison;
 use readyset_data::{Bound, DfValue, RangeBounds};
-use readyset_util::SizeOf;
 use tracing::debug;
 use vec1::Vec1;
 
@@ -228,13 +225,13 @@ impl SingleState {
         }
     }
 
-    /// Remove all rows for the given `key`, and return the amount of memory freed in bytes
+    /// Remove all rows for the given `key`, and return them with their counts
     ///
     /// # Panics
     ///
     /// * Panics if the `key` is a range, but the underlying KeyedState is backed by a HashMap
     /// * Panics if the underlying index has no columns
-    pub(super) fn mark_hole(&mut self, key: &KeyComparison) -> usize {
+    pub(super) fn mark_hole(&mut self, key: &KeyComparison) -> Vec<(Row, usize)> {
         let removed: Box<dyn Iterator<Item = (Row, usize)>> = match key {
             KeyComparison::Equal(key) => match self.state {
                 KeyedState::AllRows(_) => panic!("Empty-column index cannot be partial"),
@@ -333,10 +330,7 @@ impl SingleState {
             }
         };
 
-        removed
-            .filter(|(r, _)| Arc::strong_count(&r.data) == 1)
-            .map(|(r, count)| r.deep_size_of() * count)
-            .sum()
+        removed.collect()
     }
 
     pub(super) fn clear(&mut self) {
