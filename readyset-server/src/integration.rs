@@ -5,7 +5,7 @@
 //! to prevent flaky behavior.
 #![allow(clippy::many_single_char_names)]
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::convert::TryFrom;
 use std::slice;
 use std::sync::Arc;
@@ -4919,6 +4919,190 @@ async fn self_join_param() {
         .collect();
     assert_eq!(results, expected);
 
+    shutdown_tx.shutdown().await;
+}
+
+/// A write to a test table whose first column is its primary key.
+#[derive(Clone, Debug)]
+enum TableWrite {
+    Insert(&'static str, Vec<i32>),
+    /// Replaces the row with the new row's key.
+    Update(&'static str, Vec<i32>),
+    Delete(&'static str, i32),
+}
+
+/// Each test table's rows by primary key.
+type TableRows = BTreeMap<&'static str, BTreeMap<i32, Vec<i32>>>;
+
+fn table_rows<'a>(tables: &'a TableRows, table: &str) -> Vec<&'a [i32]> {
+    tables
+        .get(table)
+        .into_iter()
+        .flat_map(|rows| rows.values().map(Vec::as_slice))
+        .collect()
+}
+
+fn int_row(values: &[i32]) -> Vec<DfValue> {
+    values.iter().map(|&v| DfValue::from(v)).collect()
+}
+
+/// A cache read at one key and compared on the named columns.
+struct CacheRead {
+    cache: &'static str,
+    key: Vec<DfValue>,
+    columns: &'static [&'static str],
+}
+
+impl CacheRead {
+    fn at(cache: &'static str, key: i32, columns: &'static [&'static str]) -> Self {
+        Self {
+            cache,
+            key: vec![key.into()],
+            columns,
+        }
+    }
+}
+
+async fn cache_rows(g: &mut crate::Handle, read: &CacheRead) -> Vec<Vec<DfValue>> {
+    let mut view = g
+        .view(read.cache)
+        .await
+        .unwrap()
+        .into_reader_handle()
+        .unwrap();
+    let positions = read
+        .columns
+        .iter()
+        .map(|c| view.columns().iter().position(|f| f == *c).unwrap())
+        .collect::<Vec<_>>();
+    let mut rows = view
+        .lookup(&read.key, Dialect::DEFAULT_MYSQL)
+        .await
+        .unwrap()
+        .into_vec()
+        .into_iter()
+        .map(|row| positions.iter().map(|&i| row[i].clone()).collect())
+        .collect::<Vec<Vec<DfValue>>>();
+    rows.sort();
+    rows
+}
+
+/// Applies `writes` in order and, after each, requires every read to hold exactly the rows
+/// `recompute` derives from the tables' rows at that point. The reads repeat once the dataflow
+/// settles after the last write, so a late duplicate or retraction fails them too.
+async fn assert_reads_match_recomputation(
+    g: &mut crate::Handle,
+    reads: &[CacheRead],
+    writes: &[TableWrite],
+    recompute: impl Fn(&CacheRead, &TableRows) -> Vec<Vec<DfValue>>,
+) {
+    let mut tables = TableRows::new();
+    let mut handles = HashMap::new();
+    let expected = |tables: &TableRows, read: &CacheRead| {
+        let mut rows = recompute(read, tables);
+        rows.sort();
+        rows
+    };
+    for write in writes {
+        let (TableWrite::Insert(name, _)
+        | TableWrite::Update(name, _)
+        | TableWrite::Delete(name, _)) = write;
+        if !handles.contains_key(name) {
+            handles.insert(*name, g.table(*name).await.unwrap());
+        }
+        let table = handles.get_mut(name).unwrap();
+        let rows = tables.entry(*name).or_default();
+        match write {
+            TableWrite::Insert(_, row) => {
+                table.insert(int_row(row)).await.unwrap();
+                rows.insert(row[0], row.clone());
+            }
+            TableWrite::Update(_, row) => {
+                let set = row
+                    .iter()
+                    .enumerate()
+                    .skip(1)
+                    .map(|(i, &v)| (i, Modification::Set(v.into())));
+                table.update(vec![row[0].into()], set).await.unwrap();
+                rows.insert(row[0], row.clone());
+            }
+            TableWrite::Delete(_, id) => {
+                table.delete(vec![(*id).into()]).await.unwrap();
+                rows.remove(id);
+            }
+        }
+        for read in reads {
+            let want = expected(&tables, read);
+            eventually!(
+                attempts: 100,
+                sleep: Duration::from_millis(50),
+                run_test: { cache_rows(g, read).await },
+                then_assert: |rows| assert_eq!(
+                    rows, want,
+                    "{} at {:?} after {write:?}", read.cache, read.key
+                )
+            );
+        }
+    }
+    sleep().await;
+    for read in reads {
+        assert_eq!(
+            cache_rows(g, read).await,
+            expected(&tables, read),
+            "{} at {:?} once settled",
+            read.cache,
+            read.key
+        );
+    }
+}
+
+/// A LEFT join keyed on its left input, whose right input is a partially materialized COUNT: a
+/// right arrival that empties a key swaps the left rows' match for their NULL extension, and one
+/// that fills it again swaps it back.
+#[tokio::test(flavor = "multi_thread")]
+async fn left_join_over_a_partial_right_input_extends_rows_whose_key_empties() {
+    let (mut g, shutdown_tx) = start_simple_unsharded(
+        "left_join_over_a_partial_right_input_extends_rows_whose_key_empties",
+    )
+    .await;
+    g.extend_recipe(
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE a (id int PRIMARY KEY, g int, x int)",
+                "CREATE TABLE b (id int PRIMARY KEY, y int)",
+                "CREATE CACHE qg FROM SELECT a.id AS aid, bc.c AS c FROM a LEFT JOIN \
+                 (SELECT y, count(*) AS c FROM b GROUP BY y) bc ON a.x = bc.y WHERE a.g = ?",
+            ],
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let reads = [CacheRead::at("qg", 1, &["aid", "c"])];
+    let writes = [
+        TableWrite::Insert("a", vec![1, 1, 2]),
+        TableWrite::Insert("b", vec![3, 2]),
+        TableWrite::Insert("b", vec![4, 2]),
+        TableWrite::Delete("b", 3),
+        TableWrite::Delete("b", 4),
+        TableWrite::Insert("b", vec![5, 2]),
+        TableWrite::Insert("a", vec![2, 1, 3]),
+        TableWrite::Update("b", vec![5, 3]),
+    ];
+    assert_reads_match_recomputation(&mut g, &reads, &writes, |_, tables| {
+        let b = table_rows(tables, "b");
+        table_rows(tables, "a")
+            .iter()
+            .filter(|a| a[1] == 1)
+            .map(|a| match b.iter().filter(|b| b[1] == a[2]).count() {
+                0 => vec![DfValue::from(a[0]), DfValue::None],
+                c => vec![DfValue::from(a[0]), DfValue::from(c as i64)],
+            })
+            .collect()
+    })
+    .await;
     shutdown_tx.shutdown().await;
 }
 

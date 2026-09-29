@@ -624,14 +624,29 @@ impl Join {
             let mut new_right_count = None;
 
             if self.kind == JoinType::Left && !from_left {
-                let rc = self.lookup(
+                // The right input's rows under the key once this arrival is applied. A filled key
+                // holds all of them, possibly none; a weak index reports a key without rows as a
+                // miss, so it only stands in where the strict index has a hole.
+                let key = PointKey::from(join_key.iter().cloned());
+                let strict = self.lookup(
                     *self.right,
                     &self.on_right(),
-                    &PointKey::from(join_key.iter().cloned()),
+                    &key,
                     nodes,
                     state,
-                    lookup_mode,
+                    LookupMode::Strict,
                 )?;
+                let rc = match strict {
+                    IngredientLookupResult::Miss => self.lookup(
+                        *self.right,
+                        &self.on_right(),
+                        &key,
+                        nodes,
+                        state,
+                        lookup_mode,
+                    )?,
+                    filled => filled,
+                };
 
                 match rc {
                     IngredientLookupResult::Records(rc) => {
@@ -1937,6 +1952,43 @@ mod tests {
             }
             other => panic!("expected Regular processing result, got: {:?}", other),
         }
+    }
+
+    /// A right arrival that empties a key the partial right input holds filled swaps the left
+    /// rows' match for their NULL extension.
+    #[test]
+    fn right_arrival_emptying_a_filled_partial_key_null_extends_left_rows() {
+        use dataflow_state::MaterializedNodeState;
+        use readyset_client::KeyComparison;
+
+        let (mut g, l, r) = setup();
+        let tag = Tag::new(0);
+        let mut right = MemoryState::default();
+        right.add_index(Index::hash_map(vec![0]), Some(vec![tag]));
+        right.add_weak_index(Index::hash_map(vec![0]));
+        right.mark_filled(KeyComparison::from(vec1![5.into()]), tag);
+        g.states.insert(*r, MaterializedNodeState::Memory(right));
+        g.seed(l, vec![5.into(), "left".into()]);
+
+        // The right input applies the retraction of its only row under the key before the join
+        // processes it.
+        let row: Vec<DfValue> = vec![5.into(), "right".into()];
+        g.seed(r, row.clone());
+        g.states
+            .get_mut(*r)
+            .unwrap()
+            .process_records(&mut vec![(row.clone(), false)].into(), None, None)
+            .unwrap();
+
+        let out = g.one_row(r, (row, false), false);
+        assert!(
+            out.has_negative(&[5.into(), "left".into(), "right".into()][..]),
+            "the matched row is retracted: {out:?}"
+        );
+        assert!(
+            out.has_positive(&[5.into(), "left".into(), DfValue::None][..]),
+            "the left row is NULL-extended: {out:?}"
+        );
     }
 
     mod compound_keys {
