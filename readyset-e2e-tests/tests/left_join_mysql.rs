@@ -93,3 +93,65 @@ async fn left_join_right_columns_are_nullable() {
     }
     shutdown_tx.shutdown().await;
 }
+
+/// One replicated write delivers right rows whose join keys are 1, 2, 1, so the rows under key 1
+/// do not arrive together.
+#[tokio::test]
+#[tags(serial, slow)]
+#[upstream(mysql, modern)]
+async fn left_join_interleaved_binlog_batch() {
+    readyset_tracing::init_test_logging();
+    let test_name = derive_test_name();
+    mysql_helpers::recreate_database(&test_name).await;
+    let mut upstream = Conn::new(mysql_helpers::upstream_config().db_name(Some(&test_name)))
+        .await
+        .unwrap();
+    upstream
+        .query_drop(
+            "CREATE TABLE l (id INT PRIMARY KEY, k INT);
+         CREATE TABLE r (id INT PRIMARY KEY, k INT, v INT);
+         INSERT INTO l VALUES (1, 1)",
+        )
+        .await
+        .unwrap();
+    let (opts, _handle, shutdown_tx) = TestBuilder::default()
+        .replicate_db(&test_name)
+        .recreate_database(false)
+        .fallback(true)
+        .partial(false)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut rs = Conn::new(opts).await.unwrap();
+    rs.query_drop(format!("USE {test_name}")).await.unwrap();
+    let query = "SELECT l.id, r.v FROM l LEFT JOIN r ON l.k = r.k WHERE l.id = ?";
+    eventually!(run_test: {
+        rs.query_drop(format!("CREATE CACHE FROM {query}")).await
+            .map_err(|e| e.to_string())
+    }, then_assert: |result| result.unwrap());
+    for (write, expected) in [
+        ("", vec![(1i32, None)]),
+        (
+            "INSERT INTO r VALUES (1, 1, 10), (2, 2, 20), (3, 1, 30)",
+            vec![(1, Some(10)), (1, Some(30))],
+        ),
+        ("DELETE FROM r WHERE id IN (1, 2, 3)", vec![(1, None)]),
+    ] {
+        if !write.is_empty() {
+            upstream.query_drop(write).await.unwrap();
+        }
+        let mut oracle: Vec<(i32, Option<i32>)> = upstream.exec(query, (1,)).await.unwrap();
+        oracle.sort();
+        assert_eq!(oracle, expected, "upstream after {write}");
+        eventually!(attempts: 40, sleep: std::time::Duration::from_millis(50), run_test: {
+            let mut actual: Vec<(i32, Option<i32>)> = rs.exec(query, (1,)).await.unwrap();
+            actual.sort();
+            let info = last_query_info(&mut rs).await;
+            AssertUnwindSafe(move || (actual, info))
+        }, then_assert: |result| {
+            let (actual, info) = result();
+            assert_matches!(info.destination, QueryDestination::Readyset(..), "{info:?}");
+            assert_eq!(actual, oracle, "cached rows after {write}");
+        });
+    }
+    shutdown_tx.shutdown().await;
+}

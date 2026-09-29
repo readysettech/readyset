@@ -3,6 +3,7 @@ use std::convert::{TryFrom, TryInto};
 use std::mem;
 
 use dataflow_state::PointKey;
+use indexmap::IndexMap;
 use itertools::Itertools;
 use readyset_client::KeyComparison;
 use readyset_errors::{ReadySetResult, internal_err};
@@ -581,12 +582,14 @@ impl Join {
 
         let mut ret: Vec<Record> = Vec::with_capacity(rs.len());
 
-        let grouped_records = rs.into_iter().chunk_by(|rec| {
-            on_cols_ts
-                .iter()
-                .map(|i| rec[*i].clone())
-                .collect::<Vec<_>>()
-        });
+        // One group per join key across the whole batch: the NULL-row accounting below recovers a
+        // key's right-side count before the batch from the count after it and the group's net
+        // change.
+        let mut grouped_records: IndexMap<Vec<DfValue>, Vec<Record>> = IndexMap::new();
+        for rec in rs {
+            let key = on_cols_ts.iter().map(|i| rec[*i].clone()).collect();
+            grouped_records.entry(key).or_default().push(rec);
+        }
 
         let is_replay = replay_key_cols.is_some();
         // Only do a lookup into a weak index if we're processing regular updates,
@@ -700,7 +703,7 @@ impl Join {
             let other_records = match other_lookup.take() {
                 IngredientLookupResult::Records(recs) => recs,
                 IngredientLookupResult::Miss => {
-                    misses.extend(group.map(|record| {
+                    misses.extend(group.into_iter().map(|record| {
                         Miss::builder()
                             .on(other)
                             .lookup_idx(on_cols_os.clone())
@@ -1602,6 +1605,90 @@ mod tests {
         j.seed(r, r_nullx.clone());
         let rs = j.one_row(r, r_nullx, false);
         assert_eq!(rs, Records::default());
+    }
+
+    /// The net change a batch of deltas makes to each row's multiplicity.
+    fn net_deltas(rs: Records) -> HashMap<Vec<DfValue>, isize> {
+        let mut net = HashMap::new();
+        for r in rs {
+            let (row, positive) = r.extract();
+            *net.entry(row).or_default() += if positive { 1 } else { -1 };
+        }
+        net.retain(|_, n| *n != 0);
+        net
+    }
+
+    // In each test below, one right-side batch carries key 1's records on either side of a key 2
+    // record, and the right parent's state has absorbed the whole batch before the join sees it.
+
+    #[test]
+    fn left_join_interleaved_right_inserts_retract_null_once() {
+        let (mut j, l, r) = setup();
+        j.seed(l, vec![1.into(), "a".into()]);
+
+        let batch: Vec<Vec<DfValue>> = vec![
+            vec![1.into(), "x".into()],
+            vec![2.into(), "z".into()],
+            vec![1.into(), "y".into()],
+        ];
+        for row in &batch {
+            j.seed(r, row.clone());
+        }
+        let rs = j.one(r, batch, false);
+
+        assert_eq!(
+            net_deltas(rs),
+            HashMap::from([
+                (vec![1.into(), "a".into(), "x".into()], 1),
+                (vec![1.into(), "a".into(), "y".into()], 1),
+                (vec![1.into(), "a".into(), DfValue::None], -1),
+            ])
+        );
+    }
+
+    #[test]
+    fn left_join_interleaved_right_deletes_emit_null_once() {
+        let (mut j, l, r) = setup();
+        j.seed(l, vec![1.into(), "a".into()]);
+
+        let rs = j.one(
+            r,
+            vec![
+                (vec![1.into(), "x".into()], false),
+                (vec![2.into(), "z".into()], false),
+                (vec![1.into(), "y".into()], false),
+            ],
+            false,
+        );
+
+        assert_eq!(
+            net_deltas(rs),
+            HashMap::from([
+                (vec![1.into(), "a".into(), "x".into()], -1),
+                (vec![1.into(), "a".into(), "y".into()], -1),
+                (vec![1.into(), "a".into(), DfValue::None], 1),
+            ])
+        );
+    }
+
+    #[test]
+    fn left_join_interleaved_right_insert_and_delete_keep_null() {
+        let (mut j, l, r) = setup();
+        j.seed(l, vec![1.into(), "a".into()]);
+        j.seed(r, vec![2.into(), "z".into()]);
+
+        // Key 1 gains its only match and loses it again within the batch.
+        let rs = j.one(
+            r,
+            vec![
+                (vec![1.into(), "x".into()], true),
+                (vec![2.into(), "z".into()], true),
+                (vec![1.into(), "x".into()], false),
+            ],
+            false,
+        );
+
+        assert_eq!(net_deltas(rs), HashMap::new());
     }
 
     #[test]

@@ -20,6 +20,7 @@ exponential-backoff = { workspace = true }
 fail = { workspace = true }
 futures-util = { workspace = true }
 html-escape = { workspace = true }
+indexmap = { workspace = true }
 itertools = { workspace = true }
 metrics = { workspace = true }
 pin-project = { workspace = true }
