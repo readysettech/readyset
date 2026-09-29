@@ -2,6 +2,7 @@ use std::convert::TryFrom;
 
 use bytes::{BufMut, BytesMut};
 use eui48::MacAddressFormat;
+use geo_types::Point;
 use postgres::error::ErrorPosition;
 use postgres_types::{Kind, ToSql, Type};
 use readyset_util::fmt::FastEncode;
@@ -428,6 +429,16 @@ where
     Ok(())
 }
 
+/// Writes a point in postgres's text format.
+fn write_point(point: &Point, dst: &mut BytesMut) -> Result<(), Error> {
+    dst.put_slice(b"(");
+    write_float(point.x(), dst)?;
+    dst.put_slice(b",");
+    write_float(point.y(), dst)?;
+    dst.put_slice(b")");
+    Ok(())
+}
+
 fn put_u8(val: u8, dst: &mut BytesMut) {
     dst.put_u8(val);
 }
@@ -578,6 +589,9 @@ fn put_binary_value(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
         PsqlValue::VarBit(bits) => {
             bits.to_sql(&Type::VARBIT, dst)?;
         }
+        PsqlValue::Point(point) => {
+            point.to_sql(&Type::POINT, dst)?;
+        }
         PsqlValue::Array(arr, ty) => {
             arr.to_sql(ty, dst)?;
         }
@@ -702,6 +716,7 @@ fn put_text_payload(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
                 .collect::<Vec<String>>()
                 .join("")
         )?,
+        PsqlValue::Point(point) => write_point(point, dst)?,
         PsqlValue::Array(arr, _) => write!(dst, "{arr}")?,
         PsqlValue::Row(fields, _) => put_record_text(fields, dst)?,
         PsqlValue::PassThrough(p) => {
@@ -1547,6 +1562,17 @@ mod tests {
     }
 
     #[test]
+    fn test_encode_binary_point() {
+        let mut buf = BytesMut::new();
+        put_binary_value(&PsqlValue::Point(Point::new(1.2, -3.3)), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(16); // size
+        exp.put_f64(1.2);
+        exp.put_f64(-3.3);
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
     fn test_encode_binary_macaddr() {
         let mut buf = BytesMut::new();
         let macaddr = MacAddress::new([18, 52, 86, 171, 205, 239]);
@@ -1852,6 +1878,28 @@ mod tests {
 
         let mut buf = BytesMut::new();
         put_text_value(&PsqlValue::Bit(bits), &mut buf).unwrap();
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_text_point() {
+        let mut buf = BytesMut::new();
+        let point = Point::new(1.2, 3.3);
+        put_text_value(&PsqlValue::Point(point), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(9); // size = 9 chars
+        exp.extend_from_slice(b"(1.2,3.3)");
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_text_point_inf() {
+        let mut buf = BytesMut::new();
+        let point = Point::new(f64::INFINITY, f64::NEG_INFINITY);
+        put_text_value(&PsqlValue::Point(point), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(20); // size = 20 chars
+        exp.extend_from_slice(b"(Infinity,-Infinity)");
         assert_eq!(buf, exp);
     }
 

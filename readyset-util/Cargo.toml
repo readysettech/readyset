@@ -18,6 +18,7 @@ eui48 = { workspace = true }
 exponential-backoff = { workspace = true }
 fail = { workspace = true }
 futures = { workspace = true }
+geo-types = { workspace = true }
 proptest = { workspace = true }
 readyset-decimal = { path = "../readyset-decimal" }
 readyset-spatial = { path = "../readyset-spatial" }

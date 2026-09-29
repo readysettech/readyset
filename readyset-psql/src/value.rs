@@ -6,7 +6,7 @@ use postgres_types::Kind;
 use ps::PsqlValue;
 use ps::util::type_is_oid;
 use psql_srv as ps;
-use readyset_data::{Array, DfValue};
+use readyset_data::{Array, DfValue, parse_point};
 use readyset_decimal::Decimal;
 use tokio_postgres::types::Type;
 use tracing::{error, trace};
@@ -128,6 +128,15 @@ impl TryFrom<TypedDfValue<'_>> for PsqlValue {
                         .and_then(|s| {
                             serde_json::from_str::<serde_json::Value>(s)
                                 .map_err(|e| ps::Error::ParseError(e.to_string()))
+                        })?,
+                ))
+            }
+            (&Type::POINT, ref p @ (DfValue::Text(_) | DfValue::TinyText(_))) => {
+                Ok(PsqlValue::Point(
+                    <&str>::try_from(p)
+                        .map_err(|e| ps::Error::InternalError(e.to_string()))
+                        .and_then(|s| {
+                            parse_point(s).map_err(|e| ps::Error::ParseError(e.to_string()))
                         })?,
                 ))
             }

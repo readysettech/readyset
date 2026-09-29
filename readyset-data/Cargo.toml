@@ -38,7 +38,8 @@ nom = { workspace = true }
 nom_locate = { workspace = true }
 postgres-protocol = { workspace = true }
 cidr = { workspace = true }
-postgres-types = { workspace = true, features = ["with-cidr-0_3"] }
+geo-types = { workspace = true }
+postgres-types = { workspace = true, features = ["with-cidr-0_3", "with-geo-types-0_7"] }
 vec1 = { workspace = true }
 log-once = { workspace = true }
 

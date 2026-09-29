@@ -7,9 +7,10 @@ use bytes::{Buf, Bytes, BytesMut};
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
 use cidr::{IpCidr, IpInet};
 use eui48::MacAddress;
+use geo_types::Point;
 use postgres_types::{FromSql, Kind, Type};
 use readyset_data::{
-    Array, Collation, PassThroughFormat, DATE_FORMAT, ISO_TIMESTAMP_PARSE_FORMAT,
+    parse_point, Array, Collation, PassThroughFormat, DATE_FORMAT, ISO_TIMESTAMP_PARSE_FORMAT,
     TIMESTAMP_PARSE_FORMAT,
 };
 use readyset_decimal::Decimal;
@@ -438,6 +439,7 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<PsqlValue, Error> {
             Type::JSONB => Ok(PsqlValue::Jsonb(serde_json::Value::from_sql(t, buf)?)),
             Type::BIT => Ok(PsqlValue::Bit(BitVec::from_sql(t, buf)?)),
             Type::VARBIT => Ok(PsqlValue::VarBit(BitVec::from_sql(t, buf)?)),
+            Type::POINT => Ok(PsqlValue::Point(Point::from_sql(t, buf)?)),
             ref t if t.name() == "citext" => Ok(PsqlValue::Text(
                 readyset_data::Text::from_str_with_collation(
                     <&str>::from_sql(t, buf)?,
@@ -585,6 +587,9 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<PsqlValue, Error> {
             .map(PsqlValue::Jsonb),
         Type::BIT => get_bitvec_from_str(text_str).map(PsqlValue::Bit),
         Type::VARBIT => get_bitvec_from_str(text_str).map(PsqlValue::VarBit),
+        Type::POINT => parse_point(text_str)
+            .map_err(|_| DecodeError::InvalidTextPointValue(text_str.to_owned()))
+            .map(PsqlValue::Point),
         ref t if matches!(t.kind(), Kind::Array(_)) => {
             let inner_t = match t.kind() {
                 Kind::Array(inner_t) => inner_t.clone(),
@@ -1424,6 +1429,18 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_binary_point() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(16); // size
+        buf.put_f64(1.2);
+        buf.put_f64(-3.4);
+        assert_eq!(
+            get_binary_value(&mut buf.freeze(), &Type::POINT).unwrap(),
+            PsqlValue::Point(Point::new(1.2, -3.4))
+        );
+    }
+
+    #[test]
     fn test_decode_binary_timestamp_tz() {
         let dt = FixedOffset::east_opt(18000)
             .unwrap()
@@ -1706,6 +1723,28 @@ mod tests {
             get_text_value(&mut buf.freeze(), &Type::CIDR).unwrap(),
             PsqlValue::Cidr(IpCidr::from_str("192.168.1.0/24").unwrap())
         );
+    }
+
+    #[test]
+    fn test_decode_text_point() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(12);
+        buf.extend_from_slice(b"( 1.2, -3.4)");
+        assert_eq!(
+            get_text_value(&mut buf.freeze(), &Type::POINT).unwrap(),
+            PsqlValue::Point(Point::new(1.2, -3.4))
+        );
+    }
+
+    #[test]
+    fn test_decode_text_invalid_point() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(4);
+        buf.extend_from_slice(b"(1,)");
+        assert!(matches!(
+            get_text_value(&mut buf.freeze(), &Type::POINT),
+            Err(DecodeError::InvalidTextPointValue(_))
+        ));
     }
 
     #[test]

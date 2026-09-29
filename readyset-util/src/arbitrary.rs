@@ -14,6 +14,7 @@ use chrono::{
 use chrono_tz::Tz;
 use cidr::{IpCidr, IpInet};
 use eui48::MacAddress;
+use geo_types::Point;
 use prop::string::bytes_regex;
 use proptest::prelude::*;
 use proptest::sample::SizeRange;
@@ -352,7 +353,13 @@ pub fn arbitrary_mysql_point() -> impl Strategy<Value = Vec<u8>> {
     prop_oneof![srid_0, srid_4326]
 }
 
-/// Strategy for generating geometry `point` values for postgresql.
+/// Strategy for generating Postgres built-in `point` values.
+pub fn arbitrary_postgres_point() -> impl Strategy<Value = Point> {
+    let finite_f64 = any::<f64>().prop_filter("finite", |x| x.is_finite());
+    (finite_f64.clone(), finite_f64).prop_map(|(x, y)| Point::new(x, y))
+}
+
+/// Strategy for generating geometry postgis `point` values for postgresql.
 pub fn arbitrary_postgis_point() -> impl Strategy<Value = Vec<u8>> {
     // Filter to finite f64 values only - NaN/Infinity are invalid in PostGIS
     let finite_f64 = any::<f64>().prop_filter("finite", |x| x.is_finite());

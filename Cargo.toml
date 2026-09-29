@@ -164,6 +164,7 @@ fork = "0.10.0"
 futures = "0.3.30"
 futures-util = "0.3.30"
 rustc-hash = { version = "2.1"}
+geo-types = "0.7.0"
 getrandom = "0.4.1"
 growable-bloom-filter = "2.1.0"
 hashbag = "0.1.12"

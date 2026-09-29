@@ -24,6 +24,7 @@ mod types {
 
     use cidr::{IpCidr, IpInet};
     use eui48::MacAddress;
+    use geo_types::Point;
     use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest::string::string_regex;
@@ -35,7 +36,7 @@ mod types {
     use readyset_util::arbitrary::{
         arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal, arbitrary_ipcidr, arbitrary_ipinet, arbitrary_json,
         arbitrary_json_without_f64, arbitrary_mac_address, arbitrary_naive_date,
-        arbitrary_naive_time, arbitrary_systemtime, arbitrary_uuid,
+        arbitrary_naive_time, arbitrary_postgres_point, arbitrary_systemtime, arbitrary_uuid,
     };
     use readyset_util::eventually;
     use tokio_postgres::types::{FromSql, ToSql};
@@ -43,6 +44,9 @@ mod types {
     use uuid::Uuid;
 
     use super::*;
+
+    /// Postgres built-in geometric types.
+    const GEOMETRIC_TYPES: &[&str] = &["point"];
 
     async fn test_type_roundtrip<V>(type_name: &str, vals: Vec<V>)
     where
@@ -78,13 +82,22 @@ mod types {
             assert_eq!(results, vals);
         });
 
+        // The geometric types have no `=`, and `~=` compares within a tolerance, so we compare
+        // them by text form.
+        let cast_param = format!("cast($1 as {type_name})");
+        let (param_parsing_eq, fallback_eq) = if GEOMETRIC_TYPES.contains(&type_name) {
+            let eq = format!("x::text = {cast_param}::text");
+            (eq.clone(), eq)
+        } else {
+            (format!("x = {cast_param}"), "x = $1".to_owned())
+        };
+
         // check parameter parsing
         if type_name != "json" {
             for v in vals.iter() {
                 let count_where_result = client
                     .query_one(
-                        format!("SELECT count(*) FROM t WHERE x = cast($1 as {type_name})")
-                            .as_str(),
+                        format!("SELECT count(*) FROM t WHERE {param_parsing_eq}").as_str(),
                         &[v],
                     )
                     .await
@@ -107,7 +120,7 @@ mod types {
                     .transaction()
                     .await
                     .unwrap()
-                    .query("SELECT x FROM t WHERE x = $1", &[v])
+                    .query(&format!("SELECT x FROM t WHERE {fallback_eq}"), &[v])
                     .await
                     .unwrap()
                     .first()
@@ -186,6 +199,7 @@ mod types {
         varbit_bitvec("varbit(10)", bit_vec::BitVec, arbitrary_bitvec(0..=10));
         bit_varying_unlimited_bitvec("bit varying", bit_vec::BitVec, arbitrary_bitvec(0..=20));
         bit_varying_bitvec("bit varying(10)", bit_vec::BitVec, arbitrary_bitvec(0..=10));
+        point_builtin("point", Point, arbitrary_postgres_point());
         timestamp_tz_datetime("timestamp with time zone", chrono::DateTime::<chrono::FixedOffset>, arbitrary_date_time());
         text_array("text[]", Vec<String>);
     }

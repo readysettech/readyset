@@ -4,6 +4,7 @@ use bit_vec::BitVec;
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use cidr::{IpCidr, IpInet};
 use eui48::MacAddress;
+use geo_types::Point;
 use postgres_types::{FromSql, Kind, Type};
 use readyset_data::{Array, PassThroughFormat, Text, TinyText};
 use readyset_decimal::Decimal;
@@ -40,6 +41,7 @@ pub enum PsqlValue {
     Jsonb(serde_json::Value),
     Bit(BitVec),
     VarBit(BitVec),
+    Point(Point),
     Array(Array, Type),
     /// An anonymous composite (`record`) value. The second element is the composite [`Type`], whose
     /// [`Kind::Composite`] fields give the type of each field in the same order.
@@ -96,6 +98,7 @@ impl<'a> FromSql<'a> for PsqlValue {
                 Type::JSONB => serde_json::Value::from_sql(ty, raw).map(PsqlValue::Jsonb),
                 Type::BIT => BitVec::from_sql(ty, raw).map(PsqlValue::Bit),
                 Type::VARBIT => BitVec::from_sql(ty, raw).map(PsqlValue::VarBit),
+                Type::POINT => Point::from_sql(ty, raw).map(PsqlValue::Point),
                 _ => Ok(PsqlValue::PassThrough(readyset_data::PassThrough {
                     ty: ty.clone(),
                     format: PassThroughFormat::Binary,

@@ -23,6 +23,7 @@ chrono = { workspace = true }
 cidr = { workspace = true }
 eui48 = { workspace = true }
 futures = { workspace = true }
+geo-types = { workspace = true }
 hex = { workspace = true }
 hmac = { workspace = true }
 nom = { workspace = true }
@@ -31,6 +32,7 @@ postgres-protocol = { workspace = true }
 postgres-types = { workspace = true, features = [
     "with-chrono-0_4",
     "with-cidr-0_3",
+    "with-geo-types-0_7",
 ] }
 rand = { workspace = true }
 serde_json = { workspace = true, features = ["arbitrary_precision"] }

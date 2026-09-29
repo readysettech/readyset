@@ -60,6 +60,9 @@ pub enum DecodeError {
     #[error("invalid text bit vector value: {0}")]
     InvalidTextBitVectorValue(String),
 
+    #[error("invalid text point value: {0}")]
+    InvalidTextPointValue(String),
+
     #[error("invalid array value: {0}")]
     InvalidArrayValue(String),
 
