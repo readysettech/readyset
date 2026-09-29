@@ -23,6 +23,7 @@ use anyhow::{anyhow, bail, ensure};
 use clap::builder::NonEmptyStringValueParser;
 use clap::{ArgAction, Parser};
 use crossbeam_skiplist::SkipSet;
+use database_utils::tls::ServerCertVerification;
 use database_utils::{DatabaseType, DatabaseURL, TlsMode, UpstreamConfig};
 use failpoint_macros::set_failpoint;
 use futures_util::future::FutureExt;
@@ -2043,8 +2044,21 @@ where
                 None
             } else {
                 upstream_url.as_deref().and_then(|url| {
+                    let verification =
+                        match rt.block_on(ServerCertVerification::from(&upstream_config)) {
+                            Ok(verification) => verification,
+                            Err(e) => {
+                                error!(
+                                    error = %e,
+                                    "Failed to load the upstream TLS settings for the RLS \
+                                     bootstrap; refusing to start. Check --ssl-root-cert."
+                                );
+                                process::exit(1);
+                            }
+                        };
                     match rt.block_on(readyset_rls::bootstrap_from_url(
                         url,
+                        verification,
                         rls_config,
                         Some(deferred_sink.clone() as Arc<dyn readyset_rls::InvalidationSink>),
                     )) {

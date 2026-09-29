@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
+use database_utils::tls::ServerCertVerification;
 use database_utils::{DatabaseConnection, DatabaseURL, QueryableConnection, ReplicationServerId};
 use mysql_srv::{AuthCache, AuthPlugin};
 use readyset_adapter::backend::noria_connector::NoriaConnector;
@@ -783,8 +784,12 @@ impl TestBuilder {
                         }
                         None => readyset_rls::RlsConfig::default(),
                     };
+                    let verification = ServerCertVerification::from(&cdc_upstream_config)
+                        .await
+                        .expect("RLS bootstrap TLS config");
                     match readyset_rls::bootstrap_from_url(
                         url,
+                        verification,
                         rls_config,
                         Some(Arc::clone(&sink) as Arc<dyn readyset_rls::InvalidationSink>),
                     )

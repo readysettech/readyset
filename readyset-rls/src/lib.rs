@@ -47,6 +47,9 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
 
+use database_utils::error::DatabaseURLParseError;
+use database_utils::tls::ServerCertVerification;
+use database_utils::{DatabaseConnection, DatabaseError, DatabaseURL};
 use metrics::counter;
 
 /// An [`InvalidationSink`] whose real target is installed after construction.
@@ -107,7 +110,8 @@ const BOOTSTRAP_MAX_ATTEMPTS: u32 = 5;
 const BOOTSTRAP_BACKOFF_INITIAL: Duration = Duration::from_millis(200);
 const BOOTSTRAP_BACKOFF_MAX: Duration = Duration::from_secs(10);
 
-/// Connect to `upstream_url`, retrying transient connect failures, then call [`bootstrap`].
+/// Connect to `upstream_url`, verifying its certificate per `verification`, retrying transient
+/// connect failures, then call [`bootstrap`]. The poller's reconnects use the same settings.
 ///
 /// Returns `Ok(None)` for non-Postgres URLs; MySQL deployments leave the registry empty and the
 /// analyzer reports Cacheable for every query.
@@ -117,19 +121,22 @@ const BOOTSTRAP_BACKOFF_MAX: Duration = Duration::from_secs(10);
 /// `BootstrapError` is returned so the caller can decide whether to abort.
 pub async fn bootstrap_from_url(
     upstream_url: &str,
+    verification: ServerCertVerification,
     config: RlsConfig,
     sink: Option<Arc<dyn InvalidationSink>>,
 ) -> Result<Option<BootstrapHandle>, BootstrapError> {
     if !upstream_url.starts_with("postgres://") && !upstream_url.starts_with("postgresql://") {
         return Ok(None);
     }
+    let upstream_url: Arc<DatabaseURL> = Arc::new(upstream_url.parse()?);
+    let verification = Arc::new(verification);
 
     let mut backoff = BOOTSTRAP_BACKOFF_INITIAL;
     let mut last_err: Option<ConnectError> = None;
     let mut client = None;
     for attempt in 1..=BOOTSTRAP_MAX_ATTEMPTS {
         counter!(metric::RLS_BOOTSTRAP_ATTEMPTS_TOTAL).increment(1);
-        match connect_with_driver(upstream_url).await {
+        match connect_with_driver(&upstream_url, &verification).await {
             Ok(c) => {
                 client = Some(c);
                 break;
@@ -158,10 +165,10 @@ pub async fn bootstrap_from_url(
         }
     };
 
-    let upstream_url = upstream_url.to_owned();
     let reconnect = move || {
-        let url = upstream_url.clone();
-        async move { connect_with_driver(&url).await }
+        let url = Arc::clone(&upstream_url);
+        let verification = Arc::clone(&verification);
+        async move { connect_with_driver(&url, &verification).await }
     };
     let handle = bootstrap(client, config, sink, reconnect).await?;
     Ok(Some(handle))
@@ -180,40 +187,40 @@ pub struct BootstrapHandle {
     pub shutdown_tx: tokio::sync::watch::Sender<bool>,
 }
 
-async fn connect_with_driver(upstream_url: &str) -> Result<tokio_postgres::Client, ConnectError> {
-    let tls_inner = native_tls::TlsConnector::builder()
-        .build()
-        .map_err(ConnectError::Tls)?;
-    let tls = postgres_native_tls::MakeTlsConnector::new(tls_inner);
-    let (client, connection) = tokio_postgres::connect(upstream_url, tls)
-        .await
-        .map_err(ConnectError::Postgres)?;
-    // Drive the connection on a detached task; it ends when the client is dropped or the upstream
-    // tears down the socket, after which the poller's next `is_closed()` check triggers a
-    // reconnect.
+async fn connect_with_driver(
+    upstream_url: &DatabaseURL,
+    verification: &ServerCertVerification,
+) -> Result<tokio_postgres::Client, ConnectError> {
+    let DatabaseConnection::PostgreSQL(client, connection) =
+        upstream_url.connect(verification).await?
+    else {
+        return Err(ConnectError::NotPostgres);
+    };
+    // The connection ends when the client is dropped or the upstream tears down the socket, after
+    // which the poller's next `is_closed()` check triggers a reconnect.
     tokio::spawn(async move {
-        if let Err(e) = connection.await {
+        if let Ok(Err(e)) = connection.await {
             tracing::warn!(error = %e, "RLS upstream connection ended");
         }
     });
     Ok(client)
 }
 
-/// One attempt at opening an upstream connection failed. Distinguishes a Postgres-level failure
-/// (network blip, auth) from a native TLS stack initialisation failure, so operators reading logs
-/// know which class of failure to triage.
+/// One attempt at opening an upstream connection failed.
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectError {
-    #[error("native TLS initialisation failed: {0}")]
-    Tls(native_tls::Error),
     #[error(transparent)]
-    Postgres(tokio_postgres::Error),
+    Database(#[from] DatabaseError),
+    #[error("RLS upstream URL is not a Postgres URL")]
+    NotPostgres,
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum BootstrapError {
     #[error("RLS upstream connect failed: {0}")]
     Connect(ConnectError),
+    #[error("invalid RLS upstream URL: {0}")]
+    InvalidUrl(#[from] DatabaseURLParseError),
     #[error(transparent)]
     Loader(#[from] loader::LoaderError),
 }

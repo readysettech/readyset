@@ -6764,12 +6764,11 @@ dependencies = [
 name = "readyset-rls"
 version = "0.0.1"
 dependencies = [
+ "database-utils",
  "metric",
  "metrics",
- "native-tls",
  "papaya",
  "parking_lot",
- "postgres-native-tls",
  "readyset-client",
  "readyset-sql",
  "readyset-sql-parsing",
