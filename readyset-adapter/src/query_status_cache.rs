@@ -56,6 +56,10 @@ pub struct QueryStatusCache {
     ///
     /// This map is used on the hot path to determine whether to route queries to upstream or to
     /// readyset.
+    ///
+    /// Lock hierarchy: the persistent handle's `statuses` lock is always acquired before an
+    /// `id_to_status` shard lock, never the other way around. No path holds an `id_to_status`
+    /// guard across an acquisition of the persistent lock.
     id_to_status: DashMap<QueryId, QueryStatus, ahash::RandomState>,
 
     /// A handle to a more detailed, persistent cache of Query information, which holds the full
@@ -288,6 +292,15 @@ impl PersistentStatusCacheHandle {
             None => {
                 warn!(query_id=%id, "Avoiding deadlock when trying to insert")
             }
+        }
+    }
+
+    /// Marks a query the most recently used so repeat reads keep it in the bounded map. The
+    /// attempt is skipped while the map is locked, so a read never blocks on the write lock and
+    /// a hot query's recency is refreshed only when the write lock is free.
+    fn promote(&self, id: &QueryId) {
+        if let Some(mut statuses) = self.statuses.try_write() {
+            statuses.promote(id);
         }
     }
 
@@ -898,15 +911,25 @@ impl QueryStatusCache {
     /// `schema_generation` is the generation the caller rewrote `q` under, and is recorded
     /// alongside the entry. `CREATE CACHE FROM <query_id>` reads it back, so taking it as a
     /// parameter here leaves no way to put a query into the cache without it.
+    ///
+    /// Every text read and prepare passes through here, so the generation is only written when
+    /// it advances the stored one: the write takes the process-global persistent statuses write
+    /// lock. A read at the stored or an older generation instead attempts to promote the query
+    /// in the persistent map without waiting on that lock.
     pub fn query_status<Q>(&self, q: &Q, schema_generation: SchemaGeneration) -> QueryStatus
     where
         Q: QueryStatusKey,
     {
-        let mut status = match q.with_status(self, |s| s.cloned()) {
-            Some(s) => s,
+        let id = q.query_id();
+        let mut status = match self.id_to_status.get(&id) {
+            Some(s) => s.value().clone(),
             None => QueryStatus::with_migration_state(self.insert(q.clone()).1),
         };
-        self.set_schema_generation(q, schema_generation);
+        if status.schema_generation < Some(schema_generation) {
+            self.set_schema_generation(q, schema_generation);
+        } else {
+            self.persistent_handle.promote(&id);
+        }
         // Callers write whole statuses back, so the returned copy carries the generation too.
         status.schema_generation = Some(schema_generation);
         status
@@ -1047,13 +1070,16 @@ impl QueryStatusCache {
     ///
     /// Private so that the generation cannot be stamped independently of the insert that
     /// [`Self::query_status`] pairs it with.
+    ///
+    /// The stored generation only moves forward: a stamp carrying a rewrite under an older
+    /// generation cannot lower the one that another connection stamped since.
     fn set_schema_generation<Q>(&self, q: &Q, schema_generation: SchemaGeneration)
     where
         Q: QueryStatusKey,
     {
         q.with_mut_status(self, |status| {
             if let Some(status) = status {
-                status.schema_generation = Some(schema_generation);
+                status.schema_generation = status.schema_generation.max(Some(schema_generation));
             }
         });
     }
@@ -1174,7 +1200,11 @@ impl QueryStatusCache {
         self.persistent_handle.pending_inlined_migrations.remove(q);
     }
 
-    /// Updates a queries status to `status` unless the queries migration state was
+    /// Replaces the stored status for a query with `status`'s migration state and execution
+    /// info, inserting the query if it is not yet in the cache.
+    ///
+    /// The stored schema generation only moves forward: a status taken from a rewrite under an
+    /// older generation cannot lower the one that another connection stamped since.
     pub fn update_query_status<Q>(&self, q: &Q, status: QueryStatus)
     where
         Q: QueryStatusKey,
@@ -1183,7 +1213,7 @@ impl QueryStatusCache {
             Some(s) => {
                 s.migration_state.clone_from(&status.migration_state);
                 s.execution_info.clone_from(&status.execution_info);
-                s.schema_generation = status.schema_generation;
+                s.schema_generation = s.schema_generation.max(status.schema_generation);
                 false
             }
             None => true,
@@ -1360,16 +1390,26 @@ impl QueryStatusCache {
     }
 
     /// Returns a query and its stored schema generation given a query hash.
-    /// The schema generation reflects when the query was last rewritten by the adapter.
+    ///
+    /// The generation is the newest any read was stamped under, which is at least the one of the
+    /// query's last actual rewrite.
     pub fn query_with_schema_generation(
         &self,
         id: &str,
     ) -> Option<(Query, Option<SchemaGeneration>)> {
         let id = id.parse::<QueryId>().ok()?;
         let statuses = self.persistent_handle.statuses.read();
-        statuses
-            .peek(&id)
-            .map(|(query, status)| (query.clone(), status.schema_generation))
+        statuses.peek(&id).map(|(query, status)| {
+            // The in-memory copy is stamped first and every stamp only moves the stored
+            // generation forward, so the in-memory copy is never behind the persistent one.
+            // Taking a DashMap shard lock here is safe: the persistent lock is always acquired
+            // before `id_to_status`, never the other way around.
+            let generation = self
+                .id_to_status
+                .get(&id)
+                .map_or(status.schema_generation, |s| s.schema_generation);
+            (query.clone(), generation)
+        })
     }
 
     /// Removes cache entries for queries that reference any of the specified tables.
@@ -2490,6 +2530,97 @@ mod tests {
         assert_eq!(stored, Some(generation));
     }
 
+    fn cold_query(i: usize) -> ViewCreateRequest {
+        ViewCreateRequest::new(
+            select_statement(&format!("SELECT * FROM cold WHERE x = {i}")).unwrap(),
+            vec![],
+        )
+    }
+
+    /// A query read steadily at one generation keeps its place in the bounded persistent map
+    /// while newer queries arrive: the map feeds SHOW PROXIED QUERIES, CREATE CACHE FROM
+    /// <query_id>, and table invalidation, so a hot query must outlive the churn. A schema
+    /// change on its table still drops it from both maps.
+    #[test]
+    fn steady_reads_keep_a_query_in_the_persistent_map() {
+        let cache = QueryStatusCache::with_capacity(8);
+        let hot = ViewCreateRequest::new(select_statement("SELECT * FROM hot").unwrap(), vec![]);
+        let hot_id = QueryId::from(&hot).to_string();
+        let generation = SchemaGeneration::INITIAL.next();
+        cache.query_status(&hot, generation);
+        for i in 0..32 {
+            cache.query_status(&cold_query(i), generation);
+            cache.query_status(&hot, generation);
+            assert!(
+                cache.query_with_schema_generation(&hot_id).is_some(),
+                "the hot query left the persistent map after {} newer queries",
+                i + 1
+            );
+        }
+        cache.invalidate_queries_referencing_tables(&[Relation::from("hot")]);
+        assert!(
+            cache.try_query_status(&hot).is_none(),
+            "the schema change on `hot` left the hot query's status in place"
+        );
+        assert!(
+            cache.query_with_schema_generation(&hot_id).is_none(),
+            "the schema change on `hot` left the hot query in the persistent map"
+        );
+    }
+
+    /// The in-memory copy is the source of truth for the schema generation. A read at the
+    /// generation already stored serves it while the persistent copy lags. A read at a strictly
+    /// newer generation re-stamps both copies, in-memory first.
+    #[test]
+    fn a_read_serves_the_newer_in_memory_generation() {
+        let cache = QueryStatusCache::new();
+        let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
+        let id = QueryId::from(&q);
+        let older = SchemaGeneration::INITIAL.next();
+        let newer = older.next();
+        cache.query_status(&q, newer);
+        cache
+            .persistent_handle
+            .statuses
+            .write()
+            .peek_mut(&id)
+            .expect("query_status inserts into the persistent map")
+            .1
+            .schema_generation = Some(older);
+        cache.query_status(&q, newer);
+        assert_eq!(
+            cache
+                .query_with_schema_generation(&id.to_string())
+                .and_then(|(_, g)| g),
+            Some(newer)
+        );
+    }
+
+    /// A read, stamp, or write-back carrying a rewrite under an older generation than the one
+    /// already stored cannot lower the stored generation in either copy of the status.
+    #[test]
+    fn stale_generations_never_lower_the_stored_one() {
+        let cache = QueryStatusCache::new();
+        let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
+        let id = QueryId::from(&q);
+        let older = SchemaGeneration::INITIAL.next();
+        let newer = older.next();
+        let stale = cache.query_status(&q, older);
+        cache.query_status(&q, newer);
+        let assert_newer = |step: &str| {
+            let in_memory = cache.try_query_status(&q).unwrap().schema_generation;
+            assert_eq!(in_memory, Some(newer), "{step}");
+            let persistent = persistent_status(&cache, &id).unwrap().schema_generation;
+            assert_eq!(persistent, Some(newer), "{step}");
+        };
+        cache.query_status(&q, older);
+        assert_newer("stale read");
+        cache.set_schema_generation(&q, older);
+        assert_newer("stale stamp");
+        cache.update_query_status(&q, stale);
+        assert_newer("stale write-back");
+    }
+
     #[test]
     fn schema_generation_none_for_queries_without_generation() {
         let cache = QueryStatusCache::new();
@@ -3006,5 +3137,52 @@ mod tests {
                 .is_none()
         );
         assert!(!cache.may_have_inline_literal_caches());
+    }
+
+    /// The status copy held in the persistent handle, read through its lock.
+    fn persistent_status(cache: &QueryStatusCache, id: &QueryId) -> Option<QueryStatus> {
+        let statuses = cache.persistent_handle.statuses.read();
+        statuses.peek(id).map(|(_, status)| status.clone())
+    }
+
+    /// A repeat read at the generation already stored leaves the process-global persistent
+    /// statuses unlocked for writing. A read at a new generation still stamps both copies. A
+    /// thousand repeat reads under a held read lock fit the 5 s budget only if none waits on
+    /// the lock: even a bounded 10 ms wait per read would take 10 s.
+    #[test]
+    fn query_status_at_stored_generation_takes_no_persistent_write() {
+        let cache = Arc::new(QueryStatusCache::new());
+        let q = ViewCreateRequest::new(select_statement("SELECT * FROM t1").unwrap(), vec![]);
+        let id = QueryId::from(&q);
+        let generation = SchemaGeneration::INITIAL.next();
+        cache.query_status(&q, generation);
+
+        let reader = cache.persistent_handle.statuses.read();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn({
+            let (cache, q) = (Arc::clone(&cache), q.clone());
+            move || {
+                for _ in 1..1_000 {
+                    cache.query_status(&q, generation);
+                }
+                tx.send(cache.query_status(&q, generation))
+            }
+        });
+        let status = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("a steady-state query_status must not wait on the persistent write lock");
+        drop(reader);
+        assert_eq!(status.schema_generation, Some(generation));
+
+        let next = generation.next();
+        assert_eq!(cache.query_status(&q, next).schema_generation, Some(next));
+        assert_eq!(
+            cache.try_query_status(&q).unwrap().schema_generation,
+            Some(next)
+        );
+        assert_eq!(
+            persistent_status(&cache, &id).unwrap().schema_generation,
+            Some(next)
+        );
     }
 }
