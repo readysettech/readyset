@@ -20,16 +20,9 @@ pub struct HostInfo {
 }
 
 pub fn collect_host_info(disk_path: &Path) -> HostInfo {
-    let system = System::new_with_specifics(
-        RefreshKind::nothing().with_memory(MemoryRefreshKind::everything()),
-    );
-    let memory_bytes = system
-        .cgroup_limits()
-        .map_or_else(|| system.total_memory(), |limits| limits.total_memory);
-
     HostInfo {
         cpus: available_parallelism().map_or(0, |p| p.get()),
-        memory_bytes,
+        memory_bytes: host_memory_bytes(),
         disk_bytes: disk_total_bytes(disk_path),
         arch: std::env::consts::ARCH.to_owned(),
         os: System::long_os_version().unwrap_or_else(|| std::env::consts::OS.to_owned()),
@@ -37,6 +30,17 @@ pub fn collect_host_info(disk_path: &Path) -> HostInfo {
         container: Container::detect(),
         numa_nodes: numa_node_count(),
     }
+}
+
+/// Total memory available to this process, in bytes: the cgroup limit when there is one, otherwise
+/// the host's physical memory.
+pub fn host_memory_bytes() -> u64 {
+    let system = System::new_with_specifics(
+        RefreshKind::nothing().with_memory(MemoryRefreshKind::everything()),
+    );
+    system
+        .cgroup_limits()
+        .map_or_else(|| system.total_memory(), |limits| limits.total_memory)
 }
 
 fn disk_total_bytes(path: &Path) -> u64 {

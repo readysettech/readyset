@@ -426,6 +426,11 @@ use anyhow::anyhow;
 use clap::{ArgAction, Args};
 use dataflow::DomainConfig;
 use serde::{Deserialize, Serialize};
+use tracing::info;
+
+/// Share of the memory available to the process used as the memory limit when
+/// `--memory-limit` is not set.
+const DEFAULT_MEMORY_LIMIT_PERCENT: u64 = 80;
 
 /// Configuration for a running Readyset cluster.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -508,9 +513,10 @@ pub struct WorkerOptions {
     pub persistence_threads: Option<i32>,
 
     /// Memory high water mark, in bytes. If process heap memory exceeds this value, we
-    /// will perform evictions from partially materialized state. (0 = unlimited)
-    #[arg(long, short = 'm', default_value = "0", env = "READYSET_MEMORY_LIMIT")]
-    pub memory_limit: usize,
+    /// will perform evictions from partially materialized state. Defaults to 80% of the
+    /// memory available to the process. (0 = unlimited)
+    #[arg(long, short = 'm', env = "READYSET_MEMORY_LIMIT")]
+    pub memory_limit: Option<usize>,
 
     /// Frequency at which to check the process heap allocation against the memory limit (in
     /// milliseconds)
@@ -728,6 +734,21 @@ pub struct WorkerOptions {
 }
 
 impl WorkerOptions {
+    /// The memory limit in bytes, where 0 means unlimited. When `--memory-limit` is not set, this
+    /// is [`DEFAULT_MEMORY_LIMIT_PERCENT`] of the memory available to the process.
+    pub fn effective_memory_limit(&self) -> usize {
+        self.memory_limit.unwrap_or_else(|| {
+            let host_bytes = common::host_info::host_memory_bytes();
+            let limit = (host_bytes / 100 * DEFAULT_MEMORY_LIMIT_PERCENT) as usize;
+            info!(
+                host_bytes,
+                limit,
+                "--memory-limit not set, defaulting to {DEFAULT_MEMORY_LIMIT_PERCENT}% of memory"
+            );
+            limit
+        })
+    }
+
     pub fn storage_dir(&self, deployment: &str) -> PathBuf {
         self.storage_dir
             .clone()
@@ -821,6 +842,26 @@ mod tests {
         assert_eq!(
             PathBuf::from(storage_dir).join(deployment),
             worker_opts.storage_dir(deployment)
+        );
+    }
+
+    #[test]
+    fn memory_limit_explicit() {
+        let worker_opts = Wrapper::parse_from(["test", "--memory-limit", "1024"]).worker_opts;
+        assert_eq!(worker_opts.effective_memory_limit(), 1024);
+
+        let worker_opts = Wrapper::parse_from(["test", "--memory-limit", "0"]).worker_opts;
+        assert_eq!(worker_opts.effective_memory_limit(), 0);
+    }
+
+    #[test]
+    fn memory_limit_defaults_to_share_of_host_memory() {
+        let worker_opts = Wrapper::parse_from(["test"]).worker_opts;
+        let host_bytes = common::host_info::host_memory_bytes();
+        assert!(host_bytes > 0);
+        assert_eq!(
+            worker_opts.effective_memory_limit() as u64,
+            host_bytes / 100 * DEFAULT_MEMORY_LIMIT_PERCENT
         );
     }
 

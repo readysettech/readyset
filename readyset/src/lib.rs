@@ -1268,7 +1268,7 @@ where
     H::UpstreamDatabase: Sync,
     <H::UpstreamDatabase as UpstreamDatabase>::StatementMeta: Sync,
 {
-    pub fn run(&mut self, rt: tokio::runtime::Runtime, options: Options) -> anyhow::Result<()> {
+    pub fn run(&mut self, rt: tokio::runtime::Runtime, mut options: Options) -> anyhow::Result<()> {
         info!(?options, "Starting Readyset adapter");
 
         if options.deployment_mode.is_standalone() {
@@ -1718,7 +1718,8 @@ where
         // from readers on the adapter rather than across a network hop.
         let readers: Readers = Arc::new(Mutex::new(Default::default()));
 
-        let memory_limit = options.server_worker_options.memory_limit;
+        let memory_limit = options.server_worker_options.effective_memory_limit();
+        options.server_worker_options.memory_limit = Some(memory_limit);
 
         // Built from the CLI flags before `server_worker_options` is moved into
         // the server builder below.

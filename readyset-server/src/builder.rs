@@ -65,11 +65,9 @@ impl Builder {
         deployment_dir: PathBuf,
     ) -> anyhow::Result<Self> {
         let mut builder = Self::default();
-        if opts.memory_limit > 0 {
-            builder.set_memory_limit(
-                opts.memory_limit,
-                Duration::from_millis(opts.memory_check_freq),
-            );
+        let memory_limit = opts.effective_memory_limit();
+        if memory_limit > 0 {
+            builder.set_memory_limit(memory_limit, Duration::from_millis(opts.memory_check_freq));
         }
         builder.set_eviction_kind(opts.eviction_kind);
         builder.set_unquery(!opts.no_unquery);
