@@ -5164,6 +5164,97 @@ async fn left_join_over_a_partial_right_input_extends_rows_whose_key_empties() {
     shutdown_tx.shutdown().await;
 }
 
+/// Caches `query`, which joins `a` with a COUNT over `c`, then evicts a cached row's join key from
+/// the COUNT, as memory pressure can, while the cache keeps the row. A later write under that key
+/// must change the row's count in the cache, read on `columns` at `a.g = 1`.
+async fn write_under_a_key_a_join_input_evicted_reaches_the_cache_of(
+    name: &str,
+    query: &str,
+    columns: &'static [&'static str],
+) {
+    let (mut g, shutdown_tx) = start_simple_unsharded(name).await;
+    g.extend_recipe(
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE a (id int PRIMARY KEY, g int, x int)".to_owned(),
+                "CREATE TABLE c (id int PRIMARY KEY, y int)".to_owned(),
+                format!("CREATE CACHE q FROM {query}"),
+            ],
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+    let (mut a, mut c) = (g.table("a").await.unwrap(), g.table("c").await.unwrap());
+    a.insert(int_row(&[1, 1, 5])).await.unwrap();
+    c.insert(int_row(&[1, 5])).await.unwrap();
+    let read = CacheRead::at("q", 1, columns);
+    eventually!(
+        run_test: { cache_rows(&mut g, &read).await },
+        then_assert: |rows| assert_eq!(rows, vec![int_row(&[1, 1])])
+    );
+
+    let count = partial_node(&mut g, "q", "|*|").await;
+    assert!(g.evict_key(count, vec![5.into()]).await.unwrap());
+    c.insert(int_row(&[2, 5])).await.unwrap();
+    eventually!(
+        run_test: { cache_rows(&mut g, &read).await },
+        then_assert: |rows| assert_eq!(rows, vec![int_row(&[1, 2])])
+    );
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn write_under_a_key_a_join_input_evicted_reaches_the_cache() {
+    write_under_a_key_a_join_input_evicted_reaches_the_cache_of(
+        "write_under_a_key_a_join_input_evicted_reaches_the_cache",
+        "SELECT a.id AS aid, cc.n AS n FROM a \
+         JOIN (SELECT y, count(*) AS n FROM c GROUP BY y) cc ON a.x = cc.y WHERE a.g = ?",
+        &["aid", "n"],
+    )
+    .await;
+}
+
+/// The join reads the COUNT through the HAVING clause's filter.
+#[tokio::test(flavor = "multi_thread")]
+async fn write_under_a_key_a_join_input_evicted_reaches_the_cache_through_having() {
+    write_under_a_key_a_join_input_evicted_reaches_the_cache_of(
+        "write_under_a_key_a_join_input_evicted_reaches_the_cache_through_having",
+        "SELECT a.id AS aid, cc.n AS n FROM a \
+         JOIN (SELECT y, count(*) AS n FROM c GROUP BY y HAVING count(*) > 0) cc \
+         ON a.x = cc.y WHERE a.g = ?",
+        &["aid", "n"],
+    )
+    .await;
+}
+
+/// The join reads the COUNT through a projection that copies the join column twice, and joins on
+/// the second copy.
+#[tokio::test(flavor = "multi_thread")]
+async fn write_under_a_key_a_join_input_evicted_reaches_the_cache_through_a_copied_column() {
+    write_under_a_key_a_join_input_evicted_reaches_the_cache_of(
+        "write_under_a_key_a_join_input_evicted_reaches_the_cache_through_a_copied_column",
+        "SELECT a.id AS aid, cc.n AS n FROM a \
+         JOIN (SELECT y AS z, count(*) AS n, y FROM c GROUP BY y) cc ON a.x = cc.y WHERE a.g = ?",
+        &["aid", "n"],
+    )
+    .await;
+}
+
+/// The join's output is a partial state in the join's domain, which an aggregate reads.
+#[tokio::test(flavor = "multi_thread")]
+async fn write_under_a_key_a_join_input_evicted_reaches_the_cache_through_an_aggregate() {
+    write_under_a_key_a_join_input_evicted_reaches_the_cache_of(
+        "write_under_a_key_a_join_input_evicted_reaches_the_cache_through_an_aggregate",
+        "SELECT a.g AS g, max(cc.n) AS s FROM a \
+         JOIN (SELECT y, count(*) AS n FROM c GROUP BY y) cc ON a.x = cc.y \
+         WHERE a.g = ? GROUP BY a.g",
+        &["g", "s"],
+    )
+    .await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn non_sql_materialized_range_query() {
     let (mut g, shutdown_tx) = {

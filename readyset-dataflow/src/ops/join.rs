@@ -1165,6 +1165,10 @@ impl Join {
         self.rhs_full_mat
     }
 
+    pub fn lhs(&self) -> IndexPair {
+        self.left
+    }
+
     pub fn rhs(&self) -> IndexPair {
         self.right
     }

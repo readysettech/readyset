@@ -74,7 +74,7 @@ use crate::payload::{
     ReplayPieceContext,
 };
 use crate::prelude::*;
-use crate::processing::ColumnMiss;
+use crate::processing::{ColumnMiss, IngredientLookupResult, LookupMode};
 use crate::{DomainRequest, Readers, backlog};
 
 const SLOW_LOOP_THRESHOLD: Duration = Duration::from_secs(1);
@@ -4365,6 +4365,54 @@ impl Domain {
     ) -> ReadySetResult<usize> {
         let mut bytes_freed = 0;
 
+        let joined =
+            Self::rows_joined_with_evicted_keys(node, index, keys, nodes, state, replay_paths)?;
+        if !joined.is_empty() {
+            assert_reachable!("eviction from a join input evicts the rows the join paired with it");
+        }
+        for (tag, keys) in joined {
+            let path = &replay_paths[tag];
+            let keys = keys.into_iter().collect::<Vec<_>>();
+            bytes_freed += Self::walk_path(
+                &path.path[..],
+                &keys,
+                tag,
+                shard,
+                nodes,
+                reader_write_handles,
+                ex,
+                auxiliary_node_states,
+            )?;
+            // `walk_path` evicted the path's readers and sent the eviction on to later domains. A
+            // partial state that ends the path in this domain is evicted here, then its dependents.
+            let destination = path.last_segment();
+            let Some(result) = state
+                .get_mut(destination.node)
+                .and_then(|s| s.evict_keys(tag, &keys))
+            else {
+                continue;
+            };
+            bytes_freed += result.bytes_freed;
+            if result.bytes_freed > 0
+                && let Some(index) = destination.partial_index.as_ref()
+            {
+                bytes_freed += Self::trigger_downstream_evictions(
+                    index,
+                    &keys,
+                    destination.node,
+                    ex,
+                    not_ready,
+                    replay_paths,
+                    shard,
+                    state,
+                    reader_write_handles,
+                    nodes,
+                    remapped_keys,
+                    auxiliary_node_states,
+                )?;
+            }
+        }
+
         for (tag, path, keys) in
             replay_paths.downstream_dependent_paths(node, index, keys, remapped_keys)
         {
@@ -4449,6 +4497,102 @@ impl Domain {
             }
         }
         Ok(bytes_freed)
+    }
+
+    /// Finds the joins that look up `node` on `index`, directly or through stateless nodes they
+    /// query through, and the rows of each join's other input that match `keys`. Returns those
+    /// rows' keys in each replay path through the join that is keyed on the other input's columns.
+    /// Those paths fill the rows' downstream entries.
+    fn rows_joined_with_evicted_keys(
+        node: LocalNodeIndex,
+        index: &Index,
+        keys: &[KeyComparison],
+        nodes: &DomainNodes,
+        state: &StateMap,
+        replay_paths: &ReplayPaths,
+    ) -> ReadySetResult<BTreeMap<Tag, HashSet<KeyComparison>>> {
+        let mut reads = vec![];
+        let mut inputs = vec![node];
+        while let Some(input) = inputs.pop() {
+            for &child in nodes[input].borrow().children() {
+                if !state.contains_key(child) && nodes[child].borrow().can_query_through() {
+                    inputs.push(child);
+                } else {
+                    reads.push((input, child));
+                }
+            }
+        }
+        let mut joined: BTreeMap<Tag, HashSet<KeyComparison>> = BTreeMap::new();
+        for (input, child) in reads {
+            let candidate = nodes[child].borrow();
+            let Some(Join(join)) = candidate.as_internal() else {
+                continue;
+            };
+            let (other, looked_up, columns) = if join.node_is_lhs(input) {
+                (join.rhs(), join.on_left(), join.on_right())
+            } else {
+                (join.lhs(), join.on_right(), join.on_left())
+            };
+            if Self::columns_queried_through(input, &looked_up, node, nodes).as_ref()
+                != Some(&index.columns)
+            {
+                continue;
+            }
+            let paths = replay_paths.paths_through(&candidate, other.as_global());
+            if paths.is_empty() {
+                continue;
+            }
+            for key in keys {
+                // Skip range evictions, which a BTree reader sends upstream, because the other
+                // input's weak index answers only point lookups.
+                let KeyComparison::Equal(values) = key else {
+                    continue;
+                };
+                let key = PointKey::from(values.iter().cloned());
+                let rows =
+                    match join.lookup(*other, &columns, &key, nodes, state, LookupMode::Weak)? {
+                        IngredientLookupResult::Records(rows) => rows,
+                        IngredientLookupResult::Miss => continue,
+                    };
+                for row in rows {
+                    let row = row?;
+                    for (tag, path_columns) in &paths {
+                        let key = path_columns
+                            .iter()
+                            .map(|&c| row[c].clone())
+                            .collect::<Vec<_>>();
+                        let key = KeyComparison::try_from(key)
+                            .map_err(|_| internal_err!("Replay path {tag:?} has an empty key"))?;
+                        joined.entry(*tag).or_default().insert(key);
+                    }
+                }
+            }
+        }
+        Ok(joined)
+    }
+
+    /// The columns of `ancestor` that a lookup of `columns` in `node` reads, when `node` queries
+    /// through to `ancestor`.
+    fn columns_queried_through(
+        mut node: LocalNodeIndex,
+        columns: &[usize],
+        ancestor: LocalNodeIndex,
+        nodes: &DomainNodes,
+    ) -> Option<Vec<usize>> {
+        let mut columns = columns.to_vec();
+        while node != ancestor {
+            let n = nodes[node].borrow();
+            if !n.can_query_through() {
+                return None;
+            }
+            let (&[parent], ColumnSource::ExactCopy(source)) =
+                (n.parents(), n.column_source(&columns))
+            else {
+                return None;
+            };
+            (node, columns) = (parent, source.columns);
+        }
+        Some(columns)
     }
 
     #[allow(clippy::too_many_arguments)]
