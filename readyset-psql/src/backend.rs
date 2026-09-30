@@ -223,9 +223,20 @@ impl ps::PsqlBackend for Backend {
             .await?
             .try_into()?;
 
-        match response {
-            ps::QueryResponse::SimpleQuery(r) => r
-                .into_iter()
+        let messages = match response {
+            ps::QueryResponse::SimpleQuery {
+                messages,
+                pending_notices: _,
+            } => messages,
+            other => {
+                return Err(ps::Error::InternalError(format!(
+                    "unexpected response type for pg_type query: {:?}",
+                    std::mem::discriminant(&other)
+                )))
+            }
+        };
+        messages
+            .into_iter()
                 .filter_map(|m| match m {
                     SimpleQueryMessage::Row(row) => Some(row),
                     _ => None,
