@@ -6,7 +6,7 @@ use postgres_types::Kind;
 use ps::PsqlValue;
 use ps::util::type_is_oid;
 use psql_srv as ps;
-use readyset_data::{Array, DfValue, parse_point};
+use readyset_data::{Array, DfValue, parse_box, parse_point};
 use readyset_decimal::Decimal;
 use tokio_postgres::types::Type;
 use tracing::{error, trace};
@@ -140,6 +140,11 @@ impl TryFrom<TypedDfValue<'_>> for PsqlValue {
                         })?,
                 ))
             }
+            (&Type::BOX, ref b @ (DfValue::Text(_) | DfValue::TinyText(_))) => Ok(PsqlValue::Box(
+                <&str>::try_from(b)
+                    .map_err(|e| ps::Error::InternalError(e.to_string()))
+                    .and_then(|s| parse_box(s).map_err(|e| ps::Error::ParseError(e.to_string())))?,
+            )),
             (&Type::BIT, DfValue::BitVector(ref b)) => Ok(PsqlValue::Bit(b.as_ref().clone())),
             (&Type::VARBIT, DfValue::BitVector(ref b)) => Ok(PsqlValue::VarBit(b.as_ref().clone())),
             (t, DfValue::Array(ref arr)) => match t.kind() {

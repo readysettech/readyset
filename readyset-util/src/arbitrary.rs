@@ -14,7 +14,7 @@ use chrono::{
 use chrono_tz::Tz;
 use cidr::{IpCidr, IpInet};
 use eui48::MacAddress;
-use geo_types::Point;
+use geo_types::{Point, Rect};
 use prop::string::bytes_regex;
 use proptest::prelude::*;
 use proptest::sample::SizeRange;
@@ -357,6 +357,11 @@ pub fn arbitrary_mysql_point() -> impl Strategy<Value = Vec<u8>> {
 pub fn arbitrary_postgres_point() -> impl Strategy<Value = Point> {
     let finite_f64 = any::<f64>().prop_filter("finite", |x| x.is_finite());
     (finite_f64.clone(), finite_f64).prop_map(|(x, y)| Point::new(x, y))
+}
+
+/// Strategy for generating Postgres built-in `box` values.
+pub fn arbitrary_postgres_box() -> impl Strategy<Value = Rect> {
+    (arbitrary_postgres_point(), arbitrary_postgres_point()).prop_map(|(a, b)| Rect::new(a, b))
 }
 
 /// Strategy for generating geometry postgis `point` values for postgresql.

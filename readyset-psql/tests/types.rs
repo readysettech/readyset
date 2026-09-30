@@ -24,7 +24,7 @@ mod types {
 
     use cidr::{IpCidr, IpInet};
     use eui48::MacAddress;
-    use geo_types::Point;
+    use geo_types::{Point, Rect};
     use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest::string::string_regex;
@@ -36,7 +36,7 @@ mod types {
     use readyset_util::arbitrary::{
         arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal, arbitrary_ipcidr, arbitrary_ipinet, arbitrary_json,
         arbitrary_json_without_f64, arbitrary_mac_address, arbitrary_naive_date,
-        arbitrary_naive_time, arbitrary_postgres_point, arbitrary_systemtime, arbitrary_uuid,
+        arbitrary_naive_time, arbitrary_postgres_box, arbitrary_postgres_point, arbitrary_systemtime, arbitrary_uuid,
     };
     use readyset_util::eventually;
     use tokio_postgres::types::{FromSql, ToSql};
@@ -46,7 +46,7 @@ mod types {
     use super::*;
 
     /// Postgres built-in geometric types.
-    const GEOMETRIC_TYPES: &[&str] = &["point"];
+    const GEOMETRIC_TYPES: &[&str] = &["point", "box"];
 
     async fn test_type_roundtrip<V>(type_name: &str, vals: Vec<V>)
     where
@@ -200,6 +200,7 @@ mod types {
         bit_varying_unlimited_bitvec("bit varying", bit_vec::BitVec, arbitrary_bitvec(0..=20));
         bit_varying_bitvec("bit varying(10)", bit_vec::BitVec, arbitrary_bitvec(0..=10));
         point_builtin("point", Point, arbitrary_postgres_point());
+        box_builtin("box", Rect, arbitrary_postgres_box());
         timestamp_tz_datetime("timestamp with time zone", chrono::DateTime::<chrono::FixedOffset>, arbitrary_date_time());
         text_array("text[]", Vec<String>);
     }

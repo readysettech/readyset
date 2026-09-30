@@ -2,8 +2,9 @@ use std::convert::TryFrom;
 
 use bytes::{BufMut, BytesMut};
 use eui48::MacAddressFormat;
-use geo_types::Point;
+use geo_types::{Point, Rect};
 use postgres::error::ErrorPosition;
+use postgres_protocol::types::box_to_sql;
 use postgres_types::{Kind, ToSql, Type};
 use readyset_util::fmt::FastEncode;
 use tokio_util::codec::Encoder;
@@ -439,6 +440,13 @@ fn write_point(point: &Point, dst: &mut BytesMut) -> Result<(), Error> {
     Ok(())
 }
 
+/// Writes a box in postgres's text format, upper-right corner first.
+fn write_box(rect: &Rect, dst: &mut BytesMut) -> Result<(), Error> {
+    write_point(&rect.max().into(), dst)?;
+    dst.put_slice(b",");
+    write_point(&rect.min().into(), dst)
+}
+
 fn put_u8(val: u8, dst: &mut BytesMut) {
     dst.put_u8(val);
 }
@@ -592,6 +600,10 @@ fn put_binary_value(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
         PsqlValue::Point(point) => {
             point.to_sql(&Type::POINT, dst)?;
         }
+        PsqlValue::Box(rect) => {
+            let (hi, lo) = (rect.max(), rect.min());
+            box_to_sql(hi.x, hi.y, lo.x, lo.y, dst);
+        }
         PsqlValue::Array(arr, ty) => {
             arr.to_sql(ty, dst)?;
         }
@@ -717,6 +729,7 @@ fn put_text_payload(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
                 .join("")
         )?,
         PsqlValue::Point(point) => write_point(point, dst)?,
+        PsqlValue::Box(rect) => write_box(rect, dst)?,
         PsqlValue::Array(arr, _) => write!(dst, "{arr}")?,
         PsqlValue::Row(fields, _) => put_record_text(fields, dst)?,
         PsqlValue::PassThrough(p) => {
@@ -1573,6 +1586,20 @@ mod tests {
     }
 
     #[test]
+    fn test_encode_binary_box() {
+        let mut buf = BytesMut::new();
+        let rect = Rect::new((1.2, 4.0), (3.5, -3.3));
+        put_binary_value(&PsqlValue::Box(rect), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(32); // size
+        exp.put_f64(3.5);
+        exp.put_f64(4.0);
+        exp.put_f64(1.2);
+        exp.put_f64(-3.3);
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
     fn test_encode_binary_macaddr() {
         let mut buf = BytesMut::new();
         let macaddr = MacAddress::new([18, 52, 86, 171, 205, 239]);
@@ -1900,6 +1927,28 @@ mod tests {
         let mut exp = BytesMut::new();
         exp.put_i32(20); // size = 20 chars
         exp.extend_from_slice(b"(Infinity,-Infinity)");
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_text_box() {
+        let mut buf = BytesMut::new();
+        let rect = Rect::new((1.2, 4.0), (3.5, -3.3));
+        put_text_value(&PsqlValue::Box(rect), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(18); // size = 18 chars
+        exp.extend_from_slice(b"(3.5,4),(1.2,-3.3)");
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_text_box_inf() {
+        let mut buf = BytesMut::new();
+        let rect = Rect::new((f64::NEG_INFINITY, 0.0), (f64::INFINITY, 1.0));
+        put_text_value(&PsqlValue::Box(rect), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(26); // size = 26 chars
+        exp.extend_from_slice(b"(Infinity,1),(-Infinity,0)");
         assert_eq!(buf, exp);
     }
 

@@ -7,11 +7,11 @@ use bytes::{Buf, Bytes, BytesMut};
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone};
 use cidr::{IpCidr, IpInet};
 use eui48::MacAddress;
-use geo_types::Point;
+use geo_types::{Point, Rect};
 use postgres_types::{FromSql, Kind, Type};
 use readyset_data::{
-    parse_point, Array, Collation, PassThroughFormat, DATE_FORMAT, ISO_TIMESTAMP_PARSE_FORMAT,
-    TIMESTAMP_PARSE_FORMAT,
+    parse_box, parse_point, Array, Collation, PassThroughFormat, DATE_FORMAT,
+    ISO_TIMESTAMP_PARSE_FORMAT, TIMESTAMP_PARSE_FORMAT,
 };
 use readyset_decimal::Decimal;
 use tokio_util::codec::Decoder;
@@ -440,6 +440,7 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<PsqlValue, Error> {
             Type::BIT => Ok(PsqlValue::Bit(BitVec::from_sql(t, buf)?)),
             Type::VARBIT => Ok(PsqlValue::VarBit(BitVec::from_sql(t, buf)?)),
             Type::POINT => Ok(PsqlValue::Point(Point::from_sql(t, buf)?)),
+            Type::BOX => Ok(PsqlValue::Box(Rect::from_sql(t, buf)?)),
             ref t if t.name() == "citext" => Ok(PsqlValue::Text(
                 readyset_data::Text::from_str_with_collation(
                     <&str>::from_sql(t, buf)?,
@@ -590,6 +591,9 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<PsqlValue, Error> {
         Type::POINT => parse_point(text_str)
             .map_err(|_| DecodeError::InvalidTextPointValue(text_str.to_owned()))
             .map(PsqlValue::Point),
+        Type::BOX => parse_box(text_str)
+            .map_err(|_| DecodeError::InvalidTextBoxValue(text_str.to_owned()))
+            .map(PsqlValue::Box),
         ref t if matches!(t.kind(), Kind::Array(_)) => {
             let inner_t = match t.kind() {
                 Kind::Array(inner_t) => inner_t.clone(),
@@ -1441,6 +1445,20 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_binary_box() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(32); // size
+        buf.put_f64(3.5); // x1 (upper-right corner)
+        buf.put_f64(4.0); // y1
+        buf.put_f64(1.2); // x2 (lower-left corner)
+        buf.put_f64(-3.4); // y2
+        assert_eq!(
+            get_binary_value(&mut buf.freeze(), &Type::BOX).unwrap(),
+            PsqlValue::Box(Rect::new((1.2, -3.4), (3.5, 4.0)))
+        );
+    }
+
+    #[test]
     fn test_decode_binary_timestamp_tz() {
         let dt = FixedOffset::east_opt(18000)
             .unwrap()
@@ -1744,6 +1762,50 @@ mod tests {
         assert!(matches!(
             get_text_value(&mut buf.freeze(), &Type::POINT),
             Err(DecodeError::InvalidTextPointValue(_))
+        ));
+    }
+
+    #[test]
+    fn test_decode_text_box_with_outer_parentheses() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(20);
+        buf.extend_from_slice(b"((1.2,-3.4),(3.5,4))");
+        assert_eq!(
+            get_text_value(&mut buf.freeze(), &Type::BOX).unwrap(),
+            PsqlValue::Box(Rect::new((1.2, -3.4), (3.5, 4.0)))
+        );
+    }
+
+    #[test]
+    fn test_decode_text_box_without_outer_parentheses() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(18);
+        buf.extend_from_slice(b"(1.2,-3.4),(3.5,4)");
+        assert_eq!(
+            get_text_value(&mut buf.freeze(), &Type::BOX).unwrap(),
+            PsqlValue::Box(Rect::new((1.2, -3.4), (3.5, 4.0)))
+        );
+    }
+
+    #[test]
+    fn test_decode_text_box_without_parentheses() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(14);
+        buf.extend_from_slice(b"1.2,-3.4,3.5,4");
+        assert_eq!(
+            get_text_value(&mut buf.freeze(), &Type::BOX).unwrap(),
+            PsqlValue::Box(Rect::new((1.2, -3.4), (3.5, 4.0)))
+        );
+    }
+
+    #[test]
+    fn test_decode_text_invalid_box() {
+        let mut buf = BytesMut::new();
+        buf.put_i32(5);
+        buf.extend_from_slice(b"(1,2)");
+        assert!(matches!(
+            get_text_value(&mut buf.freeze(), &Type::BOX),
+            Err(DecodeError::InvalidTextBoxValue(_))
         ));
     }
 

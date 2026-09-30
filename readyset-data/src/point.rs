@@ -7,6 +7,14 @@ use readyset_errors::{ReadySetError, ReadySetResult};
 /// Parses a Postgres `point` in either text form Postgres accepts, `(x,y)` or `x,y`, with
 /// whitespace permitted around the value and each coordinate.
 pub fn parse_point(s: &str) -> ReadySetResult<Point> {
+    try_parse_point(s).ok_or_else(|| ReadySetError::DfValueConversionError {
+        src_type: "text".into(),
+        target_type: "point".into(),
+        details: format!("invalid point value: {s:?}"),
+    })
+}
+
+pub(crate) fn try_parse_point(s: &str) -> Option<Point> {
     let trimmed = s.trim();
     let inner = trimmed
         .strip_prefix('(')
@@ -16,11 +24,6 @@ pub fn parse_point(s: &str) -> ReadySetResult<Point> {
     inner
         .split_once(',')
         .and_then(|(x, y)| Some(Point::new(coord(x)?, coord(y)?)))
-        .ok_or_else(|| ReadySetError::DfValueConversionError {
-            src_type: "text".into(),
-            target_type: "point".into(),
-            details: format!("invalid point value: {s:?}"),
-        })
 }
 
 pub fn format_point(point: Point) -> String {

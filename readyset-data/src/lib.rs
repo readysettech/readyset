@@ -16,7 +16,7 @@ use chrono::{self, DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use cidr::{IpCidr, IpInet};
 use enum_kinds::EnumKind;
 use eui48::{MacAddress, MacAddressFormat};
-use geo_types::Point;
+use geo_types::{Point, Rect};
 use itertools::Itertools;
 use mysql_time::MySqlTime;
 use postgres_types::Format;
@@ -37,6 +37,7 @@ use uuid::Uuid;
 
 mod array;
 mod average;
+mod r#box;
 mod collation;
 pub mod dialect;
 pub mod encoding;
@@ -59,6 +60,7 @@ pub use crate::average::{AverageAccumulator, AvgScaleMode};
 pub use crate::collation::{CharsetFamily, Collation};
 pub use crate::dialect::{Dialect, SqlEngine};
 pub use crate::point::{format_point, parse_point};
+pub use crate::r#box::{format_box, parse_box};
 pub use crate::r#type::{DfType, PgEnumMetadata, PgTypeCategory};
 pub use crate::ranges::{Bound, BoundedRange, IntoBoundedRange, RangeBounds};
 pub use crate::text::{Text, TinyText};
@@ -2092,6 +2094,9 @@ impl ToSql for DfValue {
             (Self::Text(_) | Self::TinyText(_), &Type::POINT) => {
                 parse_point(<&str>::try_from(self)?)?.to_sql(ty, out)
             }
+            (Self::Text(_) | Self::TinyText(_), &Type::BOX) => {
+                parse_box(<&str>::try_from(self)?)?.to_sql(ty, out)
+            }
             (Self::Text(_) | Self::TinyText(_), _) => {
                 <&str>::try_from(self).unwrap().to_sql(ty, out)
             }
@@ -2224,6 +2229,7 @@ impl<'a> FromSql<'a> for DfValue {
                 }
                 Type::BIT | Type::VARBIT => mk_from_sql!(BitVec),
                 Type::POINT => Ok(DfValue::from(format_point(Point::from_sql(ty, raw)?))),
+                Type::BOX => Ok(DfValue::from(format_box(Rect::from_sql(ty, raw)?))),
                 // we intentionally throw away the tsvector data.
                 Type::TS_VECTOR => Ok(DfValue::None),
                 ref ty if ty.name() == "citext" => Ok(DfValue::from_str_and_collation(
