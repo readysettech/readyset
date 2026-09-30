@@ -6,7 +6,7 @@ use cidr::{IpCidr, IpInet};
 use eui48::MacAddress;
 use geo_types::{Point, Rect};
 use postgres_types::{FromSql, Kind, Type};
-use readyset_data::{Array, PassThroughFormat, Text, TinyText};
+use readyset_data::{Array, PassThroughFormat, PostgresPath, Text, TinyText};
 use readyset_decimal::Decimal;
 use uuid::Uuid;
 
@@ -43,6 +43,7 @@ pub enum PsqlValue {
     VarBit(BitVec),
     Point(Point),
     Box(Rect),
+    Path(PostgresPath),
     Array(Array, Type),
     /// An anonymous composite (`record`) value. The second element is the composite [`Type`], whose
     /// [`Kind::Composite`] fields give the type of each field in the same order.
@@ -101,6 +102,7 @@ impl<'a> FromSql<'a> for PsqlValue {
                 Type::VARBIT => BitVec::from_sql(ty, raw).map(PsqlValue::VarBit),
                 Type::POINT => Point::from_sql(ty, raw).map(PsqlValue::Point),
                 Type::BOX => Rect::from_sql(ty, raw).map(PsqlValue::Box),
+                Type::PATH => PostgresPath::from_sql(ty, raw).map(PsqlValue::Path),
                 _ => Ok(PsqlValue::PassThrough(readyset_data::PassThrough {
                     ty: ty.clone(),
                     format: PassThroughFormat::Binary,

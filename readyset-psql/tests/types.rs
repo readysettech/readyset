@@ -31,7 +31,7 @@ mod types {
     use readyset_adapter::backend::QueryDestination;
     use readyset_client_test_helpers::psql_helpers::{connect, last_query_info, upstream_config};
     use readyset_client_test_helpers::{sleep, Adapter};
-    use readyset_data::DfValue;
+    use readyset_data::{DfValue, PostgresPath};
     use readyset_decimal::Decimal;
     use readyset_util::arbitrary::{
         arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal, arbitrary_ipcidr, arbitrary_ipinet, arbitrary_json,
@@ -46,7 +46,7 @@ mod types {
     use super::*;
 
     /// Postgres built-in geometric types.
-    const GEOMETRIC_TYPES: &[&str] = &["point", "box"];
+    const GEOMETRIC_TYPES: &[&str] = &["point", "box", "path"];
 
     async fn test_type_roundtrip<V>(type_name: &str, vals: Vec<V>)
     where
@@ -201,6 +201,8 @@ mod types {
         bit_varying_bitvec("bit varying(10)", bit_vec::BitVec, arbitrary_bitvec(0..=10));
         point_builtin("point", Point, arbitrary_postgres_point());
         box_builtin("box", Rect, arbitrary_postgres_box());
+        path_builtin("path", PostgresPath, (any::<bool>(), vec(arbitrary_postgres_point(), 1..10))
+            .prop_map(|(closed, points)| PostgresPath { closed, points: points.into() }));
         timestamp_tz_datetime("timestamp with time zone", chrono::DateTime::<chrono::FixedOffset>, arbitrary_date_time());
         text_array("text[]", Vec<String>);
     }

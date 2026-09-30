@@ -66,6 +66,9 @@ pub enum DecodeError {
     #[error("invalid text box value: {0}")]
     InvalidTextBoxValue(String),
 
+    #[error("invalid text path value: {0}")]
+    InvalidTextPathValue(String),
+
     #[error("invalid array value: {0}")]
     InvalidArrayValue(String),
 

@@ -6,6 +6,7 @@ use geo_types::{Point, Rect};
 use postgres::error::ErrorPosition;
 use postgres_protocol::types::box_to_sql;
 use postgres_types::{Kind, ToSql, Type};
+use readyset_data::PostgresPath;
 use readyset_util::fmt::FastEncode;
 use tokio_util::codec::Encoder;
 
@@ -447,6 +448,24 @@ fn write_box(rect: &Rect, dst: &mut BytesMut) -> Result<(), Error> {
     write_point(&rect.min().into(), dst)
 }
 
+/// Writes a path in postgres's text format, bracketed when open and parenthesized when closed.
+fn write_path(path: &PostgresPath, dst: &mut BytesMut) -> Result<(), Error> {
+    let (open, close) = if path.closed {
+        (b'(', b')')
+    } else {
+        (b'[', b']')
+    };
+    dst.put_u8(open);
+    for (i, point) in path.points.iter().enumerate() {
+        if i > 0 {
+            dst.put_u8(b',');
+        }
+        write_point(point, dst)?;
+    }
+    dst.put_u8(close);
+    Ok(())
+}
+
 fn put_u8(val: u8, dst: &mut BytesMut) {
     dst.put_u8(val);
 }
@@ -604,6 +623,9 @@ fn put_binary_value(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
             let (hi, lo) = (rect.max(), rect.min());
             box_to_sql(hi.x, hi.y, lo.x, lo.y, dst);
         }
+        PsqlValue::Path(path) => {
+            path.to_sql(&Type::PATH, dst)?;
+        }
         PsqlValue::Array(arr, ty) => {
             arr.to_sql(ty, dst)?;
         }
@@ -730,6 +752,7 @@ fn put_text_payload(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
         )?,
         PsqlValue::Point(point) => write_point(point, dst)?,
         PsqlValue::Box(rect) => write_box(rect, dst)?,
+        PsqlValue::Path(path) => write_path(path, dst)?,
         PsqlValue::Array(arr, _) => write!(dst, "{arr}")?,
         PsqlValue::Row(fields, _) => put_record_text(fields, dst)?,
         PsqlValue::PassThrough(p) => {
@@ -1600,6 +1623,25 @@ mod tests {
     }
 
     #[test]
+    fn test_encode_binary_path() {
+        let mut buf = BytesMut::new();
+        let path = PostgresPath {
+            closed: true,
+            points: [Point::new(1.2, -3.3), Point::new(3.5, 4.0)].into(),
+        };
+        put_binary_value(&PsqlValue::Path(path), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(37); // size
+        exp.put_u8(1); // closed
+        exp.put_i32(2); // number of points
+        exp.put_f64(1.2);
+        exp.put_f64(-3.3);
+        exp.put_f64(3.5);
+        exp.put_f64(4.0);
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
     fn test_encode_binary_macaddr() {
         let mut buf = BytesMut::new();
         let macaddr = MacAddress::new([18, 52, 86, 171, 205, 239]);
@@ -1949,6 +1991,39 @@ mod tests {
         let mut exp = BytesMut::new();
         exp.put_i32(26); // size = 26 chars
         exp.extend_from_slice(b"(Infinity,1),(-Infinity,0)");
+        assert_eq!(buf, exp);
+    }
+
+    #[test]
+    fn test_encode_text_path() {
+        for (closed, text) in [
+            (false, b"[(1.2,-3.3),(3.5,4)]"),
+            (true, b"((1.2,-3.3),(3.5,4))"),
+        ] {
+            let mut buf = BytesMut::new();
+            let path = PostgresPath {
+                closed,
+                points: [Point::new(1.2, -3.3), Point::new(3.5, 4.0)].into(),
+            };
+            put_text_value(&PsqlValue::Path(path), &mut buf).unwrap();
+            let mut exp = BytesMut::new();
+            exp.put_i32(text.len() as i32); // size
+            exp.extend_from_slice(text);
+            assert_eq!(buf, exp);
+        }
+    }
+
+    #[test]
+    fn test_encode_text_path_inf() {
+        let mut buf = BytesMut::new();
+        let path = PostgresPath {
+            closed: true,
+            points: [Point::new(f64::INFINITY, f64::NEG_INFINITY)].into(),
+        };
+        put_text_value(&PsqlValue::Path(path), &mut buf).unwrap();
+        let mut exp = BytesMut::new();
+        exp.put_i32(22); // size = 22 chars
+        exp.extend_from_slice(b"((Infinity,-Infinity))");
         assert_eq!(buf, exp);
     }
 

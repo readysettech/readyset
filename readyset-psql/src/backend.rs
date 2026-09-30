@@ -11,7 +11,7 @@ use ps::{PsqlValue, TransferFormat};
 use psql_srv as ps;
 use readyset_adapter::backend as cl;
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
-use readyset_data::{DfValue, format_box, format_point};
+use readyset_data::{DfValue, format_box, format_path, format_point};
 use readyset_util::redacted::RedactedString;
 use thiserror::Error;
 use tokio_postgres::SimpleQueryMessage;
@@ -283,6 +283,7 @@ impl TryFrom<ParamRef<'_>> for DfValue {
             PsqlValue::Bit(bits) | PsqlValue::VarBit(bits) => Ok(DfValue::from(bits.clone())),
             PsqlValue::Point(point) => Ok(DfValue::from(format_point(*point))),
             PsqlValue::Box(rect) => Ok(DfValue::from(format_box(*rect))),
+            PsqlValue::Path(path) => Ok(DfValue::from(format_path(path))),
             PsqlValue::Array(arr, _) => Ok(DfValue::from(arr.clone())),
             // Records are only ever built on the way out to a client; the decoder resolves an
             // inbound `record` parameter to a passthrough instead.
