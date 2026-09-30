@@ -17,7 +17,6 @@ test-discovery = { path = "../test-discovery" }
 anyhow = { workspace = true }
 antithesis_sdk = { workspace = true }
 async-trait = { workspace = true }
-atoi = { workspace = true }
 bit-vec = { workspace = true, features = ["serde"] }
 bytes = { workspace = true }
 chrono = { workspace = true }

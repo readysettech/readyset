@@ -1,4 +1,6 @@
 use std::env;
+use std::future::Future;
+use std::panic::AssertUnwindSafe;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
@@ -7,6 +9,7 @@ use std::time::{Duration, Instant};
 use database_utils::{DatabaseURL, ReplicationServerId, UpstreamConfig as Config};
 #[cfg(feature = "failure_injection")]
 use fail::FailScenario;
+use futures::FutureExt;
 use itertools::Itertools;
 use mysql_async::prelude::Queryable;
 use mysql_time::MySqlTime;
@@ -4580,6 +4583,163 @@ async fn mysql_minimal_row_based_blob() {
     );
 
     shutdown_tx.shutdown().await;
+}
+
+/// Row events replicate into the right columns under `binlog_row_metadata = FULL`, which names
+/// row columns after the table's columns. `brm_names` has column names that look like the
+/// positional names `MINIMAL` metadata yields, in the opposite order.
+async fn mysql_binlog_row_metadata_full_inner(row_image: &str) {
+    readyset_tracing::init_test_logging();
+    let url = mysql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+    client
+        .query(&format!("SET binlog_row_image = {row_image}"))
+        .await
+        .unwrap();
+    client
+        .query(
+            "CREATE TABLE brm (
+                id INT PRIMARY KEY, name VARCHAR(10), qty INT UNSIGNED,
+                kind ENUM('x', 'y') DEFAULT 'x'
+            );
+            CREATE TABLE brm_names (`@1` INT, `@0` VARCHAR(10), b INT);
+            INSERT INTO brm VALUES (1, 'one', 10, 'y');
+            INSERT INTO brm_names VALUES (1, 'a', NULL);",
+        )
+        .await
+        .unwrap();
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    let text = |s: &str| DfValue::from_str_and_collation(s, Collation::Utf8AiCi);
+    let int = DfValue::Int;
+    let uint = DfValue::UnsignedInt;
+    let null = DfValue::None;
+
+    client
+        .query(
+            "INSERT INTO brm (id, name, qty) VALUES (2, NULL, 20), (3, 'three', NULL);
+            INSERT INTO brm_names (`@1`, b) VALUES (2, 5);",
+        )
+        .await
+        .unwrap();
+    check_results!(
+        ctx,
+        "brm",
+        "brm insert",
+        &[
+            &[int(1), text("one"), uint(10), int(2)],
+            &[int(2), null.clone(), uint(20), int(1)],
+            &[int(3), text("three"), null.clone(), int(1)],
+        ]
+    );
+    check_results!(
+        ctx,
+        "brm_names",
+        "brm_names insert",
+        &[
+            &[int(1), text("a"), null.clone()],
+            &[int(2), null.clone(), int(5)],
+        ]
+    );
+
+    client
+        .query(
+            "UPDATE brm SET qty = 11 WHERE id = 1;
+            UPDATE brm SET name = NULL, kind = 'y' WHERE id = 3;
+            UPDATE brm SET name = 'two' WHERE id = 2;
+            UPDATE brm_names SET b = 7 WHERE `@1` = 1;
+            UPDATE brm_names SET `@0` = 'c' WHERE `@1` = 2;",
+        )
+        .await
+        .unwrap();
+    check_results!(
+        ctx,
+        "brm",
+        "brm update",
+        &[
+            &[int(1), text("one"), uint(11), int(2)],
+            &[int(2), text("two"), uint(20), int(1)],
+            &[int(3), null.clone(), null.clone(), int(2)],
+        ]
+    );
+    check_results!(
+        ctx,
+        "brm_names",
+        "brm_names update",
+        &[&[int(1), text("a"), int(7)], &[int(2), text("c"), int(5)]]
+    );
+
+    client
+        .query("DELETE FROM brm WHERE id = 2; DELETE FROM brm_names WHERE `@1` = 1;")
+        .await
+        .unwrap();
+    check_results!(
+        ctx,
+        "brm",
+        "brm delete",
+        &[
+            &[int(1), text("one"), uint(11), int(2)],
+            &[int(3), null.clone(), null.clone(), int(2)],
+        ]
+    );
+    check_results!(
+        ctx,
+        "brm_names",
+        "brm_names delete",
+        &[&[int(2), text("c"), int(5)]]
+    );
+
+    client.stop().await;
+    ctx.stop().await;
+    shutdown_tx.shutdown().await;
+}
+
+/// Runs `test` with the upstream's `binlog_row_metadata` set to `FULL`, then restores the original
+/// value, even if `test` panics.
+async fn with_full_binlog_row_metadata(test: impl Future<Output = ()>) {
+    let opts = mysql_async::Opts::from_url(&mysql_url()).unwrap();
+    let opts = mysql_async::OptsBuilder::from_opts(opts).db_name(None::<String>);
+    let mut upstream = mysql_async::Conn::new(opts).await.unwrap();
+    let original: String = upstream
+        .query_first("SELECT @@GLOBAL.binlog_row_metadata")
+        .await
+        .unwrap()
+        .unwrap();
+    upstream
+        .query_drop("SET GLOBAL binlog_row_metadata = FULL")
+        .await
+        .unwrap();
+    let result = AssertUnwindSafe(test).catch_unwind().await;
+    upstream
+        .exec_drop("SET GLOBAL binlog_row_metadata = ?", (original,))
+        .await
+        .unwrap();
+    if let Err(panic) = result {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql, modern)]
+async fn mysql_binlog_row_metadata_full() {
+    with_full_binlog_row_metadata(mysql_binlog_row_metadata_full_inner("FULL")).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql, modern)]
+async fn mysql_binlog_row_metadata_full_with_minimal_row_image() {
+    with_full_binlog_row_metadata(mysql_binlog_row_metadata_full_inner("MINIMAL")).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

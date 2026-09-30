@@ -244,7 +244,7 @@ dependencies = [
  "arrow-ord",
  "arrow-schema",
  "arrow-select",
- "atoi 2.0.0",
+ "atoi",
  "base64 0.22.1",
  "chrono",
  "comfy-table",
@@ -460,15 +460,6 @@ name = "atoi"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f28d99ec8bfea296261ca1af174f24225171fea9664ba9003cbebee704810528"
-dependencies = [
- "num-traits",
-]
-
-[[package]]
-name = "atoi"
-version = "3.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7a8bbe9949e43a1edaa043038c68703b04774156afdfb62ba2cef5bf93d67be"
 dependencies = [
  "num-traits",
 ]
@@ -7439,7 +7430,6 @@ dependencies = [
  "antithesis_sdk",
  "anyhow",
  "async-trait",
- "atoi 3.1.0",
  "bincode",
  "bit-vec 0.9.1",
  "bytes",

@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use atoi::atoi;
 use binlog::consts::{BinlogChecksumAlg, EventType};
 use failpoint_macros::set_failpoint;
 use metrics::{counter, histogram};
@@ -607,12 +606,13 @@ impl MySqlBinlogConnector {
     ///
     /// When binlog row is partial (minimal row), we receive a binlog row with only
     /// the columns that have been set, like `(col1, col2, col3, col4)`, might come as
-    /// `col[@2,@4] / val [x, y]`. This function maps the values to their correct positions
+    /// `col[2,4] / val [x, y]`. This function maps the values to their correct positions
     /// in the row and leave a [`DfValue::Default`] for the rest. The replacement of the
     /// default values is done at [`DfValue::maybe_apply_default`].
     ///
     /// # Arguments
     /// * `row_data` - The binlog row data containing partial column information
+    /// * `columns` - Table map column index of each value in `row_data`, in image order
     /// * `tme` - Table map event containing table metadata
     ///
     /// # Returns
@@ -620,35 +620,20 @@ impl MySqlBinlogConnector {
     fn map_partial_binlog_row_insert(
         &self,
         row_data: &BinlogRow,
+        columns: &[usize],
         tme: &binlog::events::TableMapEvent<'static>,
         collation_vec: &[Option<u16>],
         signedness_vec: &[Option<bool>],
     ) -> ReadySetResult<Vec<DfValue>> {
-        let mut row = vec![DfValue::Default; tme.columns_count() as usize];
-        let mut binlog_iter = handle_table_err!(
+        let values = handle_table_err!(
             self,
             tme,
-            binlog_row_to_noria_row(row_data, tme, collation_vec, signedness_vec)
-        )
-        .into_iter();
-
-        for col in row_data.columns_ref() {
-            if let Some(idx) = parse_column_index(&col.name_str()) {
-                if let Some(value) = binlog_iter.next() {
-                    row[idx] = value;
-                }
-            } else {
-                warn!(
-                    "Unable to parse column index from column {}",
-                    col.name_str()
-                );
-            }
-        }
-
-        assert!(
-            binlog_iter.next().is_none(),
-            "binlog row has more columns than the table"
+            binlog_row_to_noria_row(row_data, columns, tme, collation_vec, signedness_vec)
         );
+        let mut row = vec![DfValue::Default; tme.columns_count() as usize];
+        for (&idx, value) in columns.iter().zip(values) {
+            row[idx] = value;
+        }
         Ok(row)
     }
 
@@ -728,6 +713,7 @@ impl MySqlBinlogConnector {
             Self::get_table_metadata(&mut self.noria, &mut self.table_schemas, tme).await
         );
 
+        let columns: Vec<usize> = wr_event.columns_after_image().iter_ones().collect();
         let mut inserted_rows = Vec::new();
         for row in wr_event.rows(tme) {
             let row = handle_err!(self, tme, &row);
@@ -738,6 +724,7 @@ impl MySqlBinlogConnector {
             );
             inserted_rows.push(TableOperation::Insert(self.map_partial_binlog_row_insert(
                 row_data,
+                &columns,
                 tme,
                 &collation_vec,
                 &signedness_vec,
@@ -775,6 +762,7 @@ impl MySqlBinlogConnector {
     /// # Arguments
     /// * `tme` - Table map event containing table metadata and column information
     /// * `row` - A tuple containing optional before and after row images
+    /// * `columns` - Table map column indices of the before and after images' values
     ///
     /// # Returns
     /// * `mysql::Result<Vec<TableOperation>>` - A vector of table operations (Delete+Insert for full updates, Update for partial)
@@ -782,17 +770,19 @@ impl MySqlBinlogConnector {
         &self,
         tme: &binlog::events::TableMapEvent<'static>,
         row: &(Option<BinlogRow>, Option<BinlogRow>),
+        columns: (&[usize], &[usize]),
         collation_vec: &[Option<u16>],
         signedness_vec: &[Option<bool>],
     ) -> ReadySetResult<Vec<TableOperation>> {
         let (before_image, after_image) =
-            self.get_before_after_images(tme, row, collation_vec, signedness_vec)?;
+            self.get_before_after_images(tme, row, columns, collation_vec, signedness_vec)?;
+        let (_, after_columns) = columns;
 
         if before_image.len() == tme.columns_count() as usize {
             let after_image = if after_image.len() == tme.columns_count() as usize {
                 after_image
             } else {
-                let update = self.create_partial_update(tme, row, after_image)?;
+                let update = self.create_partial_update(tme, after_columns, after_image);
                 // iterate over update, each row that has a modification::set, replace the value in the before_image with the new value
                 before_image
                     .iter()
@@ -814,7 +804,7 @@ impl MySqlBinlogConnector {
             ])
         } else {
             // Partial row update
-            let update = self.create_partial_update(tme, row, after_image)?;
+            let update = self.create_partial_update(tme, after_columns, after_image);
             Ok(vec![TableOperation::Update {
                 key: before_image,
                 update,
@@ -827,6 +817,7 @@ impl MySqlBinlogConnector {
     /// # Arguments
     /// * `tme` - Table map event containing table metadata
     /// * `row` - A tuple containing optional before and after row images
+    /// * `columns` - Table map column indices of the before and after images' values
     ///
     /// # Returns
     /// * `mysql::Result<(Vec<DfValue>, Vec<DfValue>)>` - A tuple of (before_image, after_image) as DfValue vectors
@@ -837,6 +828,7 @@ impl MySqlBinlogConnector {
         &self,
         tme: &binlog::events::TableMapEvent<'static>,
         row: &(Option<BinlogRow>, Option<BinlogRow>),
+        (before_columns, after_columns): (&[usize], &[usize]),
         collation_vec: &[Option<u16>],
         signedness_vec: &[Option<bool>],
     ) -> ReadySetResult<(Vec<DfValue>, Vec<DfValue>)> {
@@ -850,7 +842,13 @@ impl MySqlBinlogConnector {
         let before_image = handle_table_err!(
             self,
             tme,
-            binlog_row_to_noria_row(before_row, tme, collation_vec, signedness_vec)
+            binlog_row_to_noria_row(
+                before_row,
+                before_columns,
+                tme,
+                collation_vec,
+                signedness_vec
+            )
         );
 
         let after_row = handle_err!(
@@ -863,7 +861,7 @@ impl MySqlBinlogConnector {
         let after_image = handle_table_err!(
             self,
             tme,
-            binlog_row_to_noria_row(after_row, tme, collation_vec, signedness_vec)
+            binlog_row_to_noria_row(after_row, after_columns, tme, collation_vec, signedness_vec)
         );
 
         Ok((before_image, after_image))
@@ -873,42 +871,22 @@ impl MySqlBinlogConnector {
     ///
     /// # Arguments
     /// * `tme` - Table map event containing table metadata
-    /// * `row` - A tuple containing optional before and after row images
+    /// * `after_columns` - Table map column index of each value in `after_image`
     /// * `after_image` - Vector of DfValues representing the new values
     ///
     /// # Returns
-    /// * `mysql::Result<Vec<Modification>>` - A vector of modifications to be applied
-    ///
-    /// # Errors
-    /// Returns an error if the after image is missing from the row
+    /// * `Vec<Modification>` - A vector of modifications to be applied
     fn create_partial_update(
         &self,
         tme: &binlog::events::TableMapEvent<'static>,
-        row: &(Option<BinlogRow>, Option<BinlogRow>),
+        after_columns: &[usize],
         after_image: Vec<DfValue>,
-    ) -> ReadySetResult<Vec<Modification>> {
-        let row_after = handle_err!(
-            self,
-            tme,
-            row.1
-                .as_ref()
-                .ok_or("Missing data in UPDATE_ROWS_EVENT after image in partial update")
-        );
-
+    ) -> Vec<Modification> {
         let mut update = vec![Modification::None; tme.columns_count() as usize];
-        let mut taken = 0;
-
-        // Process each column in the row
-        for col in row_after.columns_ref() {
-            if let Some(idx) = parse_column_index(&col.name_str()) {
-                if taken < after_image.len() {
-                    update[idx] = Modification::Set(after_image[taken].clone());
-                    taken += 1;
-                }
-            }
+        for (&idx, value) in after_columns.iter().zip(after_image) {
+            update[idx] = Modification::Set(value);
         }
-
-        Ok(update)
+        update
     }
 
     /// Process a single binlog UPDATE_ROWS_EVENT
@@ -955,11 +933,19 @@ impl MySqlBinlogConnector {
             Self::get_table_metadata(&mut self.noria, &mut self.table_schemas, tme).await
         );
 
+        let before_columns: Vec<usize> = ur_event.columns_before_image().iter_ones().collect();
+        let after_columns: Vec<usize> = ur_event.columns_after_image().iter_ones().collect();
         let mut updated_rows = Vec::with_capacity(ur_event.rows(tme).count());
         // Process each row update
         for row in ur_event.rows(tme) {
             let row = handle_err!(self, tme, &row);
-            let row_ops = self.process_update_row(tme, row, &collation_vec, &signedness_vec)?;
+            let row_ops = self.process_update_row(
+                tme,
+                row,
+                (&before_columns, &after_columns),
+                &collation_vec,
+                &signedness_vec,
+            )?;
             updated_rows.extend(row_ops);
         }
 
@@ -1015,6 +1001,7 @@ impl MySqlBinlogConnector {
             Self::get_table_metadata(&mut self.noria, &mut self.table_schemas, tme).await
         );
 
+        let columns: Vec<usize> = dr_event.columns_before_image().iter_ones().collect();
         let mut deleted_rows = Vec::new();
         for row in dr_event.rows(tme) {
             // For each row in the event we produce a vector of ReadySet types that
@@ -1025,7 +1012,13 @@ impl MySqlBinlogConnector {
             let before_row_image = handle_table_err!(
                 self,
                 tme,
-                binlog_row_to_noria_row(&before_row, tme, &collation_vec, &signedness_vec)
+                binlog_row_to_noria_row(
+                    &before_row,
+                    &columns,
+                    tme,
+                    &collation_vec,
+                    &signedness_vec
+                )
             );
 
             // Partial Row, Before row image is the PKE
@@ -2511,35 +2504,29 @@ fn binlog_to_serde_jsonb_value(binlog_val: &jsonb::Value) -> ReadySetResult<serd
     }
 }
 
-/// Parse column index from column name by skipping the first character
-///
-/// # Arguments
-/// * `col_name` - Column name string, expected to be in format "@{index}"
-///
-/// # Returns
-/// * `Option<usize>` - The parsed index if valid, None otherwise
-#[inline]
-fn parse_column_index(col_name: &str) -> Option<usize> {
-    let bytes = col_name.as_bytes();
-    if bytes.first() == Some(&b'@') {
-        atoi::<usize>(&bytes[1..])
-    } else {
-        None
-    }
-}
-
+/// Converts the values of a row image. `columns` holds the table map column index of each value,
+/// in image order: the set bits of the rows event's column bitmap for that image. Column names
+/// depend on `binlog_row_metadata`, so they do not identify columns.
 fn binlog_row_to_noria_row(
     binlog_row: &BinlogRow,
+    columns: &[usize],
     tme: &binlog::events::TableMapEvent<'static>,
     collation_vec: &[Option<u16>],
     signedness_vec: &[Option<bool>],
 ) -> ReadySetResult<Vec<DfValue>> {
+    if binlog_row.len() != columns.len() {
+        return Err(internal_err!(
+            "Row image has {} values but its column bitmap has {} columns",
+            binlog_row.len(),
+            columns.len()
+        ));
+    }
     binlog_row
         .columns()
         .iter()
+        .zip(columns)
         .enumerate()
-        .map(|(idx, col)| {
-            let tme_idx = parse_column_index(&col.name_str()).unwrap();
+        .map(|(idx, (col, &tme_idx))| {
             match binlog_row.as_ref(idx).unwrap() {
                 BinlogValue::Value(val) => {
                     let (kind, meta) = (
