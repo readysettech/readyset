@@ -147,7 +147,7 @@ async fn e2e_retained_password_authenticates() {
 /// The upstream stays mid-rotation, so it accepts whichever password is forwarded.
 #[tokio::test]
 #[tags(serial)]
-#[upstream(mysql)]
+#[upstream(mysql, modern)]
 async fn e2e_both_passwords_authenticate_during_rotation() {
     readyset_tracing::init_test_logging();
     for plugin in [
