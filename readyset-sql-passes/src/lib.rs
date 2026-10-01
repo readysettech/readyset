@@ -15,6 +15,7 @@ pub mod expr;
 mod hoist_parametrizable_filters;
 mod implied_tables;
 mod infer_nullability;
+pub mod inline_ctes;
 mod inline_leading_derived_table;
 mod inline_literals;
 pub(crate) mod inline_subquery;
