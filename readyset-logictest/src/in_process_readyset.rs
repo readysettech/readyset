@@ -9,7 +9,7 @@ use database_utils::{
     SharedUpstreamRegistry, TlsMode, UpstreamConfig,
 };
 use itertools::Itertools as _;
-use mysql_srv::{AuthCache, AuthKeys, AuthPlugin, MySqlIntermediary};
+use mysql_srv::{AuthCache, AuthKeys, AuthPlugin, MySqlIntermediary, DEFAULT_CONNECT_TIMEOUT};
 use readyset_adapter::{
     backend::{MigrationMode, NoriaConnector},
     query_status_cache::QueryStatusCache,
@@ -230,6 +230,7 @@ async fn setup_adapter(
                     TlsMode::Optional,
                     AuthCache::new(),
                     AuthPlugin::default(),
+                    DEFAULT_CONNECT_TIMEOUT,
                 )
                 .await
                 .unwrap()

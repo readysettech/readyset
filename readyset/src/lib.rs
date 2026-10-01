@@ -628,6 +628,11 @@ pub struct Options {
     #[arg(long, env = "TLS_MODE", default_value = "optional")]
     pub tls_mode: TlsMode,
 
+    /// How long, in milliseconds, a client has to complete the connection handshake and
+    /// authenticate before Readyset closes the connection.
+    #[arg(long, env = "CLIENT_CONNECT_TIMEOUT_MS", default_value = "10000")]
+    pub client_connect_timeout_ms: u64,
+
     /// Specifies the sample rate for the background query sampler. 0 means no sampling.
     #[arg(long, env = "SAMPLER_SAMPLE_RATE", default_value = "0.01")]
     pub sampler_sample_rate: f64,

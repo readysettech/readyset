@@ -2,6 +2,7 @@ use std::fs;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::Path;
 use std::process::exit;
+use std::time::Duration;
 
 use clap::Parser;
 #[cfg(feature = "failure_injection")]
@@ -88,6 +89,7 @@ fn main() -> anyhow::Result<()> {
                     tls_mode: options.tls_mode,
                     auth_cache: AuthCache::new(),
                     mysql_authentication_method: options.mysql_options.mysql_authentication_method,
+                    connect_timeout: Duration::from_millis(options.client_connect_timeout_ms),
                 },
                 database_type: DatabaseType::MySQL,
                 parse_dialect: readyset_sql::Dialect::MySQL,

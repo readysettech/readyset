@@ -19,9 +19,9 @@ use mysql::consts::Command;
 use mysql::prelude::Queryable;
 use mysql::{Row, ServerError};
 use mysql_srv::{
-    AuthCache, AuthKeys, AuthPlugin, CachedSchema, CachingSha2Password, Column, ErrorKind,
-    MySqlIntermediary, MySqlShim, ParamParser, QueryResultWriter, QueryResultsResponse,
-    StatementMetaWriter, UserPasswords,
+    AuthCache, AuthKeys, AuthPlugin, CachedSchema, CachingSha2Password, Column,
+    DEFAULT_CONNECT_TIMEOUT, ErrorKind, MySqlIntermediary, MySqlShim, ParamParser,
+    QueryResultWriter, QueryResultsResponse, StatementMetaWriter, UserPasswords,
 };
 use readyset_adapter_types::DeallocateId;
 use readyset_data::encoding::{Encoding, SingleByteCharset};
@@ -342,6 +342,7 @@ where
                 TlsMode::Optional,
                 auth_cache,
                 AuthPlugin::default(),
+                DEFAULT_CONNECT_TIMEOUT,
             )
             .await
         });
@@ -1959,6 +1960,7 @@ async fn sha2_test_server<F, Fut>(
                 TlsMode::Optional,
                 cache,
                 AuthPlugin::Sha2(CachingSha2Password),
+                DEFAULT_CONNECT_TIMEOUT,
             )
             .await
             .expect("server run");
@@ -2103,6 +2105,7 @@ async fn failed_authentication() {
             TlsMode::Optional,
             AuthCache::new(),
             AuthPlugin::default(),
+            DEFAULT_CONNECT_TIMEOUT,
         )
         .await;
     });
@@ -2208,6 +2211,7 @@ async fn tls_handshake_sent_with_ssl_request() {
             TlsMode::Required,
             AuthCache::new(),
             AuthPlugin::default(),
+            DEFAULT_CONNECT_TIMEOUT,
         )
         .await;
     });
@@ -2253,4 +2257,59 @@ async fn tls_handshake_sent_with_ssl_request() {
     .await
     .expect("TLS handshake timed out")
     .expect("TLS handshake failed");
+}
+
+/// A client that stops responding during the handshake is disconnected once the connect timeout
+/// expires.
+#[tokio::test]
+async fn handshake_times_out() {
+    let _ = AuthKeys::initialize(None);
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let port = listener.local_addr().expect("local_addr").port();
+    let server_handle = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.expect("accept");
+        let shim = TestingShim::new(
+            move |_, _| unreachable!(),
+            move |_| unreachable!(),
+            move |_, _, _| unreachable!(),
+            move |_| unreachable!(),
+            move |_, _, _| unreachable!(),
+        );
+        MySqlIntermediary::run_on_tcp(
+            shim,
+            socket,
+            false,
+            None,
+            TlsMode::Optional,
+            AuthCache::new(),
+            AuthPlugin::default(),
+            Duration::from_millis(100),
+        )
+        .await
+    });
+
+    // Read the greeting and never answer it.
+    let mut stream = TcpStream::connect(("127.0.0.1", port))
+        .await
+        .expect("connect");
+    let mut header = [0u8; 4];
+    stream
+        .read_exact(&mut header)
+        .await
+        .expect("greeting header");
+    let len = u32::from_le_bytes([header[0], header[1], header[2], 0]) as usize;
+    stream
+        .read_exact(&mut vec![0; len])
+        .await
+        .expect("greeting");
+
+    let result = tokio::time::timeout(Duration::from_secs(10), server_handle)
+        .await
+        .expect("server did not close the stalled connection")
+        .expect("server task");
+    assert!(result.is_err());
+    let read = tokio::time::timeout(Duration::from_secs(10), stream.read(&mut [0; 1]))
+        .await
+        .expect("socket was not closed");
+    assert_eq!(read.expect("read"), 0);
 }

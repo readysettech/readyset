@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use database_utils::TlsMode;
 use mysql_async::prelude::Queryable;
-use mysql_srv::{AuthCache, AuthKeys, AuthPlugin, MySqlIntermediary};
+use mysql_srv::{AuthCache, AuthKeys, AuthPlugin, MySqlIntermediary, DEFAULT_CONNECT_TIMEOUT};
 use readyset_adapter::backend::{QueryInfo, UsersSync};
 use readyset_client::consensus::AllowedUsersMap;
 use readyset_mysql::{user_passwords, Backend, MySqlQueryHandler, MySqlUpstream};
@@ -163,6 +163,7 @@ impl Adapter for MySQLAdapter {
             TlsMode::Optional,
             auth_cache,
             auth_plugin,
+            DEFAULT_CONNECT_TIMEOUT,
         )
         .await
         .unwrap()

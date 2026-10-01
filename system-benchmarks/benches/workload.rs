@@ -28,7 +28,7 @@ use database_utils::tls::ServerCertVerification;
 use database_utils::{
     DatabaseConnection, DatabaseStatement, DatabaseType, DatabaseURL, QueryableConnection, TlsMode,
 };
-use mysql_srv::{AuthCache, AuthKeys, AuthPlugin};
+use mysql_srv::{AuthCache, AuthKeys, AuthPlugin, DEFAULT_CONNECT_TIMEOUT};
 use prometheus_parse::Scrape;
 use readyset::mysql::MySqlHandler;
 use readyset::psql::PsqlHandler;
@@ -731,6 +731,7 @@ fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
                 tls_mode: TlsMode::Optional,
                 auth_cache: AuthCache::new(),
                 mysql_authentication_method: AuthPlugin::default(),
+                connect_timeout: DEFAULT_CONNECT_TIMEOUT,
             },
             database_type: DatabaseType::MySQL,
             parse_dialect: readyset_sql::Dialect::MySQL,

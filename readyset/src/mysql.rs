@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
+use std::time::Duration;
 
 use clap::Parser;
 use database_utils::TlsMode;
@@ -58,6 +59,8 @@ pub struct MySqlHandler {
     pub auth_cache: Arc<AuthCache>,
     /// The authentication plugin to advertise to clients.
     pub mysql_authentication_method: AuthPlugin,
+    /// How long a client has to complete the handshake and authenticate.
+    pub connect_timeout: Duration,
 }
 
 impl ConnectionHandler for MySqlHandler {
@@ -83,6 +86,7 @@ impl ConnectionHandler for MySqlHandler {
             self.tls_mode,
             self.auth_cache.clone(),
             self.mysql_authentication_method,
+            self.connect_timeout,
         )
         .await
         {

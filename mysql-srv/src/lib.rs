@@ -171,7 +171,7 @@
 //!             };
 //!             rt.block_on(MySqlIntermediary::run_on_tcp(
 //!                 Backend, s, false, None, TlsMode::Optional,
-//!                 auth_cache, AuthPlugin::default(),
+//!                 auth_cache, AuthPlugin::default(), DEFAULT_CONNECT_TIMEOUT,
 //!             ))
 //!                 .unwrap();
 //!         }
@@ -214,6 +214,7 @@ use std::collections::HashMap;
 use std::io;
 use std::str;
 use std::sync::Arc;
+use std::time::Duration;
 
 use constants::{
     CLIENT_PLUGIN_AUTH, CONNECT_WITH_DB, DEPRECATE_EOF, LONG_PASSWORD, PROTOCOL_41, RESERVED,
@@ -550,6 +551,7 @@ pub struct MySqlIntermediary<B, S: AsyncRead + AsyncWrite + Unpin> {
 impl<B: MySqlShim<net::TcpStream> + Send> MySqlIntermediary<B, net::TcpStream> {
     /// Create a new server over a TCP stream and process client commands until the client
     /// disconnects or an error occurs. See also [`MySqlIntermediary::run_on`].
+    #[allow(clippy::too_many_arguments)]
     pub async fn run_on_tcp(
         shim: B,
         stream: net::TcpStream,
@@ -558,6 +560,7 @@ impl<B: MySqlShim<net::TcpStream> + Send> MySqlIntermediary<B, net::TcpStream> {
         tls_mode: TlsMode,
         auth_cache: Arc<AuthCache>,
         auth_plugin: AuthPlugin,
+        connect_timeout: Duration,
     ) -> Result<(), io::Error> {
         stream.set_nodelay(true)?;
         MySqlIntermediary::run_on(
@@ -568,6 +571,7 @@ impl<B: MySqlShim<net::TcpStream> + Send> MySqlIntermediary<B, net::TcpStream> {
             tls_mode,
             auth_cache,
             auth_plugin,
+            connect_timeout,
         )
         .await
     }
@@ -589,6 +593,10 @@ struct StatementData {
     params: u16,
 }
 
+/// How long a client gets to complete the handshake and authenticate, matching MySQL's default
+/// `connect_timeout`.
+pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Fallback collation ID for the HandshakeV10 greeting, matching stock MySQL 8's utf8mb4 default.
 pub const DEFAULT_HANDSHAKE_COLLATION: u8 = myc::collations::CollationId::UTF8MB4_0900_AI_CI as u8;
 
@@ -604,7 +612,9 @@ const CAPABILITIES: u32 = PROTOCOL_41
 
 impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlIntermediary<B, S> {
     /// Create a new server over a channel and process client commands until the client
-    /// disconnects or an error occurs.
+    /// disconnects or an error occurs. The connection is closed if the client does not complete
+    /// the handshake within `connect_timeout`.
+    #[allow(clippy::too_many_arguments)]
     pub async fn run_on(
         shim: B,
         stream: S,
@@ -613,6 +623,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         tls_mode: TlsMode,
         auth_cache: Arc<AuthCache>,
         auth_plugin: AuthPlugin,
+        connect_timeout: Duration,
     ) -> Result<(), io::Error> {
         let mut mi = MySqlIntermediary {
             shim,
@@ -626,13 +637,16 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             auth_plugin,
             session_auth_plugin: auth_plugin,
         };
+        let init = tokio::time::timeout(connect_timeout, mi.init())
+            .await
+            .map_err(|_| io::Error::other("client did not complete the handshake in time"))??;
         if let InitResult {
             auth_success: true,
             username,
             plain_password,
             database,
             charset,
-        } = mi.init().await?
+        } = init
         {
             let interactive = mi
                 .conn
