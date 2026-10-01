@@ -31,6 +31,7 @@ use crate::disallow_row::DisallowRow as _;
 use crate::drop_redundant_join::{DropRedundantSelfJoin as _, UniqueColumnsSchemaImpl};
 use crate::expand_join_on_using::ExpandJoinOnUsing as _;
 use crate::expr::ScalarOptimizeExpressions as _;
+use crate::inline_ctes::inline_ctes;
 use crate::inline_leading_derived_table::InlineLeadingDerivedTable as _;
 use crate::normalize_right_join::NormalizeRightJoin as _;
 use crate::normalize_subquery_positions::NormalizeSubqueryPositions as _;
@@ -342,6 +343,11 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
     // pass below sees one representation and a cache reaches the form its reads produce.
     standardize_placeholders(query)?;
     trace!(parent: &span, pass="standardize_placeholders", query = %query.display(flags.dialect));
+    // Substituting each entry's body clears the `WITH` clause, so the statement reaches the
+    // deep rewrites as an ordinary derived table rather than taking the shallow path.  Runs
+    // after the placeholders are numbered, so moving a body carries its bindings with it.
+    inline_ctes(query, flags.dialect)?;
+    trace!(parent: &span, pass="inline_ctes", query = %query.display(flags.dialect));
     let invariants_ok = query.validate_pipeline_invariants(flags.dialect);
     trace!(parent: &span, pass="validate_pipeline_invariants", query = %query.display(flags.dialect));
     match invariants_ok {
@@ -4452,6 +4458,70 @@ mod tests {
             assert!(
                 query.having.is_none(),
                 "the predicate is not over an aggregate, so nothing belongs in HAVING: {}",
+                query.display(Dialect::PostgreSQL)
+            );
+        }
+
+        /// The clause is cleared where it can be, so the statement reaches the deep rewrites as an
+        /// ordinary derived table rather than taking the shallow path as a view.
+        #[test]
+        fn a_singly_read_entry_loses_its_with_clause() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "WITH a AS (SELECT qa.p.pn AS pn FROM qa.p WHERE qa.p.color = 'RED') \
+                 SELECT a.pn FROM a",
+                Dialect::PostgreSQL,
+            );
+
+            rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                .expect("rewrite should succeed");
+
+            assert!(
+                query.ctes.is_empty(),
+                "the clause should be gone: {}",
+                query.display(Dialect::PostgreSQL)
+            );
+        }
+
+        /// `standardize_placeholders` settles a `?` into a number before this pass runs, so the
+        /// placeholder carries its own position and substituting a body cannot rebind it.  The
+        /// entry inlines whichever spelling the client wrote.
+        #[test]
+        fn a_question_mark_inlines_once_it_is_numbered() {
+            let context = SchemaAwareTestContext::new(Dialect::MySQL);
+            let mut query = parse_select_statement(
+                "WITH a AS (SELECT qa.p.pn AS pn FROM qa.p WHERE qa.p.color = ?) \
+                 SELECT a.pn FROM a",
+                Dialect::MySQL,
+            );
+
+            rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::MySQL), context)
+                .expect("rewrite should succeed");
+
+            assert!(
+                query.ctes.is_empty(),
+                "the clause should be gone: {}",
+                query.display(Dialect::MySQL)
+            );
+        }
+
+        /// A numbered placeholder carries its own position, so reshaping cannot rebind it and the
+        /// entry inlines as it would with no placeholder at all.
+        #[test]
+        fn a_numbered_placeholder_still_inlines() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "WITH a AS (SELECT qa.p.pn AS pn FROM qa.p WHERE qa.p.color = $1) \
+                 SELECT a.pn FROM a",
+                Dialect::PostgreSQL,
+            );
+
+            rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                .expect("rewrite should succeed");
+
+            assert!(
+                query.ctes.is_empty(),
+                "the clause should be gone: {}",
                 query.display(Dialect::PostgreSQL)
             );
         }
