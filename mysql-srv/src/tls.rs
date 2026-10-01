@@ -1,7 +1,10 @@
 use std::io;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
-use tokio::io::{AsyncRead, AsyncWrite};
+use bytes::Bytes;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio_native_tls::TlsAcceptor;
 use tokio_native_tls::TlsStream;
 
@@ -11,7 +14,59 @@ pub(crate) struct SwitchableStream<S: AsyncRead + AsyncWrite + Unpin>(Option<Str
 
 enum Stream<S: AsyncRead + AsyncWrite + Unpin> {
     Plain(S),
-    Tls(TlsStream<S>),
+    Tls(TlsStream<Prefixed<S>>),
+}
+
+/// A stream that yields `prefix` before reading from `inner`.
+struct Prefixed<S> {
+    prefix: Bytes,
+    inner: S,
+}
+
+impl<S: AsyncRead + Unpin> AsyncRead for Prefixed<S> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
+        if this.prefix.is_empty() {
+            return Pin::new(&mut this.inner).poll_read(cx, buf);
+        }
+        let n = this.prefix.len().min(buf.remaining());
+        buf.put_slice(&this.prefix.split_to(n));
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl<S: AsyncWrite + Unpin> AsyncWrite for Prefixed<S> {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.get_mut().inner).poll_write(cx, buf)
+    }
+
+    fn poll_write_vectored(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[io::IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.get_mut().inner).poll_write_vectored(cx, bufs)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.inner.is_write_vectored()
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
+    }
 }
 
 impl<S: AsyncRead + AsyncWrite + Unpin> SwitchableStream<S> {
@@ -25,9 +80,19 @@ impl<S: AsyncRead + AsyncWrite + Unpin> SwitchableStream<S> {
         matches!(self.0.as_ref(), Some(Stream::Tls(_)))
     }
 
-    pub async fn switch_to_tls(&mut self, tls_acceptor: Arc<TlsAcceptor>) -> io::Result<()> {
+    /// Upgrades the stream to TLS. `buffered` holds bytes already read from the plain stream,
+    /// which the client may have sent as the start of its TLS handshake.
+    pub async fn switch_to_tls(
+        &mut self,
+        tls_acceptor: Arc<TlsAcceptor>,
+        buffered: Bytes,
+    ) -> io::Result<()> {
         match self.0.take() {
-            Some(Stream::Plain(stream)) => {
+            Some(Stream::Plain(inner)) => {
+                let stream = Prefixed {
+                    prefix: buffered,
+                    inner,
+                };
                 let tls_stream = tls_acceptor.accept(stream).await;
                 match tls_stream {
                     Ok(tls_stream) => {

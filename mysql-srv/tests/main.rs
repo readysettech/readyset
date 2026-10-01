@@ -10,6 +10,7 @@ use std::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 use std::{io, net};
 
 use database_utils::TlsMode;
@@ -25,8 +26,9 @@ use mysql_srv::{
 use readyset_adapter_types::DeallocateId;
 use readyset_data::encoding::{Encoding, SingleByteCharset};
 use readyset_util::redacted::RedactedString;
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
+use tokio_native_tls::native_tls;
 
 static DEFAULT_CHARACTER_SET: u16 = myc::constants::UTF8_GENERAL_CI;
 
@@ -2117,4 +2119,138 @@ async fn failed_authentication() {
     }
 
     server_handle.await.expect("server");
+}
+
+/// Holds back `held` and sends it in the same write as the next bytes written.
+struct CoalesceNextWrite<S> {
+    held: Vec<u8>,
+    merged_len: Option<usize>,
+    inner: S,
+}
+
+impl<S: AsyncRead + Unpin> AsyncRead for CoalesceNextWrite<S> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_read(cx, buf)
+    }
+}
+
+impl<S: AsyncWrite + Unpin> AsyncWrite for CoalesceNextWrite<S> {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<io::Result<usize>> {
+        let this = self.get_mut();
+        if this.held.is_empty() && this.merged_len.is_none() {
+            return Pin::new(&mut this.inner).poll_write(cx, buf);
+        }
+        let merged_len = *this.merged_len.get_or_insert_with(|| {
+            this.held.extend_from_slice(buf);
+            buf.len()
+        });
+        while !this.held.is_empty() {
+            let n = std::task::ready!(Pin::new(&mut this.inner).poll_write(cx, &this.held))?;
+            this.held.drain(..n);
+        }
+        this.merged_len = None;
+        std::task::Poll::Ready(Ok(merged_len))
+    }
+
+    fn poll_flush(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
+    }
+}
+
+/// A MySQL client starts its TLS handshake right after the SSL request without waiting for a
+/// reply, so the server can read both in a single read.
+#[tokio::test]
+async fn tls_handshake_sent_with_ssl_request() {
+    let _ = AuthKeys::initialize(None);
+    let identity = native_tls::Identity::from_pkcs12(
+        include_bytes!("../../psql-srv/tests/tls_certs/keyStore.p12"),
+        "password",
+    )
+    .expect("identity");
+    let acceptor = Arc::new(tokio_native_tls::TlsAcceptor::from(
+        native_tls::TlsAcceptor::new(identity).expect("acceptor"),
+    ));
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let port = listener.local_addr().expect("local_addr").port();
+    tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.expect("accept");
+        let shim = TestingShim::new(
+            move |_, _| unreachable!(),
+            move |_| unreachable!(),
+            move |_, _, _| unreachable!(),
+            move |_| unreachable!(),
+            move |_, _, _| unreachable!(),
+        );
+        let _ = MySqlIntermediary::run_on_tcp(
+            shim,
+            socket,
+            false,
+            Some(acceptor),
+            TlsMode::Required,
+            AuthCache::new(),
+            AuthPlugin::default(),
+        )
+        .await;
+    });
+
+    let mut stream = TcpStream::connect(("127.0.0.1", port))
+        .await
+        .expect("connect");
+    let mut header = [0u8; 4];
+    stream
+        .read_exact(&mut header)
+        .await
+        .expect("greeting header");
+    let len = u32::from_le_bytes([header[0], header[1], header[2], 0]) as usize;
+    stream
+        .read_exact(&mut vec![0; len])
+        .await
+        .expect("greeting");
+
+    let capabilities = myc::constants::CapabilityFlags::CLIENT_SSL
+        | myc::constants::CapabilityFlags::CLIENT_PROTOCOL_41
+        | myc::constants::CapabilityFlags::CLIENT_SECURE_CONNECTION;
+    let mut ssl_request = vec![32, 0, 0, 1];
+    ssl_request.extend_from_slice(&capabilities.bits().to_le_bytes());
+    ssl_request.extend_from_slice(&(16u32 << 20).to_le_bytes());
+    ssl_request.push(DEFAULT_CHARACTER_SET as u8);
+    ssl_request.extend_from_slice(&[0; 23]);
+    let stream = CoalesceNextWrite {
+        held: ssl_request,
+        merged_len: None,
+        inner: stream,
+    };
+
+    let connector = tokio_native_tls::TlsConnector::from(
+        native_tls::TlsConnector::builder()
+            .danger_accept_invalid_certs(true)
+            .build()
+            .expect("connector"),
+    );
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        connector.connect("localhost", stream),
+    )
+    .await
+    .expect("TLS handshake timed out")
+    .expect("TLS handshake failed");
 }

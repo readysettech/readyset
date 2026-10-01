@@ -760,7 +760,6 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
             })?;
 
             self.conn
-                .stream
                 .switch_to_tls(self.tls_acceptor.clone().unwrap())
                 .await?;
 

@@ -6,6 +6,7 @@ use bytes::{Buf, BytesMut};
 use mysql_common::constants::CapabilityFlags;
 use readyset_data::encoding::Encoding;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio_native_tls::TlsAcceptor;
 
 use crate::resultset::MAX_POOL_ROW_CAPACITY;
 
@@ -150,6 +151,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin> PacketConn<S> {
             client_capabilities: CapabilityFlags::empty(),
             results_encoding: Encoding::Utf8,
         }
+    }
+
+    /// Upgrades the connection to TLS. Bytes read past the last packet are the start of the
+    /// client's TLS handshake, so they go to the acceptor.
+    pub(crate) async fn switch_to_tls(&mut self, tls_acceptor: Arc<TlsAcceptor>) -> io::Result<()> {
+        let buffered = self.read_buffer.split().freeze();
+        self.stream.switch_to_tls(tls_acceptor, buffered).await
     }
 
     /// Whether the client negotiated CLIENT_DEPRECATE_EOF. When set, the column definitions are
