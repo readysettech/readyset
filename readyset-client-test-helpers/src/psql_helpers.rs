@@ -119,6 +119,7 @@ impl Adapter for PostgreSQLAdapter {
             false,
             None,
             TlsMode::Optional,
+            psql_srv::DEFAULT_CONNECT_TIMEOUT,
         )
         .await
     }

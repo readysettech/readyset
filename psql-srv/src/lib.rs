@@ -28,6 +28,7 @@ mod value;
 use std::collections::HashMap;
 use std::mem::size_of;
 use std::sync::Arc;
+use std::time::Duration;
 
 use database_utils::TlsMode;
 use futures::Stream;
@@ -215,6 +216,9 @@ pub enum QueryResponse<R> {
     Deallocate(DeallocateId),
 }
 
+/// How long a client gets to complete the TLS handshake and authenticate by default.
+pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Run a `Backend` on the provided bytestream until the bytestream is remotely closed.
 ///
 /// * `backend` - A `Backend` object that emulates a PostgreSQL database as described above.
@@ -224,12 +228,15 @@ pub enum QueryResponse<R> {
 /// * `enable_statement_logging` - Whether to log statements received from the client.
 /// * `tls_acceptor` - An object that performs a TLS handshake and creates a `TlsStream` or returns
 ///   an error.
+/// * `connect_timeout` - How long the client has to complete the TLS handshake and authenticate
+///   before the connection is closed.
 pub async fn run_backend<B: PsqlBackend>(
     backend: B,
     channel: tokio::net::TcpStream,
     enable_statement_logging: bool,
     tls_acceptor: Option<Arc<TlsAcceptor>>,
     tls_mode: TlsMode,
+    connect_timeout: Duration,
 ) {
     runner::Runner::run(
         backend,
@@ -237,6 +244,7 @@ pub async fn run_backend<B: PsqlBackend>(
         enable_statement_logging,
         tls_acceptor,
         tls_mode,
+        connect_timeout,
     )
     .await
 }

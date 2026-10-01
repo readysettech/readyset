@@ -148,6 +148,9 @@ pub struct Protocol {
 
     /// The backend password for the current user
     backend_password: Option<RedactedString>,
+
+    /// Whether the client has completed authentication
+    authenticated: bool,
 }
 
 /// A prepared statement allows a frontend to specify the general form of a SQL statement while
@@ -184,7 +187,18 @@ impl Protocol {
             tls_server_end_point: None,
             is_tls: false,
             backend_password: None,
+            authenticated: false,
         }
+    }
+
+    /// Whether the client has completed authentication and reached the normal message flow.
+    pub fn is_authenticated(&self) -> bool {
+        self.authenticated
+    }
+
+    fn finish_authentication(&mut self) {
+        self.state = State::Ready;
+        self.authenticated = true;
     }
 
     #[inline]
@@ -402,7 +416,7 @@ impl Protocol {
                 if let Some(user) = user.as_ref() {
                     backend.set_auth_info(user, None).await?;
                 }
-                self.state = State::Ready;
+                self.finish_authentication();
                 Self::get_ready_message(backend.version())
             }
             crate::CredentialsNeeded::Cleartext => {
@@ -445,7 +459,7 @@ impl Protocol {
                 username: user.to_string(),
             })?;
 
-        self.state = State::Ready;
+        self.finish_authentication();
 
         // Set it here in case the backend gets closed and reconnect
         self.backend_password = Some(RedactedString::from(password.to_string()));
@@ -471,7 +485,7 @@ impl Protocol {
                 })
             }
             Some(Credentials::Any) => {
-                self.state = State::Ready;
+                self.finish_authentication();
                 self.backend_password = None;
                 return Ok(Response::Messages(Self::get_ready_message(
                     backend.version(),
@@ -570,7 +584,7 @@ impl Protocol {
                 .then_some(self.tls_server_end_point.as_deref())
                 .flatten(),
         )? {
-            self.state = State::Ready;
+            self.finish_authentication();
             let mut messages = vec![BackendMessage::AuthenticationSaslFinal {
                 sasl_data: server_final_message.to_string().into(),
             }];

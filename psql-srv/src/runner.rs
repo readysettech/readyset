@@ -1,6 +1,8 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::time::{timeout_at, Instant};
 use tokio_native_tls::TlsAcceptor;
 use tracing::{debug, error, info};
 
@@ -44,7 +46,9 @@ impl<B: PsqlBackend> Runner<B, tokio::net::TcpStream> {
         enable_statement_logging: bool,
         tls_acceptor: Option<Arc<TlsAcceptor>>,
         tls_mode: TlsMode,
+        connect_timeout: Duration,
     ) {
+        let deadline = Instant::now() + connect_timeout;
         // If the tls_acceptor is not set, force TlsMode to Disabled
         let protocol = Protocol::new(if tls_acceptor.is_some() {
             tls_mode
@@ -60,14 +64,17 @@ impl<B: PsqlBackend> Runner<B, tokio::net::TcpStream> {
         };
 
         // Connection has closed or is waiting for tls handshake
-        let loop_status = runner.main_loop().await;
+        let loop_status = runner.main_loop(deadline).await;
 
         if let (MainLoopStatus::RestartWithTls, Some(acceptor)) = (loop_status, &tls_acceptor) {
             let backend = runner.backend;
             let stream = runner.channel.into_inner();
             let mut protocol = runner.protocol;
 
-            let stream = acceptor.accept(stream).await;
+            let Ok(stream) = timeout_at(deadline, acceptor.accept(stream)).await else {
+                debug!("Client did not complete the TLS handshake in time");
+                return;
+            };
 
             match stream {
                 Ok(stream) => {
@@ -85,7 +92,10 @@ impl<B: PsqlBackend> Runner<B, tokio::net::TcpStream> {
                         enable_statement_logging,
                     };
                     // Run loop again. Warn client if we get an unexpected RestartWithTls status.
-                    if matches!(runner.main_loop().await, MainLoopStatus::RestartWithTls) {
+                    if matches!(
+                        runner.main_loop(deadline).await,
+                        MainLoopStatus::RestartWithTls
+                    ) {
                         let _ = runner
                             .handle_error(Error::UnexpectedMessage(
                                 "Received second SSLRequest".to_string(),
@@ -138,9 +148,20 @@ impl<B: PsqlBackend, C: AsyncRead + AsyncWrite + Unpin> Runner<B, C> {
     }
 
     /// Main loop for Protocol handling. When the client requests a TLS connection, we exit this
-    /// loop so that we can construct a TLS capable `Channel` and restart.
-    async fn main_loop(&mut self) -> MainLoopStatus {
-        while let Some(message) = self.channel.next().await {
+    /// loop so that we can construct a TLS capable `Channel` and restart. The connection is closed
+    /// if the client has not authenticated by `deadline`.
+    async fn main_loop(&mut self, deadline: Instant) -> MainLoopStatus {
+        loop {
+            let next = if self.protocol.is_authenticated() {
+                self.channel.next().await
+            } else {
+                let Ok(next) = timeout_at(deadline, self.channel.next()).await else {
+                    debug!("Client did not complete authentication in time");
+                    return MainLoopStatus::Terminate;
+                };
+                next
+            };
+            let Some(message) = next else { break };
             let result = match message {
                 Ok(msg) => self.handle_request(msg).await,
                 Err(e) => Err(Error::from(e)),

@@ -9,7 +9,7 @@ use postgres_protocol::Oid;
 use postgres_types::Type;
 use psql_srv::{
     run_backend, Column, Credentials, CredentialsNeeded, Error, PrepareResponse, PsqlBackend,
-    PsqlSrvRow, PsqlValue, QueryResponse, TransferFormat, ATTTYPMOD_NONE,
+    PsqlSrvRow, PsqlValue, QueryResponse, TransferFormat, ATTTYPMOD_NONE, DEFAULT_CONNECT_TIMEOUT,
 };
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_util::redacted::RedactedString;
@@ -141,6 +141,7 @@ where
             false,
             None,
             TlsMode::Optional,
+            DEFAULT_CONNECT_TIMEOUT,
         )
         .await;
     });
@@ -206,6 +207,7 @@ async fn prepare_error_sync() {
             false,
             None,
             TlsMode::Optional,
+            DEFAULT_CONNECT_TIMEOUT,
         )
         .await;
     });

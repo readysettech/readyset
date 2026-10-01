@@ -108,6 +108,7 @@ fn main() -> anyhow::Result<()> {
                 enable_statement_logging: options.tracing.statement_logging,
                 tls_acceptor: options.tls_acceptor()?,
                 tls_mode: options.tls_mode,
+                connect_timeout: Duration::from_millis(options.client_connect_timeout_ms),
             })?,
             database_type: DatabaseType::PostgreSQL,
             parse_dialect: readyset_sql::Dialect::PostgreSQL,

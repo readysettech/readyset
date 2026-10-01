@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use std::vec;
 
 use futures::stream;
 use postgres_protocol::Oid;
 use postgres_types::Type;
-use tokio::net::TcpListener;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 use tokio_native_tls::{native_tls, TlsAcceptor};
 use tokio_postgres::config::SslMode;
@@ -15,6 +17,7 @@ use database_utils::tls::ServerCertVerification;
 use database_utils::{DatabaseURL, QueryableConnection, TlsMode};
 use psql_srv::{
     run_backend, Credentials, CredentialsNeeded, Error, PsqlBackend, PsqlSrvRow, TransferFormat,
+    DEFAULT_CONNECT_TIMEOUT,
 };
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_util::redacted::RedactedString;
@@ -114,7 +117,15 @@ async fn connect() {
             .send(listener.local_addr().unwrap().port())
             .unwrap();
         let (socket, _) = listener.accept().await.unwrap();
-        run_backend(TestBackend, socket, false, tls_acceptor, TlsMode::Optional).await;
+        run_backend(
+            TestBackend,
+            socket,
+            false,
+            tls_acceptor,
+            TlsMode::Optional,
+            DEFAULT_CONNECT_TIMEOUT,
+        )
+        .await;
     });
 
     let port = recv_port.await.unwrap();
@@ -131,5 +142,86 @@ async fn connect() {
         .await
         .unwrap();
     // The Runner should then accept queries.
+    conn.query_drop("FAKE QUERY").await.unwrap();
+}
+
+/// Serves one connection with a short connect timeout, returning the port and the server task.
+async fn serve_with_connect_timeout(
+    tls_acceptor: Option<Arc<TlsAcceptor>>,
+) -> (u16, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let timeout = Duration::from_millis(200);
+        run_backend(
+            TestBackend,
+            socket,
+            false,
+            tls_acceptor,
+            TlsMode::Optional,
+            timeout,
+        )
+        .await;
+    });
+    (port, server)
+}
+
+/// Asserts that the server ends the connection: the task finishes and the socket reads EOF.
+async fn assert_closed(server: tokio::task::JoinHandle<()>, mut stream: TcpStream) {
+    tokio::time::timeout(Duration::from_secs(10), server)
+        .await
+        .expect("server did not close the stalled connection")
+        .unwrap();
+    let read = tokio::time::timeout(Duration::from_secs(10), stream.read(&mut [0; 1]))
+        .await
+        .expect("socket was not closed");
+    assert_eq!(read.unwrap(), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn startup_times_out() {
+    let (port, server) = serve_with_connect_timeout(None).await;
+    let stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    assert_closed(server, stream).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tls_handshake_times_out() {
+    let identity =
+        native_tls::Identity::from_pkcs12(include_bytes!("tls_certs/keyStore.p12"), "password")
+            .unwrap();
+    let tls_acceptor = Arc::new(TlsAcceptor::from(
+        native_tls::TlsAcceptor::new(identity).unwrap(),
+    ));
+    let (port, server) = serve_with_connect_timeout(Some(tls_acceptor)).await;
+
+    // Send an SSLRequest, read the server's agreement, then never start the TLS handshake.
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    stream
+        .write_all(&[0, 0, 0, 8, 0x04, 0xd2, 0x16, 0x2f])
+        .await
+        .unwrap();
+    let mut answer = [0; 1];
+    stream.read_exact(&mut answer).await.unwrap();
+    assert_eq!(&answer, b"S");
+    assert_closed(server, stream).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn authenticated_session_outlives_connect_timeout() {
+    let (port, _server) = serve_with_connect_timeout(None).await;
+    let mut config = Config::default();
+    config
+        .host("127.0.0.1")
+        .port(port)
+        .dbname("foo")
+        .ssl_mode(SslMode::Disable);
+    let mut conn = DatabaseURL::PostgreSQL(config)
+        .connect(&ServerCertVerification::None)
+        .await
+        .unwrap();
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
     conn.query_drop("FAKE QUERY").await.unwrap();
 }

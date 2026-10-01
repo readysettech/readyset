@@ -749,6 +749,7 @@ fn start_adapter(args: SystemBenchArgs) -> anyhow::Result<()> {
                 tls_acceptor: None,
                 enable_statement_logging: false,
                 tls_mode: TlsMode::Optional,
+                connect_timeout: Duration::from_secs(10),
             },
             database_type: DatabaseType::PostgreSQL,
             parse_dialect: readyset_sql::Dialect::PostgreSQL,

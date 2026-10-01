@@ -58,6 +58,7 @@ fn start_adapter(test_db: &str) -> anyhow::Result<()> {
             tls_acceptor: None,
             enable_statement_logging: false,
             tls_mode: TlsMode::Optional,
+            connect_timeout: psql_srv::DEFAULT_CONNECT_TIMEOUT,
         },
         database_type: DatabaseType::PostgreSQL,
         parse_dialect: readyset_sql::Dialect::PostgreSQL,

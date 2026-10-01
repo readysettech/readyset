@@ -246,6 +246,7 @@ async fn setup_adapter(
                     false,
                     None,
                     TlsMode::Optional,
+                    psql_srv::DEFAULT_CONNECT_TIMEOUT,
                 )
                 .await
             }

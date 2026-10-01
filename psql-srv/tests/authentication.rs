@@ -11,7 +11,7 @@ use postgres_protocol::Oid;
 use postgres_types::Type;
 use psql_srv::{
     run_backend, Credentials, CredentialsNeeded, Error, PrepareResponse, PsqlBackend, PsqlSrvRow,
-    PsqlValue, QueryResponse, TransferFormat,
+    PsqlValue, QueryResponse, TransferFormat, DEFAULT_CONNECT_TIMEOUT,
 };
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_util::redacted::RedactedString;
@@ -111,7 +111,15 @@ async fn run_server(backend: ScramSha256Backend) -> u16 {
             .send(listener.local_addr().unwrap().port())
             .unwrap();
         let (socket, _) = listener.accept().await.unwrap();
-        run_backend(backend, socket, false, tls_acceptor, TlsMode::Optional).await;
+        run_backend(
+            backend,
+            socket,
+            false,
+            tls_acceptor,
+            TlsMode::Optional,
+            DEFAULT_CONNECT_TIMEOUT,
+        )
+        .await;
     });
     recv_port.await.unwrap()
 }

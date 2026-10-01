@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use clap::Parser;
 use database_utils::TlsMode;
@@ -31,6 +32,8 @@ pub struct Config {
     pub tls_acceptor: Option<Arc<TlsAcceptor>>,
     /// Indicates which type of client connections are allowed
     pub tls_mode: TlsMode,
+    /// How long a client has to complete the handshake and authenticate
+    pub connect_timeout: Duration,
 }
 
 #[derive(Clone)]
@@ -43,6 +46,8 @@ pub struct PsqlHandler {
     pub tls_acceptor: Option<Arc<TlsAcceptor>>,
     /// Indicates which type of client connections are allowed
     pub tls_mode: TlsMode,
+    /// How long a client has to complete the handshake and authenticate
+    pub connect_timeout: Duration,
 }
 
 impl PsqlHandler {
@@ -52,6 +57,7 @@ impl PsqlHandler {
             authentication_method: config.options.postgres_authentication_method,
             tls_acceptor: config.tls_acceptor,
             tls_mode: config.tls_mode,
+            connect_timeout: config.connect_timeout,
         })
     }
 }
@@ -72,6 +78,7 @@ impl ConnectionHandler for PsqlHandler {
             self.enable_statement_logging,
             self.tls_acceptor.clone(),
             self.tls_mode,
+            self.connect_timeout,
         )
         .await;
     }
