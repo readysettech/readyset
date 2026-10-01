@@ -259,6 +259,17 @@ impl TryFromDialect<sqlparser::ast::TableWithJoins> for FromClause {
 pub struct CommonTableExpr {
     pub name: SqlIdentifier,
     pub statement: SelectStatement,
+    /// Whether the `WITH` clause introducing this expression was marked `RECURSIVE`.
+    ///
+    /// The marker qualifies the whole `WITH` list, so every expression in one list carries the
+    /// same value.  It is held per expression to keep it off [`SelectStatement`], whose literal
+    /// construction sites number in the hundreds.  Ask whether any expression in a list is
+    /// recursive to get the clause-level answer.
+    ///
+    /// Defaulted on load: controller state recorded before the marker existed carries no value
+    /// for it, and that state is read back after an upgrade.
+    #[serde(default)]
+    pub recursive: bool,
 }
 
 impl TryFromDialect<sqlparser::ast::Cte> for CommonTableExpr {
@@ -267,6 +278,9 @@ impl TryFromDialect<sqlparser::ast::Cte> for CommonTableExpr {
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
         Ok(Self {
+            // sqlparser keeps `recursive` on `ast::With` rather than on `ast::Cte`, so it is out
+            // of reach here and the `With` conversion stamps it on.
+            recursive: false,
             name: value.alias.name.into_dialect(dialect),
             statement: (*value.query).try_into_dialect(dialect)?,
         })
@@ -727,8 +741,20 @@ impl TryFromDialect<sqlparser::ast::Query> for SelectStatement {
         match *body {
             sqlparser::ast::SetExpr::Select(select) => {
                 let mut select: SelectStatement = (*select).try_into_dialect(dialect)?;
-                select.ctes = if let Some(sqlparser::ast::With { cte_tables, .. }) = with {
-                    cte_tables.try_into_dialect(dialect)?
+                select.ctes = if let Some(sqlparser::ast::With {
+                    cte_tables,
+                    recursive,
+                    ..
+                }) = with
+                {
+                    let mut ctes: Vec<CommonTableExpr> = cte_tables.try_into_dialect(dialect)?;
+                    // `RECURSIVE` qualifies the whole list, so it is stamped onto each expression.
+                    if recursive {
+                        for cte in &mut ctes {
+                            cte.recursive = true;
+                        }
+                    }
+                    ctes
                 } else {
                     Vec::new()
                 };
@@ -802,9 +828,14 @@ impl DialectDisplay for SelectStatement {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             if !self.ctes.is_empty() {
+                let recursive = if self.ctes.iter().any(|cte| cte.recursive) {
+                    "RECURSIVE "
+                } else {
+                    ""
+                };
                 write!(
                     f,
-                    "WITH {} ",
+                    "WITH {recursive}{} ",
                     CommaSeparatedList::from(&self.ctes).display(dialect)
                 )?;
             }
@@ -951,5 +982,26 @@ mod tests {
         assert!(lc.is_topk());
         assert_eq!(lc.limit(), Some(&Literal::Integer(20)));
         assert_eq!(lc.offset(), None);
+    }
+    /// Controller state is JSON, and a recipe recorded before the marker existed holds no value
+    /// for it.  Reading such a document back has to leave the expression non-recursive rather
+    /// than fail the whole state.
+    #[test]
+    fn a_recorded_expression_without_the_marker_loads_as_plain() {
+        let cte = CommonTableExpr {
+            name: "a".into(),
+            statement: SelectStatement::default(),
+            recursive: false,
+        };
+        let mut recorded = serde_json::to_value(&cte).expect("the expression should serialize");
+        recorded
+            .as_object_mut()
+            .expect("an expression serializes as an object")
+            .remove("recursive")
+            .expect("the field should have been there to remove");
+
+        let loaded: CommonTableExpr =
+            serde_json::from_value(recorded).expect("a document without the field should load");
+        assert_eq!(loaded, cte);
     }
 }

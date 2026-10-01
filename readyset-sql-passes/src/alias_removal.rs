@@ -74,48 +74,49 @@ impl<'ast> VisitorMut<'ast> for RemoveAliasesVisitor<'_> {
             .into_group_map();
 
         // Use the map of unique table references to identify any necessary alias rewrites.
-        let table_alias_rewrites: Vec<TableAliasRewrite> =
-            table_refs
-                .into_iter()
-                .flat_map(|(table, aliases)| match aliases[..] {
-                    [None] => {
-                        // The table is never referred to by an alias. No rewrite is needed.
-                        vec![]
-                    }
+        let table_alias_rewrites: Vec<TableAliasRewrite> = table_refs
+            .into_iter()
+            .flat_map(|(table, aliases)| match aliases[..] {
+                [None] => {
+                    // The table is never referred to by an alias. No rewrite is needed.
+                    vec![]
+                }
 
-                    [Some(ref alias)] => {
-                        // The table is only ever referred to using one specific alias. Rewrite
-                        // to remove the alias and refer to the table itself.
-                        vec![TableAliasRewrite::Table {
+                [Some(ref alias)] => {
+                    // The table is only ever referred to using one specific alias. Rewrite
+                    // to remove the alias and refer to the table itself.
+                    vec![TableAliasRewrite::Table {
+                        from: alias.clone(),
+                        to_table: table,
+                    }]
+                }
+
+                _ => aliases
+                    .into_iter()
+                    .flatten()
+                    .map(|alias| {
+                        // The alias is one among multiple distinct references to the
+                        // table. Create a globally unique view name, derived from the
+                        // query name, and rewrite to remove the alias and refer to this
+                        // view.
+                        TableAliasRewrite::View {
                             from: alias.clone(),
-                            to_table: table,
-                        }]
-                    }
-
-                    _ => aliases
-                        .into_iter()
-                        .flatten()
-                        .map(|alias| {
-                            // The alias is one among multiple distinct references to the
-                            // table. Create a globally unique view name, derived from the
-                            // query name, and rewrite to remove the alias and refer to this
-                            // view.
-                            TableAliasRewrite::View {
-                                from: alias.clone(),
-                                to_view: format!("__{}__{}", self.query_name, alias).into(),
-                                for_table: table.clone(),
-                            }
-                        })
-                        .collect(),
-                })
-                .chain(select_statement.ctes.drain(..).map(
-                    |CommonTableExpr { name, statement }| TableAliasRewrite::Cte {
-                        to_view: format!("__{}__{}", self.query_name, name).into(),
-                        from: name,
-                        for_statement: Box::new(statement),
-                    },
-                ))
-                .collect();
+                            to_view: format!("__{}__{}", self.query_name, alias).into(),
+                            for_table: table.clone(),
+                        }
+                    })
+                    .collect(),
+            })
+            .chain(select_statement.ctes.drain(..).map(
+                |CommonTableExpr {
+                     name, statement, ..
+                 }| TableAliasRewrite::Cte {
+                    to_view: format!("__{}__{}", self.query_name, name).into(),
+                    from: name,
+                    for_statement: Box::new(statement),
+                },
+            ))
+            .collect();
 
         // Extract remappings for FROM and JOIN table references from the alias rewrites.
         let new_table_remap = self

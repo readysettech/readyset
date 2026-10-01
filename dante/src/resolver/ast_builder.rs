@@ -774,6 +774,7 @@ fn build_select_inner(
                 ctes.push(CommonTableExpr {
                     name: cte_alias,
                     statement: inner_query,
+                    recursive: false,
                 });
             }
             Constraint::SubqueryRelation {

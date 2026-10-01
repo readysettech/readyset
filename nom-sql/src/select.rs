@@ -211,7 +211,15 @@ fn cte(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], C
         let (i, _) = whitespace0(i)?;
         let (i, _) = tag(")")(i)?;
 
-        Ok((i, CommonTableExpr { name, statement }))
+        // nom-sql does not parse `WITH RECURSIVE`; the sqlparser path carries the marker.
+        Ok((
+            i,
+            CommonTableExpr {
+                name,
+                statement,
+                recursive: false,
+            },
+        ))
     }
 }
 
@@ -1705,6 +1713,7 @@ mod tests {
             let query = SelectStatement {
                 ctes: vec![CommonTableExpr {
                     name: "foo".into(),
+                    recursive: false,
                     statement: SelectStatement {
                         fields: vec![FieldDefinitionExpr::Expr {
                             expr: Expr::Column("x".into()),
@@ -1905,6 +1914,7 @@ mod tests {
             let query = SelectStatement {
                 ctes: vec![CommonTableExpr {
                     name: "foo".into(),
+                    recursive: false,
                     statement: SelectStatement {
                         fields: vec![FieldDefinitionExpr::Expr {
                             expr: Expr::Column("x".into()),

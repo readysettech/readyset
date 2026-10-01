@@ -26,6 +26,7 @@ readyset-util = { path = "../readyset-util" }
 
 [dev-dependencies]
 bincode = { workspace = true }
+serde_json = { workspace = true }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 test-utils = { path = "../test-utils" }
 

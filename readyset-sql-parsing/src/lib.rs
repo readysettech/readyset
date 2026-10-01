@@ -2591,4 +2591,37 @@ mod tests {
         assert!(!body.fields[0].invisible, "column 'a' should be visible");
         assert!(body.fields[1].invisible, "column 'b' should be invisible");
     }
+    /// `WITH RECURSIVE` must survive the parse.  Without the marker a body's reference to its own
+    /// name is indistinguishable from a reference to a base table of that name, and reading a
+    /// recursive query as the latter yields wrong results.
+    #[test]
+    fn recursive_with_is_preserved() {
+        let SqlQuery::Select(recursive) =
+            parse_pg_sqlparser("WITH RECURSIVE c AS (SELECT 1 AS n) SELECT c.n FROM c")
+        else {
+            panic!("expected a SELECT");
+        };
+        let SqlQuery::Select(plain) =
+            parse_pg_sqlparser("WITH c AS (SELECT 1 AS n) SELECT c.n FROM c")
+        else {
+            panic!("expected a SELECT");
+        };
+
+        assert!(
+            recursive.ctes[0].recursive,
+            "the RECURSIVE marker should be preserved"
+        );
+        assert!(
+            !plain.ctes[0].recursive,
+            "a plain WITH should not be marked recursive"
+        );
+        assert!(
+            recursive
+                .display(Dialect::PostgreSQL)
+                .to_string()
+                .contains("WITH RECURSIVE"),
+            "display should emit the RECURSIVE marker, got {}",
+            recursive.display(Dialect::PostgreSQL)
+        );
+    }
 }

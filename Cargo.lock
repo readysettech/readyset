@@ -6945,6 +6945,7 @@ dependencies = [
  "readyset-sql-parsing",
  "readyset-util",
  "serde",
+ "serde_json",
  "sqlparser 0.62.0 (git+https://github.com/readysettech/datafusion-sqlparser-rs?rev=5b879bfe90ef06a627079fd0f2b9828255f99935)",
  "stacker",
  "strum",
