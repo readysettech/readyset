@@ -1,0 +1,65 @@
+statement ok
+CREATE TABLE t1 (id INT PRIMARY KEY, v INT)
+
+statement ok
+CREATE TABLE t2 (id INT PRIMARY KEY, w INT)
+
+statement ok
+INSERT INTO t1 (id, v) VALUES (1, 10), (2, 20), (3, 30)
+
+statement ok
+INSERT INTO t2 (id, w) VALUES (1, 100), (2, 200), (3, 300)
+
+# An entry read once becomes a derived table under its own name, so the columns it projects go on
+# resolving unchanged and the statement caches like any other join.
+query I nosort
+WITH c AS (SELECT t2.id AS i, t2.w AS w FROM t2) SELECT t1.v FROM t1 JOIN c ON t1.id = c.i ORDER BY t1.v
+----
+10
+20
+30
+
+# The cache tracks the tables behind the entry.  Reading before and after the write is what tells
+# a maintained cache from one that answered once and went stale.
+statement ok
+INSERT INTO t2 (id, w) VALUES (4, 400)
+
+statement ok
+INSERT INTO t1 (id, v) VALUES (4, 40)
+
+query I nosort
+WITH c AS (SELECT t2.id AS i, t2.w AS w FROM t2) SELECT t1.v FROM t1 JOIN c ON t1.id = c.i ORDER BY t1.v
+----
+10
+20
+30
+40
+
+statement ok
+DELETE FROM t2 WHERE id = 2
+
+query I nosort
+WITH c AS (SELECT t2.id AS i, t2.w AS w FROM t2) SELECT t1.v FROM t1 JOIN c ON t1.id = c.i ORDER BY t1.v
+----
+10
+30
+40
+
+# A chain collapses innermost first, and tracks writes through every link.
+query I nosort
+WITH a AS (SELECT t2.id AS i FROM t2), b AS (SELECT a.i AS i FROM a) SELECT t1.v FROM t1 JOIN b ON t1.id = b.i ORDER BY t1.v
+----
+10
+30
+40
+
+# An entry nothing reads is dropped rather than carried into the pipeline.
+query I nosort
+WITH unread AS (SELECT t2.id AS i FROM t2) SELECT t1.v FROM t1 WHERE t1.id = 1
+----
+10
+
+# An entry read twice would be copied into the statement once per read, so it is declined.
+query I nosort error: read more than once
+WITH d AS (SELECT t2.id AS i FROM t2) SELECT count(*) AS n FROM d AS d1 JOIN d AS d2 ON d1.i = d2.i
+----
