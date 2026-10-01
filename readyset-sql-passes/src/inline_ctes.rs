@@ -9,6 +9,7 @@
 //! reference that reads it: a second reference finding it gone is what refuses the statement.
 
 use readyset_errors::{ReadySetError, ReadySetResult, unsupported};
+use readyset_sql::analysis::visit::{self, Visitor};
 use readyset_sql::analysis::visit_mut::{self as visit_mut, VisitorMut};
 use std::ops::Range;
 
@@ -27,13 +28,15 @@ use readyset_sql::ast::{SelectStatement, SqlIdentifier, TableExpr, TableExprInne
 ///
 /// # Recursion
 ///
-/// This assumes a `WITH RECURSIVE` entry is distinguishable from a plain one.  It is not yet:
-/// `CommonTableExpr` carries no marker and the conversion from the parser's own `Cte` drops the
-/// `recursive` flag, so a recursive entry arrives looking ordinary and its self-reference reads as
-/// a reference to a relation of that name.  Inlining one would leave that self-reference behind,
-/// pointing at whatever else answers to the name.  Carrying the marker is a separate change; this
-/// pass must not be wired into the pipeline before it lands.
+/// A body that actually recurses is a set operation, which a `CommonTableExpr` does not hold in
+/// that position, so such a statement is refused before this pass runs.  A list written
+/// `RECURSIVE` whose body does not recurse is left where it was written: the marker names a
+/// construct this pass does not model, so the statement takes the path it takes with no pass at
+/// all, rather than becoming an error for a query that answers today.
 pub fn inline_ctes(statement: &mut SelectStatement, dialect: Dialect) -> ReadySetResult<()> {
+    if !binds_entries(statement) {
+        return Ok(());
+    }
     let mut inliner = Inliner {
         dialect,
         depth: 0,
@@ -52,6 +55,44 @@ pub fn inline_ctes(statement: &mut SelectStatement, dialect: Dialect) -> ReadySe
 /// refusing past it keeps the pass from handing any later pass a shape the parser could not have
 /// produced, and keeps this walk from running the stack out on the way there.
 const MAX_CHAIN_DEPTH: usize = 24;
+
+/// Whether the statement tree binds any `WITH` entry, refusing a `RECURSIVE` one anywhere in it.
+///
+/// A body that actually recurses is a set operation, which a `CommonTableExpr` does not hold in
+/// that position, so such a statement is refused before this pass runs.  What the marker catches
+/// is the permissive case -- a list written `RECURSIVE` whose body does not recurse -- and
+/// refusing on the marker rather than on the shape keeps that from becoming silent inlining if
+/// the AST later carries set operations.  An entry nothing reads is refused too: dropping it
+/// would discard a construct the pass does not understand.
+///
+/// Answering both questions in one walk is what lets a statement binding no entry at all leave
+/// the pass without being walked again.
+fn binds_entries(statement: &SelectStatement) -> bool {
+    #[derive(Default)]
+    struct Bound {
+        any: bool,
+        recursive: bool,
+    }
+
+    impl<'ast> Visitor<'ast> for Bound {
+        type Error = std::convert::Infallible;
+
+        fn visit_select_statement(
+            &mut self,
+            statement: &'ast SelectStatement,
+        ) -> Result<(), Self::Error> {
+            self.any |= !statement.ctes.is_empty();
+            self.recursive |= statement.ctes.iter().any(|cte| cte.recursive);
+            visit::walk_select_statement(self, statement)
+        }
+    }
+
+    let mut bound = Bound::default();
+    let Ok(()) = bound.visit_select_statement(statement);
+    // Leaving the clause rather than raising: a `RECURSIVE` list that does not recurse answers
+    // today by the shallow path, and an error here would take that away.
+    bound.any && !bound.recursive
+}
 
 /// Substitutes each entry's body at the one reference that reads it.
 ///
@@ -214,6 +255,19 @@ mod tests {
 
     use crate::util::parse_select_statement;
     use readyset_sql_parsing::parse_select;
+    use readyset_sql_parsing::{ParsingPreset, parse_select_with_config};
+
+    /// Parses as PostgreSQL through sqlparser, for syntax the default preset does not reach --
+    /// nom-sql does not accept `WITH RECURSIVE` at all.
+    fn inlined_postgres(sql: &str) -> Result<SelectStatement, String> {
+        let mut statement =
+            parse_select_with_config(ParsingPreset::OnlySqlparser, Dialect::PostgreSQL, sql)
+                .unwrap_or_else(|e| panic!("failed to parse {sql:?}: {e}"));
+        match inline_ctes(&mut statement, Dialect::PostgreSQL) {
+            Ok(()) => Ok(statement),
+            Err(error) => Err(error.to_string()),
+        }
+    }
 
     /// Inlines `sql`, giving the rewritten statement or the refusal.
     fn inlined_as(dialect: Dialect, sql: &str) -> Result<SelectStatement, String> {
@@ -258,6 +312,48 @@ mod tests {
             "got: {}\nexpected: {}",
             statement.display(Dialect::MySQL),
             expected.display(Dialect::MySQL)
+        );
+    }
+
+    /// A recursive body refers to its own name, which inlining would leave behind pointing at
+    /// whatever else answers to it.  The statement is refused rather than read as something else.
+    #[test]
+    fn a_recursive_entry_keeps_its_place() {
+        let statement =
+            inlined_postgres("WITH RECURSIVE c AS (SELECT t.x FROM t) SELECT c.x FROM c")
+                .expect("the statement should be left alone, not refused");
+        assert!(
+            !statement.ctes.is_empty(),
+            "the entry should keep its place"
+        );
+    }
+
+    /// At any depth: an entry bound inside a derived table is as recursive as one at the top.
+    #[test]
+    fn a_recursive_entry_below_the_top_level_keeps_its_place() {
+        let statement = inlined_postgres(
+            "SELECT s.x FROM (WITH RECURSIVE c AS (SELECT t.x FROM t) SELECT c.x FROM c) AS s",
+        )
+        .expect("the statement should be left alone at any depth");
+        let TableExprInner::Subquery(inner) = &statement.tables[0].inner else {
+            panic!("expected a derived table");
+        };
+        assert!(
+            !inner.ctes.is_empty(),
+            "the nested entry should keep its place"
+        );
+    }
+
+    /// Including one nothing reads.  Dropping it silently would discard a construct the pass does
+    /// not understand, so the whole statement is declined instead.
+    #[test]
+    fn a_recursive_entry_nothing_reads_also_keeps_its_place() {
+        let statement =
+            inlined_postgres("WITH RECURSIVE c AS (SELECT t.x FROM t) SELECT u.x FROM u")
+                .expect("the statement should be left alone");
+        assert!(
+            !statement.ctes.is_empty(),
+            "even an unread entry keeps its place"
         );
     }
 
