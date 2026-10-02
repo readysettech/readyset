@@ -2834,6 +2834,63 @@ async fn postgresql_replicate_citext_array() {
     shutdown_tx.shutdown().await;
 }
 
+/// Streams an insert and an update of a `citext[]` column with FULL replica identity, whose
+/// update matches the old row by its array, and checks the base-table view sees both.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(postgres)]
+async fn postgresql_replicate_citext_array_update() {
+    readyset_tracing::init_test_logging();
+    let url = pgsql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+    client
+        .query(
+            "DROP TABLE IF EXISTS citext_t CASCADE;\
+             CREATE EXTENSION IF NOT EXISTS citext;
+             CREATE TABLE citext_t (id int PRIMARY KEY, t citext[]); \
+             ALTER TABLE citext_t REPLICA IDENTITY FULL; \
+             CREATE VIEW citext_v AS SELECT id, t FROM citext_t;",
+        )
+        .await
+        .unwrap();
+    client
+        .query("INSERT INTO citext_t VALUES (1, '{abc,DeF}')")
+        .await
+        .unwrap();
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    let ci = |s| DfValue::from_str_and_collation(s, Collation::Utf8Ci);
+    client
+        .query("INSERT INTO citext_t VALUES (2, '{x,Y}')")
+        .await
+        .unwrap();
+    client
+        .query("UPDATE citext_t SET t = '{ABC,z}' WHERE id = 1")
+        .await
+        .unwrap();
+
+    check_results!(
+        ctx,
+        "citext_v",
+        "Streaming",
+        &[
+            &[1.into(), DfValue::from(vec![ci("ABC"), ci("z")])],
+            &[2.into(), DfValue::from(vec![ci("x"), ci("Y")])],
+        ],
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
 #[upstream(postgres)]

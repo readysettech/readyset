@@ -839,6 +839,10 @@ impl DfValue {
                 // trigger the happy path:
                 .unwrap_or(DfValue::Int(0));
         } else if (col_ty.is_array() && col_ty.innermost_array_type().is_enum())
+            // The WAL delivers arrays of extension text types (e.g. `citext[]`) as raw text
+            || (col_ty.is_array()
+                && self.is_byte_array()
+                && col_ty.innermost_array_type().is_any_text())
             || (col_ty.is_any_text() && col_ty.collation() != self.collation())
         {
             *self = self.coerce_to(col_ty, &DfType::Unknown)?;
