@@ -90,11 +90,17 @@ fn is_identity_project(query: &MirQuery<'_>, ni: NodeIndex) -> bool {
         && emit
             .iter()
             .zip(parent_cols.iter())
-            // Compare by name only: Column::eq's alias matching can falsely
-            // equate renamed join columns (e.g. votes.story == stories.id),
-            // while name+table rejects view aliases (v1.a vs t1.a) that ARE
-            // identity passes after AliasTable inlining.
-            .all(|(e, pc)| matches!(e, ProjectExpr::Column(c) if c.name == pc.name))
+            .enumerate()
+            // Compare names rather than Column::eq: its alias matching can falsely
+            // equate renamed join columns (e.g. votes.story == stories.id), while
+            // name+table rejects view aliases (v1.a vs t1.a) that ARE identity passes
+            // after AliasTable inlining. Names alone cannot tell apart same-named
+            // columns of different tables, so also require the column to resolve to
+            // this position the way lowering resolves it.
+            .all(|(i, (e, pc))| {
+                matches!(e, ProjectExpr::Column(c) if c.name == pc.name
+                    && query.graph.find_source_for_child_column(ancestors[0], c) == Some(i))
+            })
 }
 
 /// Try to prune a join node's `project` list in place. Returns `true` if changed.
@@ -298,6 +304,71 @@ mod tests {
         assert_eq!(emit.len(), 2);
         assert!(matches!(&emit[0], ProjectExpr::Column(c) if *c == Column::named("b")));
         assert!(matches!(&emit[1], ProjectExpr::Column(c) if *c == Column::named("a")));
+    }
+
+    #[test]
+    fn keep_projection_reordering_same_named_columns() {
+        // SELECT zq.id, b1.id FROM b1 JOIN zq ON b1.k = zq.k, after bogokey insertion:
+        // join -> bogo([b1.id, zq.id, bogokey]) -> prj([zq.id, b1.id, bogokey]) -> leaf
+        // Every name matches positionally, but prj swaps which table each `id` comes from, so it
+        // is not an identity and the leaf must still see zq.id first.
+        let mut g = MirGraph::new();
+        let b1 = base_node(&mut g, "b1", vec![cspec("b1", "id"), cspec("b1", "k")]);
+        let zq = base_node(&mut g, "zq", vec![cspec("zq", "id"), cspec("zq", "k")]);
+        let join = g.add_node(MirNode::new(
+            "join".into(),
+            MirNodeInner::Join {
+                on: vec![(Column::new(Some("b1"), "k"), Column::new(Some("zq"), "k"))],
+                project: vec![
+                    Column::new(Some("b1"), "id"),
+                    Column::new(Some("b1"), "k"),
+                    Column::new(Some("zq"), "id"),
+                    Column::new(Some("zq"), "k"),
+                ],
+            },
+        ));
+        g.add_edge(b1, join, 0);
+        g.add_edge(zq, join, 1);
+        let bogo = g.add_node(MirNode::new(
+            "bogo".into(),
+            MirNodeInner::Project {
+                emit: vec![
+                    ProjectExpr::Column(Column::new(Some("b1"), "id")),
+                    ProjectExpr::Column(Column::new(Some("zq"), "id")),
+                    ProjectExpr::Expr {
+                        expr: Expr::Literal(0.into()),
+                        alias: "bogokey".into(),
+                    },
+                ],
+            },
+        ));
+        g.add_edge(join, bogo, 0);
+        let prj = g.add_node(MirNode::new(
+            "prj".into(),
+            MirNodeInner::Project {
+                emit: vec![
+                    ProjectExpr::Column(Column::new(Some("zq"), "id").aliased_as("id".into())),
+                    ProjectExpr::Column(Column::new(Some("b1"), "id").aliased_as("id".into())),
+                    ProjectExpr::Column(Column::named("bogokey")),
+                ],
+            },
+        ));
+        g.add_edge(bogo, prj, 0);
+        let leaf = leaf_node(&mut g, "bogokey");
+        g.add_edge(prj, leaf, 0);
+
+        run_prune(&mut g, &[b1, zq, join, bogo, prj, leaf], leaf);
+
+        let tables = g
+            .columns(leaf)
+            .into_iter()
+            .map(|c| c.table.map(|t| t.name.to_string()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tables,
+            vec![Some("zq".to_owned()), Some("b1".to_owned()), None],
+            "the leaf must see zq.id before b1.id"
+        );
     }
 
     #[test]

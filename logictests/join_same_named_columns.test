@@ -1,0 +1,29 @@
+# Same-named columns from joined tables come back in SELECT-list order, also when the
+# tables are listed in the opposite order of their names
+statement ok
+CREATE TABLE zeta (id INT PRIMARY KEY, k INT)
+
+statement ok
+CREATE TABLE alpha (id INT PRIMARY KEY, k INT)
+
+statement ok
+INSERT INTO zeta (id, k) VALUES (1, 10), (2, 20)
+
+statement ok
+INSERT INTO alpha (id, k) VALUES (7, 10), (8, 20)
+
+query II rowsort
+SELECT zeta.id, alpha.id FROM zeta JOIN alpha ON zeta.k = alpha.k
+----
+1
+7
+2
+8
+
+query II rowsort
+SELECT zeta.id, alpha.id FROM zeta JOIN alpha USING (k)
+----
+1
+7
+2
+8
