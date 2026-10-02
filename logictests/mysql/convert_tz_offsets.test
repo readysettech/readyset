@@ -1,0 +1,41 @@
+# CONVERT_TZ accepts UTC offsets such as '+05:30' as well as zone names.
+
+statement ok
+CREATE TABLE t1 (id INT PRIMARY KEY, dt DATETIME);
+
+statement ok
+INSERT INTO t1 VALUES (1, '2020-01-01 10:00:00'), (2, '2020-06-15 23:30:00'), (3, NULL);
+
+query T nosort
+SELECT CONVERT_TZ(t1.dt, '+00:00', '+05:30') FROM t1 ORDER BY t1.id
+----
+2020-01-01 15:30:00
+2020-06-16 05:00:00
+NULL
+
+query T nosort
+SELECT CONVERT_TZ(t1.dt, '+05:30', '-08:00') FROM t1 ORDER BY t1.id
+----
+2019-12-31 20:30:00
+2020-06-15 10:00:00
+NULL
+
+query T nosort
+SELECT CONVERT_TZ(t1.dt, '+00:00', 'Asia/Tokyo') FROM t1 ORDER BY t1.id
+----
+2020-01-01 19:00:00
+2020-06-16 08:30:00
+NULL
+
+query T nosort
+SELECT CONVERT_TZ(t1.dt, '+00:00', '+14:01') FROM t1 ORDER BY t1.id
+----
+NULL
+NULL
+NULL
+
+query T nosort
+SELECT CONVERT_TZ(t1.dt, '+00:00', '+05:30') FROM t1 WHERE t1.id = ?
+? = 2
+----
+2020-06-16 05:00:00

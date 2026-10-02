@@ -1265,3 +1265,97 @@ async fn rollback_to_savepoint_preserves_transaction() {
 
     shutdown_tx.shutdown().await;
 }
+
+/// MySQL 5.7 reads a UTC offset only from -12:59 to +13:00, and 8.0.19 and later from -13:59 to
+/// +14:00, so a CONVERT_TZ whose result could depend on the version runs upstream: an offset between
+/// those ranges, or a zone from a column. No cache can be created for it, and an ad hoc or prepared
+/// read returns the upstream's answer. An offset every version reads alike is cached and follows
+/// later writes.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn convert_tz_zones_the_mysql_versions_read_differently_run_upstream() {
+    let (opts, _handle, shutdown_tx) = setup().await;
+    let mut conn = Conn::new(opts.clone()).await.unwrap();
+    let mut upstream = Conn::new(
+        readyset_client_test_helpers::mysql_helpers::upstream_config()
+            .db_name(opts.db_name().map(str::to_owned)),
+    )
+    .await
+    .unwrap();
+    conn.query_drop("CREATE TABLE ctz (id INT PRIMARY KEY, dt DATETIME, zone VARCHAR(10))")
+        .await
+        .unwrap();
+    conn.query_drop("INSERT INTO ctz VALUES (1, '2004-01-01 12:00:00', '-13:59')")
+        .await
+        .unwrap();
+    sleep().await;
+
+    type Converted = Option<(Option<String>,)>;
+    for query in [
+        "SELECT CAST(CONVERT_TZ(dt, '+00:00', '-13:59') AS CHAR) FROM ctz WHERE id = ?",
+        "SELECT CAST(CONVERT_TZ(dt, '+00:00', '+14:00') AS CHAR) FROM ctz WHERE id = ?",
+        "SELECT CAST(CONVERT_TZ(dt, '+00:00', zone) AS CHAR) FROM ctz WHERE id = ?",
+    ] {
+        let create = format!("CREATE CACHE FROM {query}");
+        assert!(conn.query_drop(&create).await.is_err(), "{create}");
+
+        let expected: Converted = upstream.exec_first(query, (1,)).await.unwrap();
+        let prepared: Converted = conn.exec_first(query, (1,)).await.unwrap();
+        assert_eq!(prepared, expected, "{query}");
+        assert_eq!(
+            last_query_info(&mut conn).await.destination,
+            QueryDestination::Upstream,
+            "{query}"
+        );
+        let ad_hoc = query.replace('?', "1");
+        let read: Converted = conn.query_first(&ad_hoc).await.unwrap();
+        assert_eq!(read, expected, "{ad_hoc}");
+        assert_eq!(
+            last_query_info(&mut conn).await.destination,
+            QueryDestination::Upstream,
+            "{ad_hoc}"
+        );
+    }
+
+    // A zone bound as a parameter is not a literal, so the read runs upstream whatever its value.
+    let query = "SELECT CAST(CONVERT_TZ(dt, '+00:00', ?) AS CHAR) FROM ctz WHERE id = 1";
+    let create = format!("CREATE CACHE FROM {query}");
+    assert!(conn.query_drop(&create).await.is_err(), "{create}");
+    for zone in ["-13:59", "+05:30", "+14:18446744073709551616"] {
+        let expected: Converted = upstream.exec_first(query, (zone,)).await.unwrap();
+        let read: Converted = conn.exec_first(query, (zone,)).await.unwrap();
+        assert_eq!(read, expected, "{zone}");
+        assert_eq!(
+            last_query_info(&mut conn).await.destination,
+            QueryDestination::Upstream,
+            "{zone}"
+        );
+    }
+
+    // The binary protocol returns a DATETIME as a date value, so the read checks its type as well.
+    let query = "SELECT CONVERT_TZ(dt, '+00:00', '+13:00') FROM ctz WHERE id = ?";
+    conn.query_drop(format!("CREATE CACHE FROM {query}"))
+        .await
+        .unwrap();
+    for id in [1, 2] {
+        if id == 2 {
+            conn.query_drop("INSERT INTO ctz VALUES (2, '2010-06-30 23:30:00', NULL)")
+                .await
+                .unwrap();
+        }
+        let expected: Option<(mysql_async::Value,)> =
+            upstream.exec_first(query, (id,)).await.unwrap();
+        assert_matches!(expected, Some((mysql_async::Value::Date(..),)), "{query}");
+        eventually! {
+            let read: Option<(mysql_async::Value,)> = conn.exec_first(query, (id,)).await.unwrap();
+            read == expected
+                && matches!(
+                    last_query_info(&mut conn).await.destination,
+                    QueryDestination::Readyset(_)
+                )
+        }
+    }
+
+    shutdown_tx.shutdown().await;
+}

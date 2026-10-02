@@ -5,7 +5,7 @@ use std::ops::{Add, Sub};
 use std::str::FromStr;
 
 use chrono::{
-    Datelike, Duration, LocalResult, Month, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone,
+    Datelike, Duration, FixedOffset, Month, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone,
     Timelike, Weekday,
 };
 use chrono_tz::Tz;
@@ -93,37 +93,131 @@ fn get_time_or_default(value: &DfValue, from_ty: &DfType) -> DfValue {
         .unwrap_or(DfValue::None)
 }
 
+/// A time zone named in a `CONVERT_TZ` call: an IANA name or a UTC offset such as `+05:30`.
+enum ConvertTzZone {
+    Named(Tz),
+    Offset(FixedOffset),
+}
+
+/// The UTC offsets MySQL 8.0.19 and later accept, in seconds: -13:59 to +14:00.
+const CONVERT_TZ_OFFSETS: std::ops::RangeInclusive<i32> = -(13 * 3600 + 59 * 60)..=14 * 3600;
+
+/// The UTC offsets MySQL 5.7 accepts, in seconds: -12:59 to +13:00.
+const CONVERT_TZ_OFFSETS_5_7: std::ops::RangeInclusive<i32> = -(12 * 3600 + 59 * 60)..=13 * 3600;
+
+/// The hour and minute digits of a zone in MySQL's offset syntax: at least four characters of
+/// `[+-]<hours>:<minutes>`, where the hours may be empty and the minutes may not. `None` for any
+/// other string.
+fn offset_digits(s: &str) -> Option<(&str, &str)> {
+    let (hours, minutes) = s.strip_prefix(['+', '-'])?.split_once(':')?;
+    let digits = |d: &str| d.bytes().all(|b| b.is_ascii_digit());
+    (s.len() >= 4 && !minutes.is_empty() && digits(hours) && digits(minutes))
+        .then_some((hours, minutes))
+}
+
+/// The offset in seconds of a zone in MySQL's offset syntax whose minutes are at most 59, whatever
+/// its range. `None` for any other string.
+fn utc_offset_seconds(s: &str) -> Option<i32> {
+    let (hours, minutes) = offset_digits(s)?;
+    let number = |digits: &str| {
+        digits.bytes().fold(0i32, |n, b| {
+            n.saturating_mul(10).saturating_add(i32::from(b - b'0'))
+        })
+    };
+    let (hours, minutes) = (number(hours), number(minutes));
+    if minutes > 59 {
+        return None;
+    }
+    let seconds = hours
+        .saturating_mul(60)
+        .saturating_add(minutes)
+        .saturating_mul(60);
+    Some(if s.starts_with('-') {
+        -seconds
+    } else {
+        seconds
+    })
+}
+
+/// Whether MySQL 5.7 and MySQL 8.0.19 or later may convert with `zone` differently: an offset that
+/// one of them accepts and the other does not, or one with more than two significant digits in its
+/// hours or minutes, which MySQL reads into a counter that wraps around where this parser saturates.
+pub(crate) fn convert_tz_zone_depends_on_mysql_version(zone: &str) -> bool {
+    let Some((hours, minutes)) = offset_digits(zone) else {
+        return false;
+    };
+    if [hours, minutes]
+        .iter()
+        .any(|digits| digits.trim_start_matches('0').len() > 2)
+    {
+        return true;
+    }
+    utc_offset_seconds(zone).is_some_and(|seconds| {
+        CONVERT_TZ_OFFSETS.contains(&seconds) && !CONVERT_TZ_OFFSETS_5_7.contains(&seconds)
+    })
+}
+
+impl FromStr for ConvertTzZone {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if !s.starts_with(['+', '-']) {
+            return s.parse().map(Self::Named).map_err(|_| ());
+        }
+        let seconds = utc_offset_seconds(s).ok_or(())?;
+        if !CONVERT_TZ_OFFSETS.contains(&seconds) {
+            return Err(());
+        }
+        FixedOffset::east_opt(seconds).map(Self::Offset).ok_or(())
+    }
+}
+
+impl ConvertTzZone {
+    /// Interprets `datetime` as local time in this zone and returns the same instant as a UTC
+    /// datetime, or `None` if the local time does not exist or is ambiguous in this zone.
+    fn local_to_utc(&self, datetime: &NaiveDateTime) -> Option<NaiveDateTime> {
+        match self {
+            Self::Named(tz) => tz
+                .from_local_datetime(datetime)
+                .single()
+                .map(|dt| dt.naive_utc()),
+            Self::Offset(offset) => offset
+                .from_local_datetime(datetime)
+                .single()
+                .map(|dt| dt.naive_utc()),
+        }
+    }
+
+    /// Returns the local datetime in this zone at the instant `utc`.
+    fn utc_to_local(&self, utc: &NaiveDateTime) -> NaiveDateTime {
+        match self {
+            Self::Named(tz) => tz.from_utc_datetime(utc).naive_local(),
+            Self::Offset(offset) => offset.from_utc_datetime(utc).naive_local(),
+        }
+    }
+}
+
 /// Transforms a `[NaiveDateTime]` into a new one with a different timezone.
 /// The `[NaiveDateTime]` is interpreted as having the timezone specified by the
 /// `src` parameter, and then it's transformed to timezone specified by the `target` parameter.
+/// Each timezone is an IANA name or a UTC offset such as `+05:30`.
 fn convert_tz(datetime: &NaiveDateTime, src: &str, target: &str) -> ReadySetResult<NaiveDateTime> {
     let mk_err = |message: &str| ReadySetError::ProjectExprBuiltInFunctionError {
         function: "convert_tz".to_owned(),
         message: message.to_owned(),
     };
 
-    let src_tz: Tz = src
+    let src_tz: ConvertTzZone = src
         .parse()
         .map_err(|_| mk_err("Failed to parse the source timezone"))?;
-    let target_tz: Tz = target
+    let target_tz: ConvertTzZone = target
         .parse()
         .map_err(|_| mk_err("Failed to parse the target timezone"))?;
 
-    let datetime_tz = match src_tz.from_local_datetime(datetime) {
-        LocalResult::Single(dt) => dt,
-        LocalResult::None => {
-            return Err(mk_err(
-                "Failed to transform the datetime to a different timezone",
-            ))
-        }
-        LocalResult::Ambiguous(_, _) => {
-            return Err(mk_err(
-                "Failed to transform the datetime to a different timezone",
-            ))
-        }
-    };
-
-    Ok(datetime_tz.with_timezone(&target_tz).naive_local())
+    let utc = src_tz
+        .local_to_utc(datetime)
+        .ok_or_else(|| mk_err("Failed to transform the datetime to a different timezone"))?;
+    Ok(target_tz.utc_to_local(&utc))
 }
 
 fn day_of_week(date: &NaiveDate) -> u8 {
@@ -1712,6 +1806,26 @@ mod tests {
         Expr::lower(ast, expr_dialect, &numbered_columns()).unwrap()
     }
 
+    /// `convert_tz(c0, c1, c2)` as lowering builds it for literal zones. Lowering leaves a zone
+    /// that is not a literal to the upstream, but evaluation must handle every zone a literal names.
+    fn convert_tz_over_columns() -> Expr {
+        let Expr::Call { func, ty } = parse_and_lower("convert_tz(c0, '+00:00', '+00:00')", MySQL)
+        else {
+            panic!("CONVERT_TZ lowers to a call");
+        };
+        let BuiltinFunction::ConvertTZ([input, _, _]) = *func else {
+            panic!("CONVERT_TZ lowers to ConvertTZ");
+        };
+        let zone = |index| Expr::Column {
+            index,
+            ty: DfType::DEFAULT_TEXT,
+        };
+        Expr::Call {
+            func: Box::new(BuiltinFunction::ConvertTZ([input, zone(1), zone(2)])),
+            ty,
+        }
+    }
+
     /// Postgres passes non-finite values through `round` unchanged.
     #[test]
     fn eval_call_round_non_finite() {
@@ -1744,8 +1858,54 @@ mod tests {
     }
 
     #[test]
+    fn eval_call_convert_tz_with_utc_offsets() {
+        // Expected values come from MySQL 8.4.
+        let expr = convert_tz_over_columns();
+        let datetime = NaiveDate::from_ymd_opt(2020, 1, 1)
+            .unwrap()
+            .and_hms_opt(10, 0, 0)
+            .unwrap();
+        let eval = |src: &str, target: &str| {
+            expr.eval::<DfValue>(&[datetime.into(), src.into(), target.into()])
+                .unwrap()
+        };
+        let at = |d: u32, h: u32, m: u32| {
+            DfValue::from(
+                NaiveDate::from_ymd_opt(2020, 1, d)
+                    .unwrap()
+                    .and_hms_opt(h, m, 0)
+                    .unwrap(),
+            )
+        };
+        assert_eq!(eval("+00:00", "+05:30"), at(1, 15, 30));
+        assert_eq!(eval("+0:00", "+1:00"), at(1, 11, 0));
+        assert_eq!(eval("+00:00", "-00:00"), at(1, 10, 0));
+        assert_eq!(eval("+05:30", "+00:00"), at(1, 4, 30));
+        assert_eq!(eval("UTC", "+05:30"), at(1, 15, 30));
+        assert_eq!(eval("+00:00", "Asia/Tokyo"), at(1, 19, 0));
+        assert_eq!(
+            eval("+00:00", "-13:59"),
+            DfValue::from(
+                NaiveDate::from_ymd_opt(2019, 12, 31)
+                    .unwrap()
+                    .and_hms_opt(20, 1, 0)
+                    .unwrap()
+            )
+        );
+        assert_eq!(eval("+00:00", "+14:00"), at(2, 0, 0));
+        assert_eq!(eval("+00:00", "+05:3"), at(1, 15, 3));
+        assert_eq!(eval("+00:00", "+005:30"), at(1, 15, 30));
+        assert_eq!(eval("+00:00", "+:30"), at(1, 10, 30));
+        for bad in [
+            "+14:01", "-14:00", "+00:60", "05:30", "+5", "+05:30 ", "+0530", "+05:", "+:5",
+        ] {
+            assert_eq!(eval("+00:00", bad), DfValue::None, "target {bad:?}");
+        }
+    }
+
+    #[test]
     fn eval_call_convert_tz() {
-        let expr = parse_and_lower("convert_tz(c0, c1, c2)", MySQL);
+        let expr = convert_tz_over_columns();
         let datetime = NaiveDateTime::new(
             NaiveDate::from_ymd_opt(2003, 10, 12).unwrap(),
             NaiveTime::from_hms_opt(5, 13, 33).unwrap(),

@@ -8,7 +8,7 @@ use readyset_sql_parsing::parse_sql_type;
 use readyset_util::retry_with_exponential_backoff;
 use test_utils::{tags, upstream};
 
-use crate::common::parse_lower_eval;
+use crate::common::{parse_lower_eval, try_parse_lower};
 
 fn opts() -> Opts {
     OptsBuilder::default()
@@ -138,7 +138,7 @@ async fn example_exprs_eval_same_as_mysql() {
         "convert_tz('2004-01-01 12:00:00','GMT','MET')",
         "convert_tz('asdfadsf','asdf','MET')",
         "convert_tz('asdfadsf','asdf',null)",
-        // "convert_tz('2004-01-01 12:00:00','+00:00','+10:00')", TODO(ENG-2761)
+        "convert_tz('2004-01-01 12:00:00','+00:00','+10:00')",
         "dayofweek('2022-03-24')",
         "dayofweek('2022-03-24 12:00:00')",
         "dayofweek(null)",
@@ -198,6 +198,43 @@ async fn example_exprs_eval_same_as_mysql() {
         "CAST(3.6 AS UNSIGNED)",
     ] {
         compare_eval(expr, &mut conn).await;
+    }
+
+    for offset in [
+        "+5:00", "+05:3", "+005:30", "+05:030", "+:30", "+:5", "+0530", "+05:30 ", "+05:", "-12:59",
+        "+13:00", "-14:00", "+14:01", "+00:60", "-00:00",
+    ] {
+        for expr in [
+            format!("convert_tz('2004-01-01 12:00:00','+00:00','{offset}')"),
+            format!("convert_tz('2004-01-01 12:00:00','{offset}','+00:00')"),
+        ] {
+            compare_eval(&expr, &mut conn).await;
+        }
+    }
+    // MySQL 5.7 reads an offset from -12:59 to +13:00 and 8.0.19 and later from -13:59 to +14:00,
+    // and reads each digit run into a counter that wraps around, so Readyset leaves an offset
+    // between those ranges, or one with long digit runs, to the upstream.
+    for offset in [
+        "-13:59",
+        "-13:00",
+        "+13:01",
+        "+14:00",
+        "+14:18446744073709551616",
+        "+18446744073709551616:30",
+        "+00:18446744073709551646",
+    ] {
+        for expr in [
+            format!("convert_tz('2004-01-01 12:00:00','+00:00','{offset}')"),
+            format!("convert_tz('2004-01-01 12:00:00','{offset}','+00:00')"),
+        ] {
+            let error = try_parse_lower(
+                &expr,
+                readyset_sql::Dialect::MySQL,
+                dataflow_expression::Dialect::DEFAULT_MYSQL,
+            )
+            .unwrap_err();
+            assert!(error.is_unsupported(), "{expr}: {error}");
+        }
     }
 }
 

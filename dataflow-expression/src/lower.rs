@@ -16,6 +16,7 @@ use readyset_sql::{DialectDisplay, TryIntoDialect as _};
 use readyset_util::redacted::Sensitive;
 use vec1::Vec1;
 
+use crate::eval::builtins::convert_tz_zone_depends_on_mysql_version;
 use crate::{
     BinaryOperator, BuiltinFunction, CaseWhenBranch, Dialect, Expr, NullValueTreatmentArg,
 };
@@ -279,6 +280,25 @@ impl BuiltinFunction {
                 }
                 // Type is inferred from input argument
                 let input = next_arg()?;
+                let (src, target) = (next_arg()?, next_arg()?);
+                // MySQL 5.7 and 8.0.19 or later read UTC offsets over different ranges, and the
+                // upstream's version is not known here, so a zone they could read differently is
+                // left to the upstream.
+                for zone in [&src, &target] {
+                    let same_everywhere = match zone {
+                        Expr::Literal {
+                            val: DfValue::None, ..
+                        } => true,
+                        Expr::Literal { val, .. } => <&str>::try_from(val)
+                            .is_ok_and(|zone| !convert_tz_zone_depends_on_mysql_version(zone)),
+                        _ => false,
+                    };
+                    if !same_everywhere {
+                        unsupported!(
+                            "CONVERT_TZ with a time zone that MySQL versions read differently"
+                        );
+                    }
+                }
                 let ty = input.ty().clone();
                 (
                     Self::ConvertTZ([
@@ -290,8 +310,8 @@ impl BuiltinFunction {
                                     .unwrap_or_else(|| dialect.default_subsecond_digits()),
                             },
                         ),
-                        cast(next_arg()?, DfType::DEFAULT_TEXT),
-                        cast(next_arg()?, DfType::DEFAULT_TEXT),
+                        cast(src, DfType::DEFAULT_TEXT),
+                        cast(target, DfType::DEFAULT_TEXT),
                     ]),
                     ty,
                 )
@@ -3455,6 +3475,60 @@ pub(crate) mod tests {
         let error = lower(ParserDialect::PostgreSQL, Dialect::DEFAULT_POSTGRESQL).unwrap_err();
         assert!(error.is_unsupported(), "{error}");
         lower(ParserDialect::MySQL, Dialect::DEFAULT_MYSQL).unwrap();
+    }
+
+    /// MySQL 5.7 reads a UTC offset only from -12:59 to +13:00, and 8.0.19 and later from -13:59
+    /// to +14:00, so a CONVERT_TZ whose result could depend on the server version is left to the
+    /// upstream: an offset between those ranges, a zone that is not a literal, or an offset whose
+    /// digits MySQL reads into a counter that wraps around. Either zone position counts.
+    #[test]
+    fn call_convert_tz_declines_zones_the_mysql_versions_read_differently() {
+        let lower = |sql: &str| {
+            Expr::lower(
+                parse_expr(ParserDialect::MySQL, sql).unwrap(),
+                Dialect::DEFAULT_MYSQL,
+                &resolve_columns(|_| Ok((0, DfType::DEFAULT_TEXT))),
+            )
+        };
+        let calls = |zone: &str| {
+            [
+                format!("convert_tz('2020-01-01 10:00:00', '+00:00', {zone})"),
+                format!("convert_tz('2020-01-01 10:00:00', {zone}, '+00:00')"),
+            ]
+        };
+        for zone in [
+            "'-13:59'",
+            "'-13:00'",
+            "'+13:01'",
+            "'+14:00'",
+            "'+100:00'",
+            "'+00000000000000000000123:00'",
+            "'+14:18446744073709551616'",
+            "'+18446744073709551616:30'",
+            "'+00:18446744073709551646'",
+            "'+00:100'",
+            "t.zone",
+        ] {
+            for sql in calls(zone) {
+                let error = lower(&sql).unwrap_err();
+                assert!(error.is_unsupported(), "{sql}: {error}");
+            }
+        }
+        for zone in [
+            "'-12:59'",
+            "'+13:00'",
+            "'-14:00'",
+            "'+14:01'",
+            "'+5:30'",
+            "'+005:30'",
+            "'+05:030'",
+            "'UTC'",
+            "NULL",
+        ] {
+            for sql in calls(zone) {
+                lower(&sql).unwrap_or_else(|e| panic!("{sql}: {e}"));
+            }
+        }
     }
 
     mod row_comparison_coercions {
