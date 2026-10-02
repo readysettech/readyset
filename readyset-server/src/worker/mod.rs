@@ -262,6 +262,7 @@ impl Worker {
 
     async fn clear_domains_impl(&mut self) -> ReadySetResult<()> {
         info!("controller requested that this worker clear its existing domains");
+        self.state_sizes.lock().await.clear();
         self.coord.clear();
         self.domains.clear();
         while let Some((result, domain)) = self.domain_wait_queue.next().await {
@@ -363,6 +364,7 @@ impl Worker {
             let nsde = || ReadySetError::DomainNotFound {
                 domain_index: addr.index(),
             };
+            self.state_sizes.lock().await.remove(&addr);
             match self.domains.remove(&addr) {
                 Some(domain) => {
                     info!(domain = %addr, "Shutting down domain");
@@ -855,9 +857,57 @@ impl Drop for Barrier {
 
 #[cfg(test)]
 mod test {
+    use std::net::Ipv4Addr;
+
     use futures::future::FutureExt;
+    use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
     use super::*;
+
+    /// A worker running no domains, and the receiving end of its reports of domain exits.
+    fn worker() -> (Worker, UnboundedReceiver<DomainIndex>) {
+        let (_, requests) = tokio::sync::mpsc::channel(1);
+        let (exited_tx, exited_rx) = unbounded_channel();
+        let (_, shutdown_rx) = readyset_util::shutdown::channel();
+        let worker = Worker::new(
+            requests,
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            Arc::new(ChannelCoordinator::new()),
+            exited_tx,
+            Default::default(),
+            None,
+            None,
+            shutdown_rx,
+            false,
+            unbounded_channel().0,
+        )
+        .unwrap();
+        (worker, exited_rx)
+    }
+
+    /// A domain's state size is forgotten once the domain is killed or cleared, so eviction weighs
+    /// only the domains this worker runs.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stopped_domains_state_sizes_are_forgotten() {
+        let (mut worker, _exited) = worker();
+        let [killed, cleared] = [7, 8].map(DomainIndex::new);
+        for index in [killed, cleared] {
+            worker
+                .state_sizes
+                .lock()
+                .await
+                .insert(index, Default::default());
+        }
+
+        worker.kill_domains_impl(Vec1::new(killed)).await.unwrap();
+        let known: Vec<_> = worker.state_sizes.lock().await.keys().copied().collect();
+        assert_eq!(known, [cleared], "a killed domain's size was kept");
+
+        worker.clear_domains_impl().await.unwrap();
+        let known: Vec<_> = worker.state_sizes.lock().await.keys().copied().collect();
+        assert_eq!(known, [cleared; 0], "a cleared domain's size was kept");
+    }
 
     #[tokio::test]
     async fn barrier_split() {
