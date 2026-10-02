@@ -3,11 +3,13 @@
 use mysql_async::prelude::Queryable;
 use readyset_adapter::{UpstreamConfig, UpstreamDatabase};
 use readyset_client_test_helpers::mysql_helpers;
-use readyset_mysql::MySqlUpstream;
+use readyset_data::upstream_system_props::{
+    init_system_props, system_props, UpstreamSystemProperties,
+};
+use readyset_mysql::{MySqlUpstream, QueryResult, ReadResultStream};
 use test_utils::{tags, upstream};
 
-async fn connect() -> MySqlUpstream {
-    readyset_tracing::init_test_logging();
+fn upstream_url_config() -> UpstreamConfig {
     let opts = mysql_async::Opts::from(mysql_helpers::upstream_config());
     let url = format!(
         "mysql://{}:{}@{}:{}",
@@ -16,7 +18,12 @@ async fn connect() -> MySqlUpstream {
         opts.ip_or_hostname(),
         opts.tcp_port(),
     );
-    MySqlUpstream::connect(UpstreamConfig::from_url(url).expect("valid upstream URL"), None, None, false)
+    UpstreamConfig::from_url(url).expect("valid upstream URL")
+}
+
+async fn connect() -> MySqlUpstream {
+    readyset_tracing::init_test_logging();
+    MySqlUpstream::connect(upstream_url_config(), None, None, false)
         .await
         .unwrap()
 }
@@ -139,4 +146,30 @@ async fn unknown_charset_falls_back_to_server_default() {
         .unwrap()
         .unwrap();
     assert_eq!(applied.collation_name, expected);
+}
+
+/// With connection settings loaded at startup, an upstream connect runs no SELECT to read them.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn connect_reuses_startup_connection_settings() {
+    let mut upstream = connect().await;
+    init_system_props(&UpstreamSystemProperties {
+        max_allowed_packet: upstream.max_allowed_packet().await.unwrap(),
+        wait_timeout: upstream.wait_timeout().await.unwrap(),
+        interactive_timeout: upstream.interactive_timeout().await.unwrap(),
+        ..Default::default()
+    });
+    assert!(system_props().max_allowed_packet.is_some());
+
+    let mut upstream = connect().await;
+    let QueryResult::ReadResult { stream: ReadResultStream::Text(mut rows), .. } = upstream
+        .query("SHOW SESSION STATUS LIKE 'Com_select'")
+        .await
+        .unwrap()
+    else {
+        panic!("expected a text result set");
+    };
+    let com_select: Vec<(String, String)> = rows.collect().await.unwrap();
+    assert_eq!(com_select, [("Com_select".to_string(), "0".to_string())]);
 }

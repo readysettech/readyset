@@ -371,6 +371,21 @@ pub trait UpstreamDatabase: Sized + Send {
         Ok(None)
     }
 
+    /// Query the upstream's `max_allowed_packet`, if it has one.
+    async fn max_allowed_packet(&mut self) -> Result<Option<usize>, Self::Error> {
+        Ok(None)
+    }
+
+    /// Query the upstream's `wait_timeout`, if it has one.
+    async fn wait_timeout(&mut self) -> Result<Option<usize>, Self::Error> {
+        Ok(None)
+    }
+
+    /// Query the upstream's `interactive_timeout`, if it has one.
+    async fn interactive_timeout(&mut self) -> Result<Option<usize>, Self::Error> {
+        Ok(None)
+    }
+
     /// Convert the supplied metadata into temporary metadata during a shallow cache insertion.
     async fn shallow_exec_meta(
         &mut self,

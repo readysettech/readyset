@@ -30,6 +30,10 @@ pub struct UpstreamSystemProperties {
     pub db_version: String,
     pub group_concat_max_len: usize,
     pub server_default_collation: Option<UpstreamCollation>,
+    pub max_allowed_packet: Option<usize>,
+    pub wait_timeout: Option<usize>,
+    /// Replaces `wait_timeout` for sessions that connect with `CLIENT_INTERACTIVE`.
+    pub interactive_timeout: Option<usize>,
 }
 
 impl Default for UpstreamSystemProperties {
@@ -42,6 +46,9 @@ impl Default for UpstreamSystemProperties {
             db_version: String::new(),
             group_concat_max_len: DEFAULT_GROUP_CONCAT_MAX_LEN,
             server_default_collation: None,
+            max_allowed_packet: None,
+            wait_timeout: None,
+            interactive_timeout: None,
         }
     }
 }

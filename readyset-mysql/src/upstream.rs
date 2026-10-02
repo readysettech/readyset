@@ -23,7 +23,9 @@ use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_client_metrics::QueryDestination;
 use readyset_data::encoding::Encoding;
-use readyset_data::upstream_system_props::{UpstreamCollation, DEFAULT_TIMEZONE_NAME};
+use readyset_data::upstream_system_props::{
+    system_props, UpstreamCollation, UpstreamSystemProperties, DEFAULT_TIMEZONE_NAME,
+};
 use readyset_data::DfValue;
 use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 use readyset_shallow::{CacheInsertGuard, ContentHash, MySqlMetadata, QueryMetadata, Warning};
@@ -476,6 +478,7 @@ impl MySqlUpstream {
         if interactive {
             builder = builder.add_capability(CapabilityFlags::CLIENT_INTERACTIVE);
         }
+        builder = with_startup_settings(builder, system_props(), interactive);
         let opts: Opts = builder.into();
         let span = info_span!(
             "Connecting to MySQL upstream",
@@ -521,6 +524,15 @@ impl MySqlUpstream {
         gauge!(metric::CLIENT_UPSTREAM_CONNECTIONS).increment(1.0);
         let prepared_statements = HashMap::new();
         Ok((conn, prepared_statements))
+    }
+
+    /// Read a numeric global system variable from the upstream.
+    async fn global_variable(&mut self, name: &str) -> Result<Option<usize>, Error> {
+        let value: Option<u64> = self
+            .conn
+            .query_first(format!("SELECT @@GLOBAL.{name}"))
+            .await?;
+        Ok(value.map(|value| value as usize))
     }
 
     /// Look up the given session variable's collation in the upstream's
@@ -945,8 +957,7 @@ impl UpstreamDatabase for MySqlUpstream {
     }
 
     async fn lower_case_table_names(&mut self) -> Result<bool, Self::Error> {
-        let res: Vec<u8> = self.conn.query("select @@lower_case_table_names").await?;
-        let [v] = &res[..] else {
+        let Some(v) = self.global_variable("lower_case_table_names").await? else {
             internal!("upstream is missing lower_case_table_names system variable");
         };
         match v {
@@ -964,15 +975,26 @@ impl UpstreamDatabase for MySqlUpstream {
     }
 
     async fn group_concat_max_len(&mut self) -> Result<usize, Self::Error> {
-        let res: Vec<u64> = self.conn.query("select @@group_concat_max_len").await?;
-        let [v] = &res[..] else {
+        let Some(value) = self.global_variable("group_concat_max_len").await? else {
             internal!("upstream is missing group_concat_max_len system variable");
         };
-        Ok(*v as usize)
+        Ok(value)
     }
 
     async fn server_default_collation(&mut self) -> Result<Option<UpstreamCollation>, Self::Error> {
         Ok(Some(self.collation_for("collation_server").await?))
+    }
+
+    async fn max_allowed_packet(&mut self) -> Result<Option<usize>, Self::Error> {
+        self.global_variable("max_allowed_packet").await
+    }
+
+    async fn wait_timeout(&mut self) -> Result<Option<usize>, Self::Error> {
+        self.global_variable("wait_timeout").await
+    }
+
+    async fn interactive_timeout(&mut self) -> Result<Option<usize>, Self::Error> {
+        self.global_variable("interactive_timeout").await
     }
 
     async fn shallow_exec_meta(
@@ -992,6 +1014,27 @@ fn valid_mysql_name(name: &str) -> bool {
         && name
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
+/// Apply settings read from the upstream at startup, so mysql_async does not query them again on
+/// every connect. Interactive sessions get `interactive_timeout`, as the upstream assigns it.
+fn with_startup_settings(
+    mut builder: OptsBuilder,
+    props: &UpstreamSystemProperties,
+    interactive: bool,
+) -> OptsBuilder {
+    if props.max_allowed_packet.is_some() {
+        builder = builder.max_allowed_packet(props.max_allowed_packet);
+    }
+    let wait_timeout = if interactive {
+        props.interactive_timeout
+    } else {
+        props.wait_timeout
+    };
+    if wait_timeout.is_some() {
+        builder = builder.wait_timeout(wait_timeout);
+    }
+    builder
 }
 
 /// Map the modern utf8mb3 charset and collation names to the legacy "utf8" names, which are
@@ -1032,6 +1075,21 @@ mod tests {
         let text = CacheEntry::Text(vec![DfValue::from(1)]);
         let binary = CacheEntry::Binary(vec![DfValue::from(1)]);
         assert_ne!(text.content_hash(), binary.content_hash());
+    }
+
+    #[test]
+    fn startup_settings_pick_timeout_by_interactive_flag() {
+        let props = UpstreamSystemProperties {
+            max_allowed_packet: Some(32 * 1024 * 1024),
+            wait_timeout: Some(600),
+            interactive_timeout: Some(7200),
+            ..Default::default()
+        };
+        let opts: Opts = with_startup_settings(OptsBuilder::default(), &props, false).into();
+        assert_eq!(opts.max_allowed_packet(), Some(32 * 1024 * 1024));
+        assert_eq!(opts.wait_timeout(), Some(600));
+        let opts: Opts = with_startup_settings(OptsBuilder::default(), &props, true).into();
+        assert_eq!(opts.wait_timeout(), Some(7200));
     }
 
     #[test]

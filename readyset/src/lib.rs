@@ -1242,6 +1242,9 @@ where
         let db_version = upstream.version();
         let group_concat_max_len = upstream.group_concat_max_len().await?;
         let server_default_collation = upstream.server_default_collation().await?;
+        let max_allowed_packet = upstream.max_allowed_packet().await?;
+        let wait_timeout = upstream.wait_timeout().await?;
+        let interactive_timeout = upstream.interactive_timeout().await?;
 
         Ok::<_, U::Error>(UpstreamSystemProperties {
             search_path,
@@ -1251,6 +1254,9 @@ where
             db_version,
             group_concat_max_len,
             server_default_collation,
+            max_allowed_packet,
+            wait_timeout,
+            interactive_timeout,
         })
     };
 

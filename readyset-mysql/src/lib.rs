@@ -9,4 +9,4 @@ mod value;
 pub use backend::{user_passwords, Backend};
 pub use error::Error;
 pub use query_handler::MySqlQueryHandler;
-pub use upstream::{MySqlUpstream, QueryResult};
+pub use upstream::{MySqlUpstream, QueryResult, ReadResultStream};

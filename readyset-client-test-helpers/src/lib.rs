@@ -1023,6 +1023,9 @@ impl TestBuilder {
                                 .server_default_collation()
                                 .await
                                 .unwrap(),
+                            max_allowed_packet: cdc_upstream.max_allowed_packet().await.unwrap(),
+                            wait_timeout: cdc_upstream.wait_timeout().await.unwrap(),
+                            interactive_timeout: cdc_upstream.interactive_timeout().await.unwrap(),
                         }
                     } else {
                         UpstreamSystemProperties {
