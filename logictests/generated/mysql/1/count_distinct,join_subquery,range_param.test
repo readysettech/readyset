@@ -14,12 +14,12 @@ SELECT count(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1` INNER JO
 ----
 0
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT count(distinct `table_1`.`column_3`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`)
 ----
 10
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT count(distinct `table_1`.`column_4`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT count(distinct `table_1`.`column_5`) AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_5` = `alias_3`.`alias_2`)
 ----
 0
@@ -92,12 +92,12 @@ SELECT count(distinct `table_1`.`column_1`) AS `alias_1` FROM `table_1` INNER JO
 ----
 0
 
-query  rowsort error: (values|results) returned
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT count(distinct `table_1`.`column_3`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`)
 ----
 5
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT count(distinct `table_1`.`column_4`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT count(distinct `table_1`.`column_5`) AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_5` = `alias_3`.`alias_2`)
 ----
 0

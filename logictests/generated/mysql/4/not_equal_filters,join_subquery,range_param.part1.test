@@ -8,17 +8,17 @@ CREATE TABLE `table_1` (`column_1` INT, `column_2` INT, `column_3` INT, PRIMARY 
 statement ok
 INSERT INTO `table_1` (`column_1`, `column_2`, `column_3`) VALUES (1, -1965098660, 0), (309457166, -888400432, 1), (1, -2098958092, 2), (839238829, -828932652, 3), (1, -1162732458, 4), (-756680698, 1568797438, 5), (1, 1193529100, 6), (-1378995084, -1960816058, 7), (1, 147860451, 8), (-1508986997, -2044203904, 9)
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != `table_1`.`column_2`)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != `table_1`.`column_2`)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != 1)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -27,7 +27,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != 1)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -36,17 +36,17 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != `table_1`.`column_2`))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) AND (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -55,17 +55,17 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != `table_1`.`column_2`)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) AND (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -74,17 +74,17 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != `table_1`.`column_2`)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != 1) OR (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -93,7 +93,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != 1)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -102,7 +102,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != 1)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -111,7 +111,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != `table_1`.`column_2`)) AND (`table_1`.`column_1` != 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -120,17 +120,17 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != `table_1`.`column_2`)) OR (`table_1`.`column_1` != 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != `table_1`.`column_2`))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` != `table_1`.`column_2`) AND (`table_1`.`column_1` != 1)) OR (`table_1`.`column_1` != 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -139,7 +139,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) AND (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -148,12 +148,12 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` != `table_1`.`column_2`) AND (`table_1`.`column_1` != 1)) OR (`table_1`.`column_1` != 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -162,7 +162,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) AND (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -171,12 +171,12 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != 1) OR (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -185,7 +185,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != `table_1`.`column_2`)) AND (`table_1`.`column_1` != 1)) OR (`table_1`.`column_1` != 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -194,7 +194,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != `table_1`.`column_2`)) AND (`table_1`.`column_1` != 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -203,12 +203,12 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != `table_1`.`column_2`)) OR (`table_1`.`column_1` != 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` != `table_1`.`column_2`) AND (`table_1`.`column_1` != 1)) OR (`table_1`.`column_1` != 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -217,7 +217,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` != `table_1`.`column_2`) AND (`table_1`.`column_1` != 1)) OR (`table_1`.`column_1` != 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -226,7 +226,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != `table_1`.`column_2`)) AND (`table_1`.`column_1` != 1)) OR (`table_1`.`column_1` != 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -235,17 +235,17 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != `table_1`.`column_2`)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != `table_1`.`column_2`)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != 1)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -254,7 +254,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != 1)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -263,17 +263,17 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != `table_1`.`column_2`))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) AND (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -282,17 +282,17 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != `table_1`.`column_2`)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) AND (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -301,17 +301,17 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != `table_1`.`column_2`)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != 1) OR (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -320,7 +320,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != 1)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -329,7 +329,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != 1)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -338,7 +338,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != `table_1`.`column_2`)) AND (`table_1`.`column_1` != 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -347,17 +347,17 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != `table_1`.`column_2`)) OR (`table_1`.`column_1` != 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != `table_1`.`column_2`))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` != `table_1`.`column_2`) AND (`table_1`.`column_1` != 1)) OR (`table_1`.`column_1` != 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -366,7 +366,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) AND (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -375,12 +375,12 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` != `table_1`.`column_2`) AND (`table_1`.`column_1` != 1)) OR (`table_1`.`column_1` != 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -389,7 +389,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) AND (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -398,12 +398,12 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != 1) OR (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -412,7 +412,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != `table_1`.`column_2`)) AND (`table_1`.`column_1` != 1)) OR (`table_1`.`column_1` != 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -421,7 +421,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != `table_1`.`column_2`)) AND (`table_1`.`column_1` != 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -430,12 +430,12 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != `table_1`.`column_2`)) OR (`table_1`.`column_1` != 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 30 values hashing to fb825ce6800a961eb9aa2f0a4520bfba
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` != `table_1`.`column_2`) AND (`table_1`.`column_1` != 1)) OR (`table_1`.`column_1` != 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -444,7 +444,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` != `table_1`.`column_2`) AND (`table_1`.`column_1` != 1)) OR (`table_1`.`column_1` != 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -453,7 +453,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != `table_1`.`column_2`)) AND (`table_1`.`column_1` != 1)) OR (`table_1`.`column_1` != 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_2`) WHERE (`table_1`.`column_1` != `table_1`.`column_2`)
 ----
 -1378995084
@@ -462,7 +462,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != `table_1`.`column_2`)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -471,7 +471,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != `table_1`.`column_2`)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -480,7 +480,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != 1)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -489,7 +489,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != 1)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -498,7 +498,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -507,7 +507,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != `table_1`.`column_2`))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -516,7 +516,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) AND (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -525,7 +525,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -534,7 +534,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != `table_1`.`column_2`)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -543,7 +543,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) AND (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -552,7 +552,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -561,7 +561,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != `table_1`.`column_2`)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -570,7 +570,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != 1) OR (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -579,7 +579,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != 1)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -588,7 +588,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != 1)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -597,7 +597,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != `table_1`.`column_2`)) AND (`table_1`.`column_1` != 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -606,7 +606,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != `table_1`.`column_2`)) OR (`table_1`.`column_1` != 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -615,7 +615,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != `table_1`.`column_2`))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -624,7 +624,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` != `table_1`.`column_2`) AND (`table_1`.`column_1` != 1)) OR (`table_1`.`column_1` != 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -633,7 +633,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) AND (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -642,7 +642,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -651,7 +651,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` != `table_1`.`column_2`) AND (`table_1`.`column_1` != 1)) OR (`table_1`.`column_1` != 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -660,7 +660,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) AND (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -669,7 +669,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -678,7 +678,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != 1) OR (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -687,7 +687,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != `table_1`.`column_2`)) AND (`table_1`.`column_1` != 1)) OR (`table_1`.`column_1` != 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -696,7 +696,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != `table_1`.`column_2`)) AND (`table_1`.`column_1` != 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -705,7 +705,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != `table_1`.`column_2`)) OR (`table_1`.`column_1` != 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -714,7 +714,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` != `table_1`.`column_2`) AND (`table_1`.`column_1` != 1)) OR (`table_1`.`column_1` != 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -723,7 +723,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (((`table_1`.`column_1` != `table_1`.`column_2`) AND (`table_1`.`column_1` != 1)) OR (`table_1`.`column_1` != 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -732,7 +732,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != `table_1`.`column_2`)) AND (`table_1`.`column_1` != 1)) OR (`table_1`.`column_1` != 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -741,7 +741,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != `table_1`.`column_2`)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -750,7 +750,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != `table_1`.`column_2`)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -759,7 +759,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != 1)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -768,7 +768,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1` WHERE (`table_1`.`column_1` != 1)) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -777,7 +777,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_1` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -786,7 +786,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) OR (`table_1`.`column_1` != `table_1`.`column_2`))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084
@@ -795,7 +795,7 @@ SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `tabl
 309457166
 839238829
 
-query  rowsort
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE ((`table_1`.`column_1` != `table_1`.`column_2`) AND (`table_1`.`column_1` != 1))) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_2`) WHERE (`table_1`.`column_1` != 1)
 ----
 -1378995084

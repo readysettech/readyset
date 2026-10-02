@@ -104,9 +104,9 @@ NYC
 
 # Nested subquery inside HAVING: outer correlation rebinds, innermost uncorrelated stays put.
 # The inner IN deliberately reads from `p` (NOT `j`) -- using the same base table as the
-# outer subquery body would trip `contains_problematic_self_joins` after the IN gets
-# decorrelated as a semi-join, blocking the entire chain.  Using a distinct table keeps
-# the descent exercise meaningful without bumping into that downstream gate.
+# outer subquery body would make the decorrelated semi-join compare `j`.`jn` to itself,
+# which the engine declines.  Using a distinct table keeps the descent exercise meaningful
+# without bumping into that gate.
 # `SELECT jn FROM p` returns {2, 3, 99}.  Outer body counts j rows per city with jn in
 # that set: NYC=2 (jn=2,3 AND city=NYC), LA=0, SF=0.  Outer s counts: NYC=2, LA=3, SF=1.
 # `count_outer > count_inner`: NYC (2>2 false), LA (3>0 true), SF (1>0 true).

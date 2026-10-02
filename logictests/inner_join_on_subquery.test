@@ -28,6 +28,15 @@ insert into cfg values
 ('active', 20),
 ('legacy', 5);
 
+statement ok
+create table hub (city text, tier int);
+
+statement ok
+insert into hub values
+('NYC', 1),
+('LA',  2),
+('SF',  9);
+
 # Rows in s per city: NYC=2, LA=3, SF=1.  Rows in j per city: NYC=3, LA=1.
 
 # Correlated EXISTS in INNER JOIN ON.  Move to WHERE, decorrelate via
@@ -60,12 +69,15 @@ LA
 
 # Uncorrelated IN-subquery in INNER JOIN ON.  Subquery is a query-level
 # constant.  The move-to-WHERE + standard IN decorrelation must produce
-# results consistent with upstream.
+# results consistent with upstream.  The IN reads `hub`, so its decorrelated
+# semi-join compares hub.city to j.city.  An IN over `j` would compare j.city
+# to itself, which the engine declines.  `tier <= 1` selects NYC, the same set
+# the join sees either way.
 query IT rowsort
 select s.sn, s.city
 from s
 inner join j on s.city = j.city
-             and j.city in (select city from j as j3 where j3.jn <= 3);
+             and j.city in (select city from hub as h where h.tier <= 1);
 ----
 1
 NYC
@@ -79,6 +91,16 @@ NYC
 NYC
 2
 NYC
+
+# The shape the query above used to have: the IN reads `j`, which the outer FROM already
+# joins, so the decorrelated semi-join compares j.city to itself and the engine declines.
+# Kept so that restoring a cache for this shape has to be deliberate.
+query IT rowsort error: Self-joins using the same column are unsupported
+select s.sn, s.city
+from s
+inner join j on s.city = j.city
+             and j.city in (select city from j as j3 where j3.jn <= 3);
+----
 
 # Scalar-subquery comparison in INNER JOIN ON.  Compare a joined column
 # to a per-query scalar (max threshold from cfg = 20).  Only s rows

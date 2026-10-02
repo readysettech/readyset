@@ -523,8 +523,17 @@ SELECT a, sum(b) OVER (ORDER BY a) FROM t_negzero;
 
 # Test window functions in subqueries
 
+# The IN reads `u_win`.  An IN over `t` would make the decorrelated semi-join compare
+# `t`.`a` to itself, which the engine declines.  The two lowest `a` values are 1 in
+# either table, so `rn <= 2` selects `{1}` and the recorded rows are unchanged.
+statement ok
+CREATE TABLE u_win (a INT, b INT);
+
+statement ok
+INSERT INTO u_win VALUES (1,1), (1,2), (2,2);
+
 query II rowsort
-SELECT a, b FROM t WHERE a IN (SELECT a FROM (SELECT a, row_number() OVER (ORDER BY a) as rn FROM t) sq WHERE rn <= 2);
+SELECT a, b FROM t WHERE a IN (SELECT a FROM (SELECT a, row_number() OVER (ORDER BY a) as rn FROM u_win) sq WHERE rn <= 2);
 ----
 1
 2

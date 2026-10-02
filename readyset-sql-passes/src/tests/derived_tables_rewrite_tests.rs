@@ -1743,14 +1743,14 @@ FROM
             "s"
     ) AS "tab2" ON ("tab2"."sn" = "tab1"."sn");
     "#;
-    // tab1 inlines (no overlap with outer "spj"), but tab2 bails out because "s" already
-    // exists after tab1 was inlined — inlining would create a self-join.
+    // tab1 inlines (no overlap with outer "spj"); tab2 stays a derived table because
+    // inlining it would reach "s" twice. The remaining join keeps its ON predicate, so the
+    // self-join stays visible to the engine's own check.
     test_it(
         "test79",
         original_text,
-        r#"SELECT "spj"."sn" FROM "s" INNER JOIN "spj" ON ("s"."sn" = "spj"."sn")
-        CROSS JOIN (SELECT "s"."sn" FROM "s") AS "tab2"
-        WHERE ("tab2"."sn" = "s"."sn")"#,
+        r#"SELECT "spj"."sn" FROM "spj" INNER JOIN "s" ON ("spj"."sn" = "s"."sn")
+        INNER JOIN (SELECT "s"."sn" FROM "s") AS "tab2" ON ("s"."sn" = "tab2"."sn")"#,
     );
 }
 
@@ -1796,7 +1796,7 @@ FROM s LEFT OUTER JOIN (
     test_it("test82", original_text, original_text);
 }
 
-// Test83: Self-join bail-out — t inlines but t1 bails because "spj" already exists
+// Test83: t inlines but t1 stays a derived table because "spj" already exists
 #[test]
 fn test83() {
     let original_text = r#"
@@ -1812,8 +1812,7 @@ JOIN (
         "test83",
         original_text,
         r#"SELECT "spj"."sn" FROM "spj"
-        CROSS JOIN (SELECT "spj"."sn" FROM "spj") AS "t1"
-        WHERE ("spj"."sn" = "t1"."sn")"#,
+        INNER JOIN (SELECT "spj"."sn" FROM "spj") AS "t1" ON ("spj"."sn" = "t1"."sn")"#,
     );
 }
 
@@ -3068,10 +3067,10 @@ fn test144() {
     );
 }
 
-// Self-join bail-out: inlining sq would put t1 twice in FROM/JOINs.
-// Inlining is blocked, but normalize_joins_shape still reshapes the query.
+// Inlining sq would put t1 twice in FROM/JOINs, so sq stays a derived table.
+// normalize_joins_shape still reshapes the query, keeping the ON predicate on the join.
 #[test]
-fn self_join_bail_out() {
+fn self_join_inline_declines() {
     let original = r#"
         SELECT "t1"."id", "sq"."val"
         FROM "t1"
@@ -3079,12 +3078,11 @@ fn self_join_bail_out() {
         ON "t1"."id" = "sq"."id"
     "#;
     test_it(
-        "self_join_bail_out",
+        "self_join_inline_declines",
         original,
         r#"SELECT "t1"."id", "sq"."val"
         FROM (SELECT "t1"."id", "t1"."val" FROM "t1" WHERE "t1"."active") AS "sq"
-        CROSS JOIN "t1"
-        WHERE ("t1"."id" = "sq"."id")"#,
+        INNER JOIN "t1" ON ("sq"."id" = "t1"."id")"#,
     );
 }
 

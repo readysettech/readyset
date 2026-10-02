@@ -1,4 +1,3 @@
-use crate::detect_problematic_self_joins::contains_problematic_self_joins;
 use crate::get_local_from_items_iter_mut;
 use crate::rewrite_utils::{
     add_expression_to_join_constraint, and_predicates_skip_true, as_sub_query_with_alias_mut,
@@ -963,22 +962,10 @@ fn find_join_candidate_for_rhs(
     Ok(None)
 }
 
-fn try_add_to_existing_join(
-    stmt: &mut SelectStatement,
-    jc_idx: usize,
-    eq_constraint: Expr,
-) -> bool {
+fn add_to_existing_join(stmt: &mut SelectStatement, jc_idx: usize, eq_constraint: Expr) {
     let join_constraint = mem::replace(&mut stmt.join[jc_idx].constraint, JoinConstraint::Empty);
-
     stmt.join[jc_idx].constraint =
-        add_expression_to_join_constraint(join_constraint.clone(), eq_constraint);
-
-    if contains_problematic_self_joins(stmt) {
-        stmt.join[jc_idx].constraint = join_constraint;
-        false
-    } else {
-        true
-    }
+        add_expression_to_join_constraint(join_constraint, eq_constraint);
 }
 
 fn insert_new_join_at(
@@ -986,7 +973,7 @@ fn insert_new_join_at(
     jc_idx: usize,
     join_rhs: TableExpr,
     on_expr: Expr,
-) -> bool {
+) {
     stmt.join.insert(
         jc_idx,
         JoinClause {
@@ -995,15 +982,6 @@ fn insert_new_join_at(
             constraint: JoinConstraint::On(on_expr),
         },
     );
-    !contains_problematic_self_joins(stmt)
-}
-
-fn remove_new_join_at(stmt: &mut SelectStatement, jc_idx: usize) -> ReadySetResult<TableExpr> {
-    if let JoinRightSide::Table(rhs) = stmt.join.remove(jc_idx).right {
-        Ok(rhs)
-    } else {
-        internal!("Expected JoinRightSide::Table at join index {}", jc_idx)
-    }
 }
 
 /// Try to move an equality constraint into an existing or new join clause.
@@ -1028,26 +1006,19 @@ fn add_to_statement_join(stmt: &mut SelectStatement, eq_constraint: Expr) -> Rea
     match contain_lhs_rhs(&stmt.tables, &lhs, &rhs)? {
         Some(EitherOrBoth::Both(_, rhs_idx)) if is_filter_pushable_from_join_clause(stmt, 0) => {
             let rhs = stmt.tables.remove(rhs_idx);
-            return Ok(if insert_new_join_at(stmt, 0, rhs, eq_constraint) {
-                true
-            } else {
-                let rhs = remove_new_join_at(stmt, 0)?;
-                stmt.tables.insert(rhs_idx, rhs);
-                false
-            });
+            insert_new_join_at(stmt, 0, rhs, eq_constraint);
+            return Ok(true);
         }
         Some(EitherOrBoth::Left(_)) => {
             if let Some(jc_idx) = find_join_candidate_for_rhs(stmt, &rhs)? {
-                return Ok(try_add_to_existing_join(stmt, jc_idx, eq_constraint));
+                add_to_existing_join(stmt, jc_idx, eq_constraint);
+                return Ok(true);
             }
         }
         Some(EitherOrBoth::Right(_)) => {
             if let Some(jc_idx) = find_join_candidate_for_rhs(stmt, &lhs)? {
-                return Ok(try_add_to_existing_join(
-                    stmt,
-                    jc_idx,
-                    swap_eq_constraint_operands(&eq_constraint)?,
-                ));
+                add_to_existing_join(stmt, jc_idx, swap_eq_constraint_operands(&eq_constraint)?);
+                return Ok(true);
             }
         }
         Some(EitherOrBoth::Both(..)) | None => {}
@@ -1067,15 +1038,8 @@ fn add_to_statement_join(stmt: &mut SelectStatement, eq_constraint: Expr) -> Rea
     }
     if let Some((jc_idx, rhs_idx)) = join_to_insert {
         let rhs = with_rhs_tables_do!(jc_idx, remove(rhs_idx));
-        return Ok(
-            if insert_new_join_at(stmt, jc_idx + 1, rhs, eq_constraint) {
-                true
-            } else {
-                let rhs = remove_new_join_at(stmt, jc_idx + 1)?;
-                with_rhs_tables_do!(jc_idx, insert(rhs_idx, rhs));
-                false
-            },
-        );
+        insert_new_join_at(stmt, jc_idx + 1, rhs, eq_constraint);
+        return Ok(true);
     }
 
     let jc_idx = match (
@@ -1087,14 +1051,15 @@ fn add_to_statement_join(stmt: &mut SelectStatement, eq_constraint: Expr) -> Rea
         (None, Some(rhs_jc_idx)) => rhs_jc_idx,
         (None, None) => return Ok(false),
     };
-    Ok(try_add_to_existing_join(stmt, jc_idx, eq_constraint))
+    add_to_existing_join(stmt, jc_idx, eq_constraint);
+    Ok(true)
 }
 
 // This function tries to move cross-table equality predicates from WHERE into JOIN ... ON
 // constraints if the target JOIN clause can safely accommodate them.
 //
 // It is a best-effort optimization — not a correctness requirement. If a predicate can't be
-// moved (e.g., no matching join clause, join not inner, or causing `self-join` issue),
+// moved (e.g., no matching join clause, or the join is not an inner join),
 // it remains in WHERE.
 //
 // === Important Distinction ===
@@ -1128,28 +1093,6 @@ pub(crate) fn move_applicable_where_conditions_to_joins(
         }
     }
     Ok(false)
-}
-
-fn repair_problematic_self_join_issue(stmt: &mut SelectStatement) -> ReadySetResult<()> {
-    // Strip off join predicates from INNER joins and place them to WHERE clause
-    let (predicates, mut back_to_where) =
-        strip_inner_joins_predicates(&mut stmt.join, &IS_CROSS_TABLE_EQUALITY);
-    if let Some(conjoined) = conjoin_all_dedup(predicates) {
-        back_to_where = and_predicates_skip_true(back_to_where, conjoined);
-    }
-    if let Some(back_to_where) = back_to_where {
-        stmt.where_clause = and_predicates_skip_true(stmt.where_clause.take(), back_to_where);
-    }
-
-    // Re-adding applicable constraints back to the appropriate INNER join,
-    // one by one avoiding the `problematic self-join` issue.
-    // **NOTE** This function does not factor in possibility of `more than 2 tables join`.
-    move_applicable_where_conditions_to_joins(stmt)?;
-
-    // Detect and repair the `more than 2 tables join` issue
-    try_normalize_joins_conditions(stmt)?;
-
-    Ok(())
 }
 
 /// Moves applicable WHERE cross-table equality predicates onto `STRAIGHT_JOIN` ON constraints.
@@ -1238,8 +1181,7 @@ fn move_applicable_where_conditions_to_straight_joins(
 /// 2. Attaching applicable WHERE predicates to STRAIGHT_JOIN ON constraints.
 /// 3. Reordering INNER JOIN chains using equality constraints from the WHERE clause.
 /// 4. Repairing multi-table ON constraints that violate ReadySet’s 2-table ON limit.
-/// 5. Fixing problematic self-joins by demoting ON clauses to WHERE and reattaching safely.
-/// 6. Canonicalizing all JOIN operator + constraint combinations into minimal, deterministic form.
+/// 5. Canonicalizing all JOIN operator + constraint combinations into minimal, deterministic form.
 ///
 /// This is a **local rewrite pass** — intended to operate on a single flat SELECT.
 /// It is called by [`normalize_joins_shape`] to apply normalization recursively across the query.
@@ -1271,24 +1213,6 @@ fn normalize_statement_joins_shape(
 
     // Detect and repair the `more than 2 tables join` issue
     was_rewritten |= try_normalize_joins_conditions(stmt)?;
-
-    // Detect and fix problematic self-joins that remain even after ON normalization.
-    // These can arise from joins with multiple-table ON constraints, often due to
-    // reordering or constraint attachment from WHERE clause.
-    //
-    // To recover a canonical shape:
-    //   1. Strip all INNER JOIN ON constraints and move them to WHERE.
-    //   2. Reassign each constraint back only if it does not cause ambiguity.
-    //   3. Temporarily strip WHERE to allow safe reordering of INNER JOINs only using ONs.
-    if contains_problematic_self_joins(stmt) {
-        repair_problematic_self_join_issue(stmt)?;
-
-        let where_clause = stmt.where_clause.take();
-        normalize_inner_joins_order(stmt)?;
-        stmt.where_clause = where_clause;
-
-        was_rewritten = true;
-    }
 
     // Canonicalize join operator and constraint syntax.
     // This pass runs *last* to ensure syntactic determinism across semantically equivalent
