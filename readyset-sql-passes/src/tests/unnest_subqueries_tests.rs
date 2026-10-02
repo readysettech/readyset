@@ -628,7 +628,10 @@ where
     test_it("test13", original_text, expected_text);
 }
 
-// Test with partial rewrite, as the full rewrite would cause `problematic self-join` issue
+// Every correlated subquery is decorrelated, including the select-list scalar one. The
+// correlated `max(spj2.qty)` comparison in the WHERE joins `spj` to a derived table over
+// `spj`, so a self-join is already present while the remaining subqueries decorrelate.
+// Decorrelation proceeds regardless; refusing that self-join belongs to the server-side pass.
 // WHERE IN; correlated; LATERAL subquery flattened; with GROUP BY; rewritten as LEFT OUTER
 // JOIN; NP/EP omitted when null-safe; RHS deduplicated (DISTINCT).
 #[test]
@@ -691,16 +694,23 @@ WHERE
       WHERE p4.weight > 50
     );"#;
 
-    let expected_text = r#"SELECT "spj"."sn", "spj"."pn", "spj"."qty", "l1"."total_weight", "l2"."avg_weight_for_status", "l3"."adjusted_sum",
-    (SELECT count(*) FROM "p" AS "p_non" WHERE (("p_non"."pn" = "spj"."pn") AND ("p_non"."weight" > 100))) AS "high_weight_count" FROM "spj"
-    LEFT OUTER JOIN (SELECT sum("p1"."weight") AS "total_weight", "p1"."pn" AS "pn" FROM "p" AS "p1" GROUP BY "p1"."pn") AS "l1" ON
-    ("l1"."pn" = "spj"."pn") LEFT OUTER JOIN (SELECT avg("p2"."weight") AS "avg_weight_for_status", "GNL"."sn" AS "sn" FROM "p" AS "p2"
-    INNER JOIN (SELECT max("s2"."city") AS "max(city)", "s2"."sn" AS "sn" FROM "s" AS "s2" GROUP BY "s2"."sn") AS "GNL" ON ("p2"."city" = "GNL"."max(city)")
-    WHERE ("p2"."weight" > 0) GROUP BY "GNL"."sn") AS "l2" ON ("l2"."sn" = "spj"."sn") INNER JOIN (SELECT ("l_mid"."sum_weight" * 1.10) AS "adjusted_sum",
-    "l_mid"."jn" AS "jn" FROM (SELECT sum("p3"."weight") AS "sum_weight", "p3"."jn" AS "jn" FROM "p" AS "p3" GROUP BY "p3"."jn") AS "l_mid") AS "l3"
-    ON ("l3"."jn" = "spj"."jn") INNER JOIN (SELECT max("spj2"."qty") AS "max(qty)", "spj2"."pn" AS "pn" FROM "spj" AS "spj2" GROUP BY "spj2"."pn") AS "GNL"
-    ON (("GNL"."pn" = "spj"."pn") AND ("spj"."qty" = "GNL"."max(qty)")) INNER JOIN
-    (SELECT DISTINCT "p4"."pn" AS "pn" FROM "p" AS "p4" WHERE ("p4"."weight" > 50)) AS "GNL1" ON ("spj"."pn" = "GNL1"."pn")"#;
+    let expected_text = r#"SELECT "spj"."sn", "spj"."pn", "spj"."qty", "l1"."total_weight",
+    "l2"."avg_weight_for_status", "l3"."adjusted_sum", coalesce("GNL2"."count(*)", 0) AS
+    "high_weight_count" FROM "spj" LEFT OUTER JOIN (SELECT sum("p1"."weight") AS "total_weight",
+    "p1"."pn" AS "pn" FROM "p" AS "p1" GROUP BY "p1"."pn") AS "l1" ON ("l1"."pn" = "spj"."pn")
+    LEFT OUTER JOIN (SELECT avg("p2"."weight") AS "avg_weight_for_status", "GNL"."sn" AS "sn"
+    FROM "p" AS "p2" INNER JOIN (SELECT max("s2"."city") AS "max(city)", "s2"."sn" AS "sn" FROM
+    "s" AS "s2" GROUP BY "s2"."sn") AS "GNL" ON ("p2"."city" = "GNL"."max(city)") WHERE
+    ("p2"."weight" > 0) GROUP BY "GNL"."sn") AS "l2" ON ("l2"."sn" = "spj"."sn") INNER JOIN
+    (SELECT ("l_mid"."sum_weight" * 1.10) AS "adjusted_sum", "l_mid"."jn" AS "jn" FROM (SELECT
+    sum("p3"."weight") AS "sum_weight", "p3"."jn" AS "jn" FROM "p" AS "p3" GROUP BY "p3"."jn")
+    AS "l_mid") AS "l3" ON ("l3"."jn" = "spj"."jn") INNER JOIN (SELECT max("spj2"."qty") AS
+    "max(qty)", "spj2"."pn" AS "pn" FROM "spj" AS "spj2" GROUP BY "spj2"."pn") AS "GNL" ON
+    (("GNL"."pn" = "spj"."pn") AND ("spj"."qty" = "GNL"."max(qty)")) INNER JOIN (SELECT DISTINCT
+    "p4"."pn" AS "pn" FROM "p" AS "p4" WHERE ("p4"."weight" > 50)) AS "GNL1" ON ("spj"."pn" =
+    "GNL1"."pn") LEFT OUTER JOIN (SELECT count(*) AS "count(*)", "p_non"."pn" AS "pn" FROM "p"
+    AS "p_non" WHERE ("p_non"."weight" > 100) GROUP BY "p_non"."pn") AS "GNL2" ON ("GNL2"."pn" =
+    "spj"."pn")"#;
     test_it("test14", original_text, expected_text);
 }
 

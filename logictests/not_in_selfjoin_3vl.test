@@ -1,0 +1,29 @@
+# A NOT IN whose subquery reads a table already in the FROM decorrelates into an anti-join
+# over that table, and the engine declines a self-join on one column.  Keeping the
+# decorrelation is what makes the decline happen: while the subquery survived instead, MIR
+# lowered it on its own, without the 3VL probes, and the NULL in `t`.`x` went unseen.
+#
+# Under three-valued logic `x NOT IN (20, NULL)` is UNKNOWN for every x that does not equal
+# 20, so the correct answer is empty.
+
+statement ok
+create table t (id int primary key, x int);
+
+statement ok
+insert into t (id, x) values (1, 10), (2, 20), (3, NULL);
+
+query I nosort error: Self-joins using the same column are unsupported
+SELECT a.x FROM t AS a WHERE a.x NOT IN (SELECT b.x FROM t AS b WHERE b.id > 1) ORDER BY a.x;
+----
+
+# The same NULL situation over a separate table keeps its probes, caches, and answers
+# empty.  This is the control: it fails if the probes stop being emitted at all.
+statement ok
+create table u (id int primary key, y int);
+
+statement ok
+insert into u (id, y) values (1, 99), (2, 20), (3, NULL);
+
+query I nosort
+SELECT a.x FROM t AS a WHERE a.x NOT IN (SELECT u.y FROM u WHERE u.id > 1) ORDER BY a.x;
+----

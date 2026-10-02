@@ -1,5 +1,4 @@
 use crate::derived_tables_rewrite::promote_null_rejecting_outer_joins_where;
-use crate::detect_problematic_self_joins::contains_problematic_self_joins;
 use crate::drop_redundant_join::UniqueColumnsSchema;
 use crate::inline_subquery::limit_clause_as_numbers;
 use crate::lateral_join::unnest_lateral_subqueries;
@@ -2060,22 +2059,13 @@ pub(crate) fn join_derived_table(
         );
     }
 
-    let was_inner_join = join_clause.operator.is_inner_join();
     base_stmt.join.push(join_clause);
 
-    Ok(
-        if contains_problematic_self_joins(base_stmt) && !was_inner_join {
-            // The only mutation so far was pushing a new JOIN, so pop it to restore `base_stmt`
-            base_stmt.join.pop();
-            false
-        } else {
-            if let Some(add_to_where) = add_to_where {
-                base_stmt.where_clause =
-                    and_predicates_skip_true(mem::take(&mut base_stmt.where_clause), add_to_where);
-            }
-            true
-        },
-    )
+    if let Some(add_to_where) = add_to_where {
+        base_stmt.where_clause =
+            and_predicates_skip_true(mem::take(&mut base_stmt.where_clause), add_to_where);
+    }
+    Ok(true)
 }
 
 pub(crate) fn collect_subquery_predicates(
