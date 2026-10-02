@@ -232,6 +232,11 @@ pub struct Options {
     #[arg(long, short = 'a', env = "LISTEN_ADDRESS", value_delimiter = ',')]
     address: Vec<SocketAddr>,
 
+    /// Maximum number of client connections waiting to be accepted on each listen address.
+    /// The kernel caps it at `net.core.somaxconn`.
+    #[arg(long, env = "LISTEN_BACKLOG", default_value = "4096")]
+    listen_backlog: u32,
+
     /// ReadySet deployment ID. All nodes in a deployment must have the same deployment ID.
     #[arg(long, env = "DEPLOYMENT", default_value = "readyset.db", value_parser = NonEmptyStringValueParser::new(), hide = true)]
     pub deployment: String,
@@ -1294,6 +1299,32 @@ fn shallow_max_capacity(
     Some((memory_limit as f64 * percent / 100.0) as u64)
 }
 
+/// Bind a listener that queues up to `backlog` connections waiting to be accepted.
+fn bind_listener(addr: SocketAddr, backlog: u32) -> std::io::Result<net::TcpListener> {
+    let socket = if addr.is_ipv4() {
+        net::TcpSocket::new_v4()?
+    } else {
+        net::TcpSocket::new_v6()?
+    };
+    socket.set_reuseaddr(true)?;
+    socket.bind(addr)?;
+    socket.listen(backlog)
+}
+
+/// The backlog the kernel applies to a `listen` request: the requested value, capped by
+/// `somaxconn` when it is known.
+fn effective_backlog(requested: u32, somaxconn: Option<u32>) -> u32 {
+    somaxconn.map_or(requested, |max| requested.min(max))
+}
+
+fn somaxconn() -> Option<u32> {
+    std::fs::read_to_string("/proc/sys/net/core/somaxconn")
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
+}
+
 /// Resolves worker threads per connection shard, defaulting to `available_parallelism / shards` so
 /// that the shards together cover the machine without each one sizing itself to every core.
 fn shard_worker_threads(shards: usize, configured: Option<usize>) -> usize {
@@ -1499,13 +1530,21 @@ where
         let admin_credentials = (!admin_addresses.is_empty())
             .then(|| options.get_admin_credentials())
             .transpose()?;
+        let backlog = options.listen_backlog;
+        let effective = effective_backlog(backlog, somaxconn());
+        if effective < backlog {
+            warn!(
+                requested = backlog,
+                effective, "Listen backlog is capped by net.core.somaxconn"
+            );
+        }
         let mut all_listeners = SelectAll::new();
-        for listen_address in listen_addresses {
+        for &listen_address in listen_addresses {
             let listener = rt
-                .block_on(tokio::net::TcpListener::bind(listen_address))
+                .block_on(async { bind_listener(listen_address, backlog) })
                 .map_err(|e| anyhow!("Failed to bind listener on {listen_address}: {e}"))?;
             all_listeners.push(tag_listener(listener, false));
-            info!(%listen_address, "Listening for new connections");
+            info!(%listen_address, backlog = effective, "Listening for new connections");
         }
         // Safe: ensured non-empty above.  Used as the address the query sampler
         // reconnects to the adapter on; for multi-listener setups the first
@@ -1514,13 +1553,13 @@ where
 
         if let Some(ref ddl_addr) = options.cache_ddl_address {
             info!(%ddl_addr, "Listening for cache ddl connections");
-            let cache_ddl_listener = rt.block_on(tokio::net::TcpListener::bind(ddl_addr))?;
+            let cache_ddl_listener = rt.block_on(async { bind_listener(*ddl_addr, backlog) })?;
             all_listeners.push(tag_listener(cache_ddl_listener, false));
         }
 
-        for admin_address in &admin_addresses {
+        for &admin_address in &admin_addresses {
             let listener = rt
-                .block_on(tokio::net::TcpListener::bind(admin_address))
+                .block_on(async { bind_listener(admin_address, backlog) })
                 .map_err(|e| anyhow!("Failed to bind admin listener on {admin_address}: {e}"))?;
             all_listeners.push(tag_listener(listener, true));
             info!(%admin_address, "Listening for admin connections");
@@ -2732,6 +2771,30 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["b:3306"]
         );
+    }
+
+    #[test]
+    fn effective_backlog_is_capped_by_somaxconn() {
+        assert_eq!(effective_backlog(4096, Some(1024)), 1024);
+        assert_eq!(effective_backlog(512, Some(4096)), 512);
+        assert_eq!(effective_backlog(4096, None), 4096);
+    }
+
+    #[tokio::test]
+    async fn bound_listener_accepts_connections() {
+        for addr in ["127.0.0.1:0", "[::1]:0"] {
+            let listener = match bind_listener(addr.parse().unwrap(), 4096) {
+                Ok(listener) => listener,
+                // Hosts without an IPv6 loopback, such as CI containers, cannot bind `::1`.
+                Err(e) if e.kind() == std::io::ErrorKind::AddrNotAvailable => continue,
+                Err(e) => panic!("binding {addr}: {e}"),
+            };
+            let local = listener.local_addr().unwrap();
+            let (client, accepted) =
+                tokio::join!(net::TcpStream::connect(local), listener.accept());
+            client.unwrap();
+            accepted.unwrap();
+        }
     }
 
     /// Builds shards without runtimes behind them: placement only reads the live counts.
