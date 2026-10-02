@@ -801,13 +801,16 @@ impl State for PersistentState {
         }
 
         let mut batch = WriteBatch::default();
+        // When `remove` deletes a row with a non-unique primary key, it adds the row's full key
+        // here. Two deletions of equal rows then delete two different stored copies.
+        let mut removed = HashSet::new();
         for r in records.iter() {
             match *r {
                 Record::Positive(ref r) => {
                     self.insert(&mut batch, r)?;
                 }
                 Record::Negative(ref r) => {
-                    self.remove(&mut batch, r)?;
+                    self.remove(&mut batch, r, &mut removed)?;
                 }
             }
         }
@@ -2727,7 +2730,14 @@ impl PersistentState {
         Ok(())
     }
 
-    fn remove(&self, batch: &mut WriteBatch, r: &[DfValue]) -> ReadySetResult<()> {
+    /// Delete one stored copy of `r` in `batch`. If the primary key is not unique, prefer a copy
+    /// whose full key is not in `removed`, and add the deleted copy's key to `removed`.
+    fn remove(
+        &self,
+        batch: &mut WriteBatch,
+        r: &[DfValue],
+        removed: &mut HashSet<Vec<u8>>,
+    ) -> ReadySetResult<()> {
         let db = self.db.db();
         let ss = self.db.shared_state();
 
@@ -2744,26 +2754,31 @@ impl PersistentState {
             // This key is unique, so we can delete it as is
             prefix
         } else {
-            // This is key is not unique, therefore we have to iterate over the
-            // the values, looking for the first one that matches the full row
-            // and then return the (full length) unique primary key associated with it
+            // The key is not unique, so iterate over the rows with this prefix. Find a copy of `r`
+            // whose full key is not in `removed`. If `removed` holds the key of every copy, use
+            // the first copy again. It is already deleted in `batch`, so this deletion is a no-op.
             let mut iter = db.raw_iterator_cf(&primary_cf);
             iter.seek(&prefix); // Find the first key
+            let mut deleted_match = None;
 
             loop {
-                let key = iter
-                    .key()
-                    .filter(|k| k.starts_with(&prefix))
-                    .ok_or_else(|| {
+                let Some(key) = iter.key().filter(|k| k.starts_with(&prefix)) else {
+                    break deleted_match.ok_or_else(|| {
                         internal_err!(
                             "tried removing non-existent row from {}: {:?}",
                             self.name,
                             r
                         )
                     })?;
+                };
                 let val: Vec<DfValue> = deserialize_row(iter.value().unwrap());
                 if val == r {
-                    break key.to_vec();
+                    if !removed.contains(key) {
+                        let key = key.to_vec();
+                        removed.insert(key.clone());
+                        break key;
+                    }
+                    deleted_match.get_or_insert_with(|| key.to_vec());
                 }
                 iter.next();
             }
@@ -3798,6 +3813,43 @@ mod tests {
             }
             _ => unreachable!(),
         }
+    }
+
+    /// Two deletions of a duplicated row in one batch delete two different stored copies, and a
+    /// later deletion deletes the last copy.
+    #[test]
+    fn remove_every_duplicate_in_one_batch() {
+        let mut state = setup_single_key("remove_every_duplicate_in_one_batch");
+        let a: Vec<DfValue> = vec![1.into(), "a".into()];
+        let b: Vec<DfValue> = vec![1.into(), "b".into()];
+        state
+            .process_records(
+                &mut vec![a.clone(), b.clone(), a.clone(), a.clone()].into(),
+                None,
+                None,
+            )
+            .unwrap();
+        state
+            .process_records(
+                &mut vec![(a.clone(), false), (a.clone(), false)].into(),
+                None,
+                None,
+            )
+            .unwrap();
+        let rows = |state: &PersistentState| match state.lookup(&[0], &PointKey::Single(1.into())) {
+            LookupResult::Some(rows) => {
+                let mut rows: Vec<Vec<DfValue>> =
+                    rows.into_iter().map(|r| r.into_owned()).collect();
+                rows.sort();
+                rows
+            }
+            LookupResult::Missing => unreachable!("persistent state is full"),
+        };
+        assert_eq!(rows(&state), vec![a.clone(), b.clone()]);
+        state
+            .process_records(&mut vec![(a.clone(), false)].into(), None, None)
+            .unwrap();
+        assert_eq!(rows(&state), vec![b]);
     }
 
     #[test]
