@@ -772,9 +772,12 @@ impl QueryStatusCache {
     }
 
     /// Forget every one of them, handing back the DDL that filed them.
-    pub fn take_inline_literal_caches(&self) -> Vec<CacheDDLRequest> {
+    pub fn clear_inline_literal_caches(&self) -> Vec<CacheDDLRequest> {
         let mut taken = Vec::new();
+        // Subtract only what this removed: a cache registered meanwhile has counted itself.
+        let mut gone = 0;
         self.inline_literal_caches.retain(|_, caches| {
+            gone += caches.len();
             taken.extend(
                 caches
                     .iter_mut()
@@ -782,17 +785,11 @@ impl QueryStatusCache {
             );
             false
         });
-        self.clear_inline_literal_caches();
-        taken
-    }
-
-    /// Forget every one of them. Used by DROP ALL CACHES.
-    pub fn clear_inline_literal_caches(&self) {
-        self.inline_literal_caches.clear();
         self.inline_literal_caches_live
-            .store(0, atomic::Ordering::Release);
+            .fetch_sub(gone, atomic::Ordering::Release);
         self.inline_literal_caches_generation
             .fetch_add(1, atomic::Ordering::Release);
+        taken
     }
 
     /// Record that the in-request-path filter has rejected this query, and
@@ -1619,7 +1616,7 @@ impl SchemaChangeHandler for QscSchemaChangeAdapter {
 
     fn invalidate_all(&self) {
         self.qsc.invalidate_all_statuses();
-        let ddl = self.qsc.take_inline_literal_caches();
+        let ddl = self.qsc.clear_inline_literal_caches();
         self.recover_inline_literal_caches(ddl);
     }
 }
@@ -3071,7 +3068,7 @@ mod tests {
         assert!(ddl[0].unparsed_stmt.contains("SELECT v FROM t WHERE a = 1"));
 
         // And clearing hands back what is left.
-        let rest = cache.take_inline_literal_caches();
+        let rest = cache.clear_inline_literal_caches();
         assert_eq!(rest.len(), 1);
         assert_eq!(rest[0].cache_name, Some(Relation::from("on_t2")));
         assert!(!cache.may_have_inline_literal_caches());
@@ -3185,5 +3182,44 @@ mod tests {
             persistent_status(&cache, &id).unwrap().schema_generation,
             Some(next)
         );
+    }
+
+    /// A cache registered during a clear is either cleared with the rest or stays counted, so a
+    /// read never skips the lookup while one is registered. The race needs the two to overlap,
+    /// so the test runs many rounds.
+    #[test]
+    fn a_cache_registered_during_a_clear_stays_counted() {
+        let cache = QueryStatusCache::new();
+        let query = "SELECT v FROM t WHERE a = 1";
+        let (shape, canonical) = rewrite(query, true);
+        let (form, params) = rewrite(query, false);
+        let start = std::sync::Barrier::new(2);
+        for _ in 0..1000 {
+            std::thread::scope(|s| {
+                s.spawn(|| {
+                    start.wait();
+                    cache.clear_inline_literal_caches();
+                });
+                start.wait();
+                cache
+                    .register_inline_literal_cache(
+                        InlineLiteralRegistration {
+                            shape: QueryId::from_select(&shape, &[]),
+                            slots: canonical.slots().clone(),
+                            request: ViewCreateRequest::new(form.clone(), vec![]),
+                            params: params.clone(),
+                        },
+                        Relation::from("kept"),
+                        TrxCachePolicy::default(),
+                        None,
+                    )
+                    .unwrap();
+            });
+            let entries: usize = cache.inline_literal_caches.iter().map(|e| e.len()).sum();
+            let live = cache
+                .inline_literal_caches_live
+                .load(atomic::Ordering::Acquire);
+            assert_eq!(live, entries);
+        }
     }
 }
