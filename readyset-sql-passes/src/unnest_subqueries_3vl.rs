@@ -18,65 +18,89 @@ use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::mem;
 
-/// What we cache: for a given RHS + correlation, we maintain *once*:
+/// What we cache. The existence probe is kept once per RHS and correlation; the null-present
+/// probe is kept once per RHS, correlation and compared expression, because its answer is
+/// about that expression:
 ///  - NP probe (null-present):   EXISTS(rhs WHERE first_field IS NULL)
 ///  - EP probe (existence):      EXISTS(rhs)
 ///
 /// Both are installed as LEFT LATERAL joins that project a `present_` flag.
 /// We reference them with `present_ IS [NOT] NULL` where needed.
-#[derive(Default, Clone)]
+#[derive(Debug, Clone)]
 pub(crate) struct ProbeInfo {
     pub has_null: Option<(Relation /*alias*/, SqlIdentifier /*present_*/)>,
     pub non_empty: Option<(Relation /*alias*/, SqlIdentifier /*present_*/)>,
 }
 
-/// Structural key hash: normalized RHS body + the correlation ON predicate we apply for that RHS.
-/// We hash *post* normalization that `as_joinable_derived_table` performs (DISTINCT, ORDER removal,
-/// correlation hoist, TOP-K normalized earlier, etc.). This avoids cache misses caused by superficial
-/// differences (alias names, whitespace, etc.).
-#[derive(Hash, Eq, PartialEq, Clone)]
+/// Structural key hash over the three things a probe's answer depends on: the RHS body, the
+/// correlation ON predicate applied to it, and the expression the probe is read against.
+///
+/// The first two are hashed *post* the normalization `as_joinable_derived_table` performs
+/// (DISTINCT, ORDER removal, correlation hoist, TOP-K normalized earlier), so two spellings of
+/// one RHS share a probe. The third is taken before it, because that normalization replaces the
+/// projection with `present_` and the compared expression would otherwise be erased.
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
 struct ProbeKeyHash {
-    rhs_hash: u64, // normalized RHS body
-    on_hash: u64,  // normalized ON predicate we’ll apply
+    rhs_hash: u64,      // normalized RHS body
+    on_hash: u64,       // normalized ON predicate applied to it
+    compared_hash: u64, // the expression a null-present probe tests; 0 for an existence key
 }
 
 impl ProbeKeyHash {
-    fn new(rhs_stmt: &SelectStatement, on_expr: &Option<Expr>) -> Self {
-        fn hash_select(stmt: &SelectStatement) -> u64 {
-            let mut h = DefaultHasher::new();
-            stmt.hash(&mut h);
-            h.finish()
-        }
-
-        fn hash_expr_opt(on: &Option<Expr>) -> u64 {
-            let mut h = DefaultHasher::new();
-            if let Some(e) = on {
-                e.hash(&mut h);
-            }
-            h.finish()
-        }
-
+    /// The key an existence probe is stored under. Its question is whether the group is
+    /// non-empty, which does not depend on which expression the RHS projects, so one probe
+    /// serves every compared expression over the same body and correlation.
+    fn for_existence(rhs_stmt: &SelectStatement, on_expr: &Option<Expr>) -> Self {
         Self {
-            rhs_hash: hash_select(rhs_stmt),
+            rhs_hash: hash_one(rhs_stmt),
             on_hash: hash_expr_opt(on_expr),
+            compared_hash: 0,
+        }
+    }
+
+    /// The key a null-present probe is stored under. Its predicate is `<compared> IS NULL`,
+    /// so its answer belongs to that expression and cannot be shared across them.
+    fn for_null_present(
+        rhs_stmt: &SelectStatement,
+        on_expr: &Option<Expr>,
+        compared: &Expr,
+    ) -> Self {
+        Self {
+            compared_hash: hash_one(compared),
+            ..Self::for_existence(rhs_stmt, on_expr)
         }
     }
 }
 
-#[derive(Hash, Eq, PartialEq, Clone)]
-enum ProbeKey {
-    NullableRhs(ProbeKeyHash),
-    NullFreeRhs(ProbeKeyHash),
+fn hash_one<T: Hash>(value: &T) -> u64 {
+    let mut h = DefaultHasher::new();
+    value.hash(&mut h);
+    h.finish()
 }
 
+fn hash_expr_opt(on: &Option<Expr>) -> u64 {
+    let mut h = DefaultHasher::new();
+    if let Some(e) = on {
+        e.hash(&mut h);
+    }
+    h.finish()
+}
+
+#[derive(Debug)]
 pub(crate) struct ProbeRegistry {
-    map: HashMap<ProbeKey, ProbeInfo>,
+    /// Null-present probes, keyed by the expression each one tests.  A null-free RHS neither
+    /// builds nor reads one: both guards branch on `is_null_free` before touching `has_null`,
+    /// so an entry found here is only meaningful when the RHS is nullable.
+    null_present: HashMap<ProbeKeyHash, (Relation, SqlIdentifier)>,
+    /// Existence probes, keyed without it, so they are shared across compared expressions.
+    existence: HashMap<ProbeKeyHash, (Relation, SqlIdentifier)>,
 }
 
 impl ProbeRegistry {
     pub fn new() -> Self {
         Self {
-            map: HashMap::new(),
+            null_present: HashMap::new(),
+            existence: HashMap::new(),
         }
     }
 
@@ -162,6 +186,11 @@ impl ProbeRegistry {
         // Collect locals once for stable alias generation in probes (EP/NP).
         let locals = collect_local_from_items(base_stmt)?;
 
+        // Building the NP probe shapes `rhs_stmt_original` in place and replaces its projection
+        // with `present_`, so take the compared expression first: it is what that probe tests
+        // for NULL, and it belongs in the key.
+        let compared_expr = get_first_field_expr(&rhs_stmt_original)?;
+
         // Normalize RHS & ON:
         // TODO: we really need actual semantic normalization here: aliases, comparison sides, etc
         // PROBE-KEY SHAPE: we normalize through `as_joinable_derived_table_with_opts(.., Exists, ..)`
@@ -172,16 +201,19 @@ impl ProbeRegistry {
             get_unique_alias(&locals, "PRB_K")
         );
         let (rhs_norm_stmt_for_key, _) = expect_sub_query_with_alias(&rhs_dt_for_key);
-        let key_hash = ProbeKeyHash::new(rhs_norm_stmt_for_key, &on_for_key);
 
-        let key = if rhs_ctx.is_null_free() {
-            ProbeKey::NullFreeRhs(key_hash)
-        } else {
-            ProbeKey::NullableRhs(key_hash)
+        // The two probe kinds are keyed apart: the null-present probe by the expression it
+        // tests, the existence probe without it, so one existence probe serves predicates
+        // whose compared expressions differ.
+        let np_key =
+            ProbeKeyHash::for_null_present(rhs_norm_stmt_for_key, &on_for_key, compared_expr);
+        let ep_key = ProbeKeyHash::for_existence(rhs_norm_stmt_for_key, &on_for_key);
+
+        // Look up what is already joined; we may "upgrade" it by adding missing probes.
+        let mut entry = ProbeInfo {
+            has_null: self.null_present.get(&np_key).cloned(),
+            non_empty: self.existence.get(&ep_key).cloned(),
         };
-
-        // Look up or initialize an empty entry; we may "upgrade" it by adding missing probes.
-        let mut entry = self.map.get(&key).cloned().unwrap_or_default();
         // We may upgrade a partially-populated entry (e.g., add EP later if LHS can be NULL).
         // This keeps probe construction lazy and avoids duplicate joins.
 
@@ -259,7 +291,12 @@ impl ProbeRegistry {
             entry.has_null = Some((np_alias.into(), PRESENT_COL_NAME.into()));
         }
 
-        self.map.insert(key, entry.clone());
+        if let Some(np) = &entry.has_null {
+            self.null_present.insert(np_key, np.clone());
+        }
+        if let Some(ep) = &entry.non_empty {
+            self.existence.insert(ep_key, ep.clone());
+        }
 
         Ok(entry)
     }

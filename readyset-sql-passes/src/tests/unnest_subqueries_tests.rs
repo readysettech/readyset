@@ -154,6 +154,25 @@ fn contains_np_3vl(s: &str) -> bool {
     s.contains("NP_3VL")
 }
 
+/// How many distinct null-present probes the rewritten statement joins.  Each probe spells
+/// its alias twice, once on the inner derived table and once on the join, so count the names.
+fn np_3vl_probes(s: &str) -> usize {
+    distinct_probes(s, "AS \"NP_3VL")
+}
+
+/// How many distinct existence probes the rewritten statement joins.
+fn ep_3vl_probes(s: &str) -> usize {
+    distinct_probes(s, "AS \"EP_3VL")
+}
+
+fn distinct_probes(s: &str, prefix: &str) -> usize {
+    s.split(prefix)
+        .skip(1)
+        .filter_map(|rest| rest.split('"').next())
+        .collect::<HashSet<_>>()
+        .len()
+}
+
 fn contains_ep_3vl(s: &str) -> bool {
     s.contains("EP_3VL")
 }
@@ -7609,5 +7628,109 @@ fn nsp_promoted_both_side_loj_on_subquery_fully_decorrelates() {
     assert!(
         !out.contains("LEFT"),
         "residual LEFT join -- not promoted:\n{out}"
+    );
+}
+
+/// A null-present probe answers `<the compared column> IS NULL`, so its answer belongs to
+/// that column.  Two `NOT IN` predicates reading one table through different columns each
+/// need their own; sharing one makes the second behave as though its column held no NULL.
+#[test]
+fn not_in_null_probe_belongs_to_its_column() {
+    // `p`.`pn` and `p`.`color` are both nullable, and the two RHS differ only in which one
+    // they project -- the shape whose probes were shared.
+    let two_columns = rewrite(
+        "two_columns",
+        r#"SELECT "spj"."sn" FROM "spj"
+           WHERE "spj"."pn" NOT IN (SELECT "p"."pn" FROM "p")
+             AND "spj"."jn" NOT IN (SELECT "p"."color" FROM "p")"#,
+        get_schema_guard(),
+    );
+    assert_eq!(
+        np_3vl_probes(&two_columns),
+        2,
+        "each NOT IN tests its own column for NULL:\n{two_columns}"
+    );
+    // Whether the group is non-empty does not depend on the projection, so one existence
+    // probe serves both predicates.
+    assert_eq!(
+        ep_3vl_probes(&two_columns),
+        1,
+        "existence is shared across compared columns:\n{two_columns}"
+    );
+
+    // Reading one column twice still shares a probe: the key splits on the compared
+    // column and on nothing else, so this fails if the split is too eager.
+    let one_column = rewrite(
+        "one_column",
+        r#"SELECT "spj"."sn" FROM "spj"
+           WHERE "spj"."pn" NOT IN (SELECT "p"."pn" FROM "p")
+             AND "spj"."jn" NOT IN (SELECT "p"."pn" FROM "p")"#,
+        get_schema_guard(),
+    );
+    assert_eq!(
+        np_3vl_probes(&one_column),
+        1,
+        "one column read twice shares one probe:\n{one_column}"
+    );
+
+    // Null-freeness belongs to the compared column too, so a nullable column and a NOT NULL
+    // one still share the existence probe.  `p`.`weight` is NOT NULL in this schema.
+    let mixed_nullability = rewrite(
+        "mixed_nullability",
+        r#"SELECT "spj"."sn" FROM "spj"
+           WHERE "spj"."pn" NOT IN (SELECT "p"."pn" FROM "p")
+             AND "spj"."jn" NOT IN (SELECT "p"."weight" FROM "p")"#,
+        get_schema_guard(),
+    );
+    assert_eq!(
+        ep_3vl_probes(&mixed_nullability),
+        1,
+        "existence is shared across compared columns of differing nullability:\n{mixed_nullability}"
+    );
+
+    // One column read from two different RHS bodies needs a probe each: they are different
+    // groups and each answers for its own.  This fails if the key drops the RHS body.
+    let different_bodies = rewrite(
+        "different_bodies",
+        r#"SELECT "spj"."sn" FROM "spj"
+           WHERE "spj"."pn" NOT IN (SELECT "p"."pn" FROM "p")
+             AND "spj"."jn" NOT IN (SELECT "p"."pn" FROM "p" WHERE "p"."weight" > 10)"#,
+        get_schema_guard(),
+    );
+    assert_eq!(
+        np_3vl_probes(&different_bodies),
+        2,
+        "a different RHS body is a different probe:\n{different_bodies}"
+    );
+
+    // Likewise for the correlation: one RHS body reached through two different ON predicates
+    // is two groups.  This fails if the key drops the ON predicate.
+    let different_correlations = rewrite(
+        "different_correlations",
+        r#"SELECT "spj"."sn" FROM "spj"
+           WHERE "spj"."pn" NOT IN (SELECT "p"."pn" FROM "p" WHERE "p"."jn" = "spj"."jn")
+             AND "spj"."qty" NOT IN (SELECT "p"."pn" FROM "p" WHERE "p"."jn" = "spj"."sn")"#,
+        get_schema_guard(),
+    );
+    assert_eq!(
+        np_3vl_probes(&different_correlations),
+        2,
+        "a different correlation is a different probe:\n{different_correlations}"
+    );
+
+    // The alias is not what the probe tests, so spelling the same column two ways still
+    // shares.  This fails if the key is taken over the projected field instead of its
+    // expression.
+    let one_column_aliased = rewrite(
+        "one_column_aliased",
+        r#"SELECT "spj"."sn" FROM "spj"
+           WHERE "spj"."pn" NOT IN (SELECT "p"."pn" FROM "p")
+             AND "spj"."jn" NOT IN (SELECT "p"."pn" AS "k" FROM "p")"#,
+        get_schema_guard(),
+    );
+    assert_eq!(
+        np_3vl_probes(&one_column_aliased),
+        1,
+        "an alias does not make a different probe:\n{one_column_aliased}"
     );
 }

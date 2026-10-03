@@ -1,0 +1,49 @@
+# A null-present probe answers `<the compared column> IS NULL`, so two NOT INs reading one
+# table through different columns each need their own.  Sharing one makes the second read a
+# probe built for the first column and behave as though its own column held no NULL.
+#
+# The two RHS bodies hash alike because the EXISTS shaping the key uses clears the projection,
+# so `SELECT t7.a` and `SELECT t7.b` are one body by the time they are keyed.
+#
+# `t7`.`b` holds a NULL and `t7`.`a` does not, so the two predicates disagree about whether
+# their column is null-bearing -- which is only visible when each has its own probe.
+
+statement ok
+create table s7 (sn int, pn int);
+
+statement ok
+insert into s7 (sn, pn) values (1, 100), (2, 200), (3, 300);
+
+statement ok
+create table t7 (id int primary key, a int, b int);
+
+statement ok
+insert into t7 (id, a, b) values (3, 5, 5), (4, 8, NULL);
+
+# `s7`.`pn` NOT IN {5, NULL} is UNKNOWN for every row, so nothing qualifies.
+query I nosort
+SELECT s7.sn FROM s7
+ WHERE s7.sn NOT IN (SELECT t7.a FROM t7)
+   AND s7.pn NOT IN (SELECT t7.b FROM t7)
+ ORDER BY s7.sn;
+----
+
+# The NULL-bearing column read first.  This pair cannot observe the reverse sharing direction:
+# `pn NOT IN {5, NULL}` is UNKNOWN for every row, so the answer is empty whichever probe the
+# second predicate reads.  Kept as a control: the registry starts empty per statement, so the
+# first predicate builds its own probe and has none to inherit.
+query I nosort
+SELECT s7.sn FROM s7
+ WHERE s7.pn NOT IN (SELECT t7.b FROM t7)
+   AND s7.sn NOT IN (SELECT t7.a FROM t7)
+ ORDER BY s7.sn;
+----
+
+# Only the NULL-free column: every row qualifies.  Without this a regression that answers
+# nothing at all would satisfy the two queries above.
+query I nosort
+SELECT s7.sn FROM s7 WHERE s7.sn NOT IN (SELECT t7.a FROM t7) ORDER BY s7.sn;
+----
+1
+2
+3
