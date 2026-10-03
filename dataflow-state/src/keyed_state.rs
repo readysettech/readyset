@@ -633,7 +633,7 @@ impl KeyedState {
         macro_rules! do_evict_range {
             ($m: expr, $range: expr, $hint: ty) => {
                 $m.remove_range(<$hint as MakeKey<DfValue>>::from_range($range))
-                    .flat_map(|(_, rows)| rows.into_iter().map(|(r, _)| r))
+                    .flat_map(|(_, rows)| rows)
                     .collect()
             };
         }
@@ -650,7 +650,7 @@ impl KeyedState {
                     range.start_bound().map(Vec1::as_slice),
                     range.end_bound().map(Vec1::as_slice),
                 ))
-                .flat_map(|(_, rows)| rows.into_iter().map(|(r, _)| r))
+                .flat_map(|(_, rows)| rows)
                 .collect(),
             _ => {
                 #[allow(clippy::panic)] // documented invariant

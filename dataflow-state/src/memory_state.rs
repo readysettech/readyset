@@ -1170,6 +1170,38 @@ mod tests {
             );
         }
 
+        /// An evicted key whose rows repeat leaves no copy of them in the weak index, so filling
+        /// the key again holds each copy once. The key is evicted as a point and as a range.
+        #[test]
+        fn evict_keys_takes_every_copy_out_of_the_weak_index() {
+            let mut state = MemoryState::default();
+            state.add_index(Index::btree_map(vec![0]), Some(vec![Tag::new(0)]));
+            state.add_weak_index(Index::hash_map(vec![1]));
+            let key = KeyComparison::Equal(vec1![1.into()]);
+            let range = KeyComparison::Range((
+                Bound::Included(vec1![1.into()]),
+                Bound::Included(vec1![1.into()]),
+            ));
+            let row: Vec<DfValue> = vec![1.into(), "A".into()];
+            let weak_rows = |state: &MemoryState| -> Vec<Vec<DfValue>> {
+                state
+                    .lookup_weak(&[1], &PointKey::Single(DfValue::from("A")))
+                    .map(|rows| rows.into_iter().map(|row| row.to_vec()).collect())
+                    .unwrap_or_default()
+            };
+            for evicted in [&key, &range, &key] {
+                state.mark_filled(key.clone(), Tag::new(0));
+                let mut records: Records = vec![(row.clone(), true), (row.clone(), true)].into();
+                state
+                    .process_records(&mut records, Some(Tag::new(0)), None)
+                    .unwrap();
+                assert_eq!(weak_rows(&state), vec![row.clone(), row.clone()]);
+
+                state.evict_keys(Tag::new(0), std::slice::from_ref(evicted));
+                assert_eq!(weak_rows(&state), Vec::<Vec<DfValue>>::new(), "{evicted:?}");
+            }
+        }
+
         /// Regression test for REA-3336: when multiple strict indexes have overlapping rows and
         /// distinct rows that share the same weak index key, the weak index must contain all
         /// unique rows without duplicates.
@@ -1372,6 +1404,7 @@ mod tests {
             InsertRow(TestRow),
             DeleteRow(TestRow),
             ReplayKey(Tag, Vec<u8>),
+            EvictKey(Tag, Vec<u8>),
             CreateStrictIndex(Vec<usize>, Tag),
             CreateWeakIndex(Vec<usize>),
         }
@@ -1407,6 +1440,14 @@ mod tests {
                               tag in Just(tag))
                              -> Operation {
                 Operation::ReplayKey(tag, key)
+            }
+        }
+
+        prop_compose! {
+            fn gen_evict_key(filled: Vec<(Tag, Vec<u8>)>)
+                            ((tag, key) in sample::select(filled))
+                            -> Operation {
+                Operation::EvictKey(tag, key)
             }
         }
 
@@ -1469,6 +1510,21 @@ mod tests {
                     ops.push(replay_key_strat);
                 }
 
+                let filled: Vec<(Tag, Vec<u8>)> = self
+                    .strict_indexes
+                    .iter()
+                    .flat_map(|(tag, index)| {
+                        self.filled_holes
+                            .get(index)
+                            .into_iter()
+                            .flatten()
+                            .map(move |key| (*tag, key.clone()))
+                    })
+                    .collect();
+                if !filled.is_empty() {
+                    ops.push(gen_evict_key(filled).boxed());
+                }
+
                 ops
             }
 
@@ -1489,6 +1545,13 @@ mod tests {
                         })
                     }
                     Operation::DeleteRow(row) => self.rows.contains(row),
+                    Operation::EvictKey(tag, key) => {
+                        self.strict_indexes.get(tag).is_some_and(|index| {
+                            self.filled_holes
+                                .get(index)
+                                .is_some_and(|filled| filled.contains(key))
+                        })
+                    }
                 }
             }
 
@@ -1507,6 +1570,12 @@ mod tests {
                             .entry(index)
                             .or_default()
                             .push(key.clone());
+                    }
+                    Operation::EvictKey(tag, key) => {
+                        let index = &self.strict_indexes[tag];
+                        if let Some(filled) = self.filled_holes.get_mut(index) {
+                            filled.retain(|k| k != key);
+                        }
                     }
                     Operation::CreateStrictIndex(columns, tag) => {
                         self.strict_indexes.insert(*tag, columns.clone());
@@ -1555,6 +1624,15 @@ mod tests {
 
                         ctxt.process_records(&mut records, Some(*tag), None)
                             .unwrap();
+                    }
+                    Operation::EvictKey(tag, key) => {
+                        let key_comparison = KeyComparison::Equal(
+                            Vec1::try_from_vec(
+                                key.iter().map(|v| DfValue::Int(*v as i64)).collect(),
+                            )
+                            .unwrap(),
+                        );
+                        ctxt.evict_keys(*tag, &[key_comparison]);
                     }
                     Operation::CreateStrictIndex(columns, tag) => {
                         let index = Index::new(IndexType::HashMap, columns.clone());

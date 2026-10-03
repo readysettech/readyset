@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc cc8be82a412d492046e67ac50638119b5d647efa9117aa2a6b5a347199555006 # shrinks to [CreateWeakIndex([1, 2]), CreateStrictIndex([1, 2], Tag(1)), CreateStrictIndex([1, 2], Tag(2)), InsertRow([0, 0, 0]), CreateStrictIndex([0], Tag(9)), ReplayKey(Tag(9), [0]), InsertRow([0, 0, 0]), ReplayKey(Tag(2), [0, 0]), EvictKey(Tag(9), [0]), EvictKey(Tag(1), [0, 0])]

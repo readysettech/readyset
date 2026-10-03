@@ -395,11 +395,7 @@ impl SingleState {
                     if result.is_some() {
                         key_was_present = true;
                     }
-                    Either::Left(
-                        result
-                            .into_iter()
-                            .flat_map(|r| r.into_iter().map(|(r, _)| r)),
-                    )
+                    Either::Left(result.into_iter().flatten())
                 }
                 KeyComparison::Range(range) => {
                     // For ranges, check if any part of the range was marked as filled before evicting.
@@ -431,7 +427,7 @@ impl SingleState {
                     if was_filled {
                         key_was_present = true;
                     }
-                    Either::Right(range_rows.into_iter().map(|(r, _)| r))
+                    Either::Right(range_rows.into_iter())
                 }
             })
             .collect::<Rows>();
