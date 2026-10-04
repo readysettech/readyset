@@ -398,9 +398,16 @@ pub(crate) fn add_3vl_for_not_in_where_subquery(
         construct_null_check_expr(has_null_present, true)
     };
 
-    // If LHS is provably non-null, the guard is just `rhs_not_null`
+    // If LHS is provably non-null, the guard is just `rhs_not_null`. This guard asks for no
+    // existence probe of its own, but an earlier guard over the same RHS may already have put
+    // one in the statement, and the caller has to know what reads this entry's table.
     if is_lhs_null_free {
-        return Ok((rhs_not_null, EmittedProbes { existence: false }));
+        return Ok((
+            rhs_not_null,
+            EmittedProbes {
+                existence: info.non_empty.is_some(),
+            },
+        ));
     }
 
     // Otherwise we also need EP for the (… OR is_empty) branch — upgrade lazily.
@@ -439,8 +446,9 @@ pub(crate) fn add_3vl_for_not_in_where_subquery(
 /// same table the subquery does.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct EmittedProbes {
-    /// The existence probe reads every row of the group, so it reads the rows the entry feeding
-    /// the anti-join reads.  The null-present probe is filtered to the NULLs and does not.
+    /// Whether an existence probe for this RHS is in the statement.  Both probe kinds scan the
+    /// entry\'s table -- the null-present filter sits above an unfiltered scan -- so this is
+    /// narrower than "something reads it"; REA-7085 covers widening it.
     pub(crate) existence: bool,
 }
 

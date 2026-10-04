@@ -7734,3 +7734,27 @@ fn not_in_null_probe_belongs_to_its_column() {
         "an alias does not make a different probe:\n{one_column_aliased}"
     );
 }
+
+/// A guard whose left side is provably non-null asks for no existence probe of its own, but
+/// an earlier guard over the same RHS may already have put one in the statement.  The entry
+/// feeding the later anti-join then reads a table a probe reads too, so it keeps set
+/// semantics.  This fails if the guard reports what it asked for instead of what is there.
+///
+/// `spj`.`pn` is nullable and `spj`.`qty` is NOT NULL in this schema, so the first predicate
+/// installs the existence probe and the second is the one that asks for none.
+#[test]
+fn not_in_reports_an_existence_probe_an_earlier_guard_left() {
+    let out = rewrite(
+        "existence_probe_from_earlier_guard",
+        r#"SELECT "spj"."sn" FROM "spj"
+           WHERE "spj"."pn" NOT IN (SELECT "p"."pn" FROM "p")
+             AND "spj"."qty" NOT IN (SELECT "p"."pn" FROM "p")"#,
+        get_schema_guard(),
+    );
+    assert!(
+        out.contains(
+            r#"(SELECT DISTINCT "p"."pn" AS "pn" FROM "p") AS "GNL1" ON ("spj"."qty" = "GNL1"."pn")"#
+        ),
+        "the entry the later guard feeds keeps set semantics:\n{out}"
+    );
+}
