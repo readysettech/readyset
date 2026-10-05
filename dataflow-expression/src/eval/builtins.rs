@@ -143,6 +143,52 @@ fn timediff_times(time1: &MySqlTime, time2: &MySqlTime) -> MySqlTime {
     time1.sub(*time2)
 }
 
+/// The kinds of value MySQL's TIMEDIFF subtracts. Two values of different kinds give NULL.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TimediffKind {
+    Date,
+    DateTime,
+    Time,
+}
+
+/// Reads a TIMEDIFF argument as MySQL does: its kind, and its value as a timestamp or a time, or
+/// `None` for NULL. A string takes its kind from its content. Beside a DATE, DATETIME or TIMESTAMP
+/// it must be a date or a datetime. Otherwise it is a datetime, or a TIME up to the first
+/// character a TIME cannot hold, so a date-only string reads as a TIME from its leading digits.
+fn timediff_arg(
+    value: &DfValue,
+    ty: &DfType,
+    beside_a_date: bool,
+) -> Option<(TimediffKind, DfValue)> {
+    let text = match <&str>::try_from(value) {
+        Ok(text) if !ty.is_any_temporal() => text.trim(),
+        _ => {
+            let time = get_time_or_default(value, ty);
+            let kind = match ty {
+                DfType::Date => TimediffKind::Date,
+                _ if time.is_datetime() => TimediffKind::DateTime,
+                _ => TimediffKind::Time,
+            };
+            return (!time.is_none()).then_some((kind, time));
+        }
+    };
+    let is_date = NaiveDate::from_str(text).is_ok();
+    if is_date && beside_a_date {
+        Some((TimediffKind::Date, get_time_or_default(value, ty)))
+    } else if !is_date && TimestampTz::from_str(text).is_ok() {
+        Some((TimediffKind::DateTime, get_time_or_default(value, ty)))
+    } else if beside_a_date {
+        None
+    } else {
+        let sign = usize::from(text.starts_with('-'));
+        let end = text[sign..]
+            .find(|c: char| !(c.is_ascii_digit() || c == ':' || c == '.'))
+            .map_or(text.len(), |end| sign + end);
+        let time = MySqlTime::from_str(&text[..end]).ok()?;
+        Some((TimediffKind::Time, DfValue::Time(time)))
+    }
+}
+
 fn addtime_datetime(time1: &NaiveDateTime, time2: &MySqlTime) -> NaiveDateTime {
     time2.add(*time1)
 }
@@ -846,21 +892,19 @@ impl BuiltinFunction {
                 &(NaiveDate::try_from(non_null!(&arg.eval(record)?))?),
             ) as u64)),
             BuiltinFunction::Timediff(arg1, arg2) => {
-                let param1 = arg1.eval(record)?;
-                let param2 = arg2.eval(record)?;
-                let null_result = Ok(DfValue::None);
-                let time_param1 = get_time_or_default(&param1, arg1.ty());
-                let time_param2 = get_time_or_default(&param2, arg2.ty());
-                if time_param1.is_none()
-                    || time_param1
-                        .sql_type()
-                        .zip(time_param2.sql_type())
-                        .filter(|(st1, st2)| st1.eq(st2))
-                        .is_none()
-                {
-                    return null_result;
+                let beside_a_date = [arg1.ty(), arg2.ty()]
+                    .into_iter()
+                    .any(|ty| *ty == DfType::Date || ty.is_date_and_time());
+                let (Some((kind1, time_param1)), Some((kind2, time_param2))) = (
+                    timediff_arg(&arg1.eval(record)?, arg1.ty(), beside_a_date),
+                    timediff_arg(&arg2.eval(record)?, arg2.ty(), beside_a_date),
+                ) else {
+                    return Ok(DfValue::None);
+                };
+                if kind1 != kind2 {
+                    return Ok(DfValue::None);
                 }
-                let time = if time_param1.is_datetime() {
+                let time = if kind1 != TimediffKind::Time {
                     timediff_datetimes(
                         &(NaiveDateTime::try_from(&time_param1)?),
                         &(NaiveDateTime::try_from(&time_param2)?),
@@ -1836,6 +1880,73 @@ mod tests {
     }
 
     #[test]
+    fn eval_call_timediff_of_a_date_and_a_datetime_is_null() {
+        let date = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap();
+        let dt = date.and_hms_opt(12, 30, 45).unwrap();
+        for (expr, args) in [
+            (
+                "timediff(cast(c0 as datetime), cast(c1 as date))",
+                [dt.into(), date.into()],
+            ),
+            (
+                "timediff(cast(c0 as date), cast(c1 as datetime))",
+                [date.into(), dt.into()],
+            ),
+        ] {
+            let result = parse_and_lower(expr, MySQL).eval::<DfValue>(&args).unwrap();
+            assert_eq!(result, DfValue::None);
+        }
+        assert_eq!(
+            parse_and_lower("timediff(cast(c0 as date), cast(c1 as date))", MySQL)
+                .eval::<DfValue>(&[date.into(), date.into()])
+                .unwrap(),
+            DfValue::Time(MySqlTime::from_hmsus(true, 0, 0, 0, 0))
+        );
+    }
+
+    /// Expected values are MySQL 8.0's.
+    #[test]
+    fn eval_call_timediff_reads_a_string_by_its_content() {
+        let date: DfValue = NaiveDate::from_ymd_opt(2020, 1, 1).unwrap().into();
+        let dt: DfValue = NaiveDate::from_ymd_opt(2020, 2, 1)
+            .unwrap()
+            .and_hms_opt(12, 30, 45)
+            .unwrap()
+            .into();
+        let tm = DfValue::Time(MySqlTime::from_hmsus(true, 12, 30, 45, 0));
+        let eval = |expr, arg: &DfValue| {
+            parse_and_lower(expr, MySQL)
+                .eval::<DfValue>(std::slice::from_ref(arg))
+                .unwrap()
+        };
+        for (expr, arg) in [
+            ("timediff(cast(c0 as date), '2020-02-01 12:30:45')", &date),
+            ("timediff('2020-02-01 12:30:45', cast(c0 as date))", &date),
+            ("timediff(cast(c0 as datetime), '2020-01-01')", &dt),
+            ("timediff(cast(c0 as date), '12:30:45')", &date),
+            ("timediff(cast(c0 as time), 'abc')", &tm),
+            ("timediff(cast(c0 as time), '')", &tm),
+            ("timediff('2020-02-01 12:30:45', '2020-01-01')", &tm),
+            ("timediff('1999-01-01', '12:30:45')", &tm),
+            ("timediff('abc', 'abc')", &tm),
+        ] {
+            assert_eq!(eval(expr, arg), DfValue::None, "{expr}");
+        }
+        for (expr, arg, expected) in [
+            (
+                "timediff(cast(c0 as date), '2020-01-02')",
+                &date,
+                "-24:00:00",
+            ),
+            ("timediff(cast(c0 as time), '2020-01-01')", &tm, "12:10:25"),
+            ("timediff('2020-01-02', '2020-01-01')", &tm, "00:00:00"),
+            ("timediff('2020-01-01', '-12:30:45')", &tm, "12:51:05"),
+        ] {
+            assert_eq!(eval(expr, arg).to_string(), expected, "{expr}");
+        }
+    }
+
+    #[test]
     fn eval_call_timediff() {
         let expr = parse_and_lower("timediff(c0, c1)", MySQL);
         let param1 = NaiveDateTime::new(
@@ -1898,6 +2009,13 @@ mod tests {
         );
         let param1 = "not a date nor time";
         let param2 = "01:00:00.4";
+        for args in [[param1, param2], [param2, param1]] {
+            assert_eq!(
+                expr.eval::<DfValue>(&args.map(DfValue::from)).unwrap(),
+                DfValue::None
+            );
+        }
+        let param1 = "00:00:00";
         assert_eq!(
             expr.eval::<DfValue>(&[param1.into(), param2.into()])
                 .unwrap(),

@@ -1,0 +1,103 @@
+# MySQL's TIMEDIFF reads a string argument by its content. Beside a DATE, DATETIME or TIMESTAMP a
+# string is a date or a datetime; otherwise it is a datetime or a TIME, and a date-only string reads
+# as a TIME from its leading digits ('2020-01-01' is 00:20:20). Values of two kinds give NULL.
+
+statement ok
+CREATE TABLE m (id INT PRIMARY KEY, cd DATE, cdt DATETIME, cts TIMESTAMP NULL, ctm TIME,
+  s_date VARCHAR(40), s_dt VARCHAR(40), s_dtf VARCHAR(40), s_neg VARCHAR(40), s_garbage VARCHAR(40),
+  s_empty VARCHAR(40));
+
+statement ok
+INSERT INTO m VALUES (1, '2020-01-01', '2020-02-01 12:30:45', '2020-02-01 12:30:45', '12:30:45',
+  '2020-01-01', '2020-02-01 12:30:45', '2020-02-01 12:30:45.123456', '-12:30:45', 'abc', '');
+
+query nosort
+SELECT TIMEDIFF(cd, '2020-01-02') FROM m
+----
+-24:00:00
+
+query nosort
+SELECT TIMEDIFF(cd, '2020-02-01 12:30:45') FROM m
+----
+NULL
+
+query nosort
+SELECT TIMEDIFF(s_dt, cd) FROM m
+----
+NULL
+
+query nosort
+SELECT TIMEDIFF(cdt, s_dt) FROM m
+----
+00:00:00.000000
+
+query nosort
+SELECT TIMEDIFF(cdt, s_date) FROM m
+----
+NULL
+
+query nosort
+SELECT TIMEDIFF('2020-01-01', cts) FROM m
+----
+NULL
+
+query nosort
+SELECT TIMEDIFF(ctm, '-12:30:45') FROM m
+----
+25:01:30
+
+query nosort
+SELECT TIMEDIFF(ctm, s_date) FROM m
+----
+12:10:25.000000
+
+query nosort
+SELECT TIMEDIFF('2020-01-01', ctm) FROM m
+----
+-12:10:25
+
+query nosort
+SELECT TIMEDIFF(ctm, 'abc') FROM m
+----
+NULL
+
+query nosort
+SELECT TIMEDIFF(s_empty, ctm) FROM m
+----
+NULL
+
+query nosort
+SELECT TIMEDIFF(s_date, s_dt) FROM m
+----
+NULL
+
+query nosort
+SELECT TIMEDIFF(s_dt, s_dtf) FROM m
+----
+-00:00:00.123456
+
+query nosort
+SELECT TIMEDIFF(s_date, s_neg) FROM m
+----
+12:51:05.000000
+
+query nosort
+SELECT TIMEDIFF('2020-01-01', '2020-01-02') FROM m
+----
+00:00:00
+
+query nosort
+SELECT TIMEDIFF('2020-02-01 12:30:45', '2020-01-01') FROM m
+----
+NULL
+
+query nosort
+SELECT TIMEDIFF('12:30:45', '') FROM m
+----
+NULL
+
+query nosort
+SELECT TIMEDIFF(s_garbage, s_garbage) FROM m
+----
+NULL
+

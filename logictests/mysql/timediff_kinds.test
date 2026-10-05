@@ -1,0 +1,33 @@
+# MySQL's TIMEDIFF subtracts two values of one kind: two DATEs, two DATETIMEs or TIMESTAMPs, or two
+# TIMEs. A DATE beside a DATETIME or TIMESTAMP, or a TIME beside either, gives NULL.
+
+statement ok
+CREATE TABLE t (id INT PRIMARY KEY, dt DATETIME, d DATE, ts TIMESTAMP NULL, tm TIME);
+
+statement ok
+INSERT INTO t VALUES (1, '2020-02-01 12:30:45', '2020-01-01', '2020-02-01 12:30:45', '12:30:45');
+
+query  nosort
+SELECT TIMEDIFF(dt, d) FROM t
+----
+NULL
+
+query  nosort
+SELECT TIMEDIFF(d, dt) FROM t
+----
+NULL
+
+query  nosort
+SELECT TIMEDIFF(ts, d) FROM t
+----
+NULL
+
+query  nosort
+SELECT TIMEDIFF(d, d) FROM t
+----
+00:00:00
+
+query  nosort
+SELECT TIMEDIFF(d, tm) FROM t
+----
+NULL
