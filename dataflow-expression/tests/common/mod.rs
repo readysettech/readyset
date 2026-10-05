@@ -35,12 +35,18 @@ pub fn try_parse_lower(
     Expr::lower(ast, expr_dialect, &TestLowerContext)
 }
 
+pub fn parse_lower(
+    expr: &str,
+    parser_dialect: readyset_sql::Dialect,
+    expr_dialect: dataflow_expression::Dialect,
+) -> Expr {
+    try_parse_lower(expr, parser_dialect, expr_dialect).unwrap()
+}
+
 pub fn parse_lower_eval(
     expr: &str,
     parser_dialect: readyset_sql::Dialect,
     expr_dialect: dataflow_expression::Dialect,
 ) -> ReadySetResult<DfValue> {
-    let ast = parse_expr(parser_dialect, expr).unwrap();
-    let lowered = Expr::lower(ast, expr_dialect, &TestLowerContext).unwrap();
-    lowered.eval::<DfValue>(&[])
+    parse_lower(expr, parser_dialect, expr_dialect).eval::<DfValue>(&[])
 }

@@ -8,7 +8,7 @@ use readyset_sql_parsing::parse_sql_type;
 use readyset_util::retry_with_exponential_backoff;
 use test_utils::{tags, upstream};
 
-use crate::common::{parse_lower_eval, try_parse_lower};
+use crate::common::{parse_lower, parse_lower_eval, try_parse_lower};
 
 fn opts() -> Opts {
     OptsBuilder::default()
@@ -43,11 +43,6 @@ async fn connect() -> Conn {
 }
 
 async fn mysql_eval(expr: &str, conn: &mut Conn) -> DfValue {
-    // Normalize the connection charset across server versions. The server default collation
-    // for utf8mb4 applies, matching the case- and accent-insensitive default our MySQL
-    // dialect uses.
-    conn.query_drop("SET NAMES 'utf8mb4'").await.unwrap();
-
     // Because mysql is much more weakly typed than postgres, it returns results for queries using
     // values of different types than the actual results of expressions; eg, `1 = 1` returns
     // `Value::Bytes("1")` instead of `Value::Int(1)`. To work around comparison issues, we first
@@ -55,6 +50,25 @@ async fn mysql_eval(expr: &str, conn: &mut Conn) -> DfValue {
     // way is to create a temporary table with that expression as its only column, then look at the
     // type of that column) and then use that to coerce the result value from actually evaluating
     // the expression
+    let target_type = mysql_type(expr, conn).await;
+    let res: DfValue = conn
+        .query_first::<mysql_async::Value, _>(format!("SELECT {expr}"))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_into()
+        .unwrap();
+
+    res.coerce_to(&target_type, &DfType::Unknown).unwrap()
+}
+
+/// The type MySQL gives a column holding `expr`.
+async fn mysql_type(expr: &str, conn: &mut Conn) -> DfType {
+    // Normalize the connection charset across server versions. The server default collation
+    // for utf8mb4 applies, matching the case- and accent-insensitive default our MySQL
+    // dialect uses.
+    conn.query_drop("SET NAMES 'utf8mb4'").await.unwrap();
+
     conn.query_drop("DROP TABLE IF EXISTS t").await.unwrap();
     conn.query_drop(format!("CREATE TEMPORARY TABLE t AS SELECT {expr} AS r"))
         .await
@@ -66,23 +80,13 @@ async fn mysql_eval(expr: &str, conn: &mut Conn) -> DfValue {
         .unwrap();
     let raw_type: String = col.get("Type").unwrap();
     let sql_type = parse_sql_type(readyset_sql::Dialect::MySQL, raw_type).unwrap();
-    let target_type = DfType::from_sql_type(
+    DfType::from_sql_type(
         &sql_type,
         dataflow_expression::Dialect::DEFAULT_MYSQL,
         |_| None,
         None,
     )
-    .unwrap();
-
-    let res: DfValue = conn
-        .query_first::<mysql_async::Value, _>(format!("SELECT {expr}"))
-        .await
-        .unwrap()
-        .unwrap()
-        .try_into()
-        .unwrap();
-
-    res.coerce_to(&target_type, &DfType::Unknown).unwrap()
+    .unwrap()
 }
 
 async fn compare_eval(expr: &str, conn: &mut Conn) {
@@ -97,6 +101,43 @@ async fn compare_eval(expr: &str, conn: &mut Conn) {
         our_result, mysql_result,
         "mismatched results for {expr} (left: us, right: mysql)"
     );
+}
+
+async fn compare_type(expr: &str, conn: &mut Conn) {
+    let mysql_type = mysql_type(expr, conn).await;
+    let ours = parse_lower(
+        expr,
+        readyset_sql::Dialect::MySQL,
+        dataflow_expression::Dialect::DEFAULT_MYSQL,
+    );
+    assert_eq!(
+        ours.ty(),
+        &mysql_type,
+        "mismatched types for {expr} (left: us, right: mysql)"
+    );
+}
+
+#[tokio::test]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn example_exprs_type_same_as_mysql() {
+    let mut conn = connect().await;
+    for expr in [
+        "convert_tz(cast('2020-06-07' as date), '+00:00', '+05:30')",
+        "convert_tz(cast('2020-06-07 10:00:00' as datetime), '+00:00', '+05:30')",
+        "convert_tz(cast('2020-06-07 10:00:00.5' as datetime(3)), '+00:00', '+05:30')",
+        "convert_tz('2004-01-01 12:00:00', '+00:00', '+10:00')",
+        "convert_tz('2004-01-01 12:00:00.123', '+00:00', '+10:00')",
+        "convert_tz('2004-01-01', '+00:00', '+10:00')",
+        "convert_tz('2004-01-01 12:00:00.1234567', '+00:00', '+10:00')",
+        "convert_tz('2004-01-01T12:00:00.5', '+00:00', '+10:00')",
+        "convert_tz('20040101120000.25', '+00:00', '+10:00')",
+        "convert_tz('2004.01.01 12:00:00', '+00:00', '+10:00')",
+        "convert_tz('  2004-01-01 12:00:00.12  ', '+00:00', '+10:00')",
+        "convert_tz(null, '+00:00', '+10:00')",
+    ] {
+        compare_type(expr, &mut conn).await;
+    }
 }
 
 #[tokio::test]
@@ -139,6 +180,8 @@ async fn example_exprs_eval_same_as_mysql() {
         "convert_tz('asdfadsf','asdf','MET')",
         "convert_tz('asdfadsf','asdf',null)",
         "convert_tz('2004-01-01 12:00:00','+00:00','+10:00')",
+        "convert_tz('2004-01-01 12:00:00.123','+00:00','+10:00')",
+        "convert_tz('2004-01-01','+00:00','+10:00')",
         "dayofweek('2022-03-24')",
         "dayofweek('2022-03-24 12:00:00')",
         "dayofweek(null)",

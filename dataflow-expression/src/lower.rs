@@ -278,7 +278,6 @@ impl BuiltinFunction {
                 if dialect.engine() != SqlEngine::MySQL {
                     unsupported!("Function {name} does not exist in {}", dialect.engine());
                 }
-                // Type is inferred from input argument
                 let input = next_arg()?;
                 let (src, target) = (next_arg()?, next_arg()?);
                 // MySQL 5.7 and 8.0.19 or later read UTC offsets over different ranges, and the
@@ -299,21 +298,26 @@ impl BuiltinFunction {
                         );
                     }
                 }
-                let ty = input.ty().clone();
+                // MySQL returns a `datetime` whatever the type of the argument. It keeps the
+                // subsecond digits of a temporal argument or of a string literal, and gives any
+                // other string 6.
+                let subsecond_digits = match &input {
+                    Expr::Literal { val, ty } if ty.is_any_text() => {
+                        <&str>::try_from(val).map_or(0, literal_subsecond_digits)
+                    }
+                    _ if input.ty().is_any_text() => 6,
+                    _ => input
+                        .ty()
+                        .subsecond_digits()
+                        .unwrap_or_else(|| dialect.default_subsecond_digits()),
+                };
                 (
                     Self::ConvertTZ([
-                        try_cast(
-                            input,
-                            DfType::Timestamp {
-                                subsecond_digits: ty
-                                    .subsecond_digits()
-                                    .unwrap_or_else(|| dialect.default_subsecond_digits()),
-                            },
-                        ),
+                        try_cast(input, DfType::Timestamp { subsecond_digits }),
                         cast(src, DfType::DEFAULT_TEXT),
                         cast(target, DfType::DEFAULT_TEXT),
                     ]),
-                    ty,
+                    DfType::DateTime { subsecond_digits },
                 )
             }
             "dayofweek" => {
@@ -923,6 +927,19 @@ impl BuiltinFunction {
 
         Ok(result)
     }
+}
+
+/// The subsecond digits MySQL reads in a datetime string literal: the digits after its last `.`,
+/// at most 6, if a time of day comes before that `.`.
+fn literal_subsecond_digits(literal: &str) -> u16 {
+    let Some((whole, fraction)) = literal.trim().rsplit_once('.') else {
+        return 0;
+    };
+    let has_time = whole.contains(':') || whole.bytes().all(|b| b.is_ascii_digit());
+    if !has_time || fraction.is_empty() || !fraction.bytes().all(|b| b.is_ascii_digit()) {
+        return 0;
+    }
+    fraction.len().min(6) as u16
 }
 
 fn max_subsecond_digits(left: &DfType, right: &DfType) -> Option<u16> {
@@ -2498,6 +2515,54 @@ pub(crate) mod tests {
                 ty: DfType::Int
             }
         );
+    }
+
+    /// MySQL's CONVERT_TZ returns a DATETIME whatever the type of its argument, with the
+    /// argument's subsecond digits, or 6 for a string column.
+    #[test]
+    fn call_convert_tz_is_a_datetime() {
+        let datetime = |subsecond_digits| DfType::DateTime { subsecond_digits };
+        let timestamp = |subsecond_digits| DfType::Timestamp { subsecond_digits };
+        let time = |subsecond_digits| DfType::Time { subsecond_digits };
+        for (column, subsecond_digits) in [
+            (DfType::Date, 0),
+            (datetime(3), 3),
+            (timestamp(2), 2),
+            (time(0), 0),
+            (DfType::DEFAULT_TEXT, 6),
+            (DfType::Int, 0),
+        ] {
+            let input =
+                parse_expr(ParserDialect::MySQL, "convert_tz(t.x, '+00:00', '+05:30')").unwrap();
+            let expr = Expr::lower(
+                input,
+                Dialect::DEFAULT_MYSQL,
+                &resolve_columns(|_| Ok((0, column.clone()))),
+            )
+            .unwrap();
+            assert_eq!(expr.ty(), &datetime(subsecond_digits), "{column:?}");
+        }
+        // A string literal keeps the subsecond digits it spells out, at most 6, as in MySQL.
+        for (literal, subsecond_digits) in [
+            ("'2004-01-01 12:00:00'", 0),
+            ("'2004-01-01 12:00:00.123'", 3),
+            ("'2004-01-01 12:00:00.100'", 3),
+            ("'2004-01-01 12:00:00.1234567'", 6),
+            ("'2004-01-01T12:00:00.5'", 1),
+            ("'20040101120000.25'", 2),
+            ("'  2004-01-01 12:00:00.12  '", 2),
+            ("'2004.01.01 12:00:00'", 0),
+            ("'2004-01-01'", 0),
+            ("null", 0),
+        ] {
+            let input = parse_expr(
+                ParserDialect::MySQL,
+                format!("convert_tz({literal}, '+00:00', '+05:30')"),
+            )
+            .unwrap();
+            let expr = Expr::lower(input, Dialect::DEFAULT_MYSQL, &no_op_lower_context()).unwrap();
+            assert_eq!(expr.ty(), &datetime(subsecond_digits), "{literal}");
+        }
     }
 
     #[test]

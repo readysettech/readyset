@@ -39,3 +39,17 @@ SELECT CONVERT_TZ(t1.dt, '+00:00', '+05:30') FROM t1 WHERE t1.id = ?
 ? = 2
 ----
 2020-06-16 05:00:00
+
+# A DATE converts as midnight and comes back as a DATETIME, keeping the converted time of day.
+statement ok
+CREATE TABLE t2 (id INT PRIMARY KEY, d DATE);
+
+statement ok
+INSERT INTO t2 VALUES (1, '2020-06-07'), (2, '2020-01-01'), (3, NULL);
+
+query T nosort
+SELECT CONVERT_TZ(t2.d, '+00:00', '+05:30') FROM t2 ORDER BY t2.id
+----
+2020-06-07 05:30:00
+2020-01-01 05:30:00
+NULL
