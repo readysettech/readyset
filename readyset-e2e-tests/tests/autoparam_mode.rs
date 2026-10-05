@@ -1427,13 +1427,12 @@ async fn a_read_prefers_the_cache_that_kept_its_exact_limit() {
     shutdown_tx.shutdown().await;
 }
 
-/// The second attempt runs exactly where the router retries an ordinary cache: behind an
-/// `ORDER BY`. An order-less literal limit keeps its one shape, so a cache filed under the
-/// stripped form is not reached by it.
+/// An order-less literal limit is retried without its limit too, so it reaches a cache filed under
+/// the stripped form, and the read's own limit bounds the rows, ad-hoc and prepared alike.
 #[tokio::test]
 #[tags(serial)]
 #[upstream(mysql)]
-async fn an_orderless_limit_read_takes_one_shape() {
+async fn an_orderless_limit_read_reaches_a_cache_with_a_placeholder_limit() {
     let (mut rs_conn, _upstream, _handle, shutdown_tx) =
         topk_adapter("autoparam_topk_orderless", TK).await;
 
@@ -1445,17 +1444,14 @@ async fn an_orderless_limit_read_takes_one_shape() {
         .await
         .unwrap();
 
-    let rows: Vec<i32> = eventually_readyset(
-        &mut rs_conn,
-        "SELECT v FROM t WHERE status = 'archived' LIMIT 1",
-        QueryDestination::Upstream,
-    )
-    .await;
+    let served = QueryDestination::Readyset(Some("par_nord".into()));
+    let read = "SELECT v FROM t WHERE status = 'archived' LIMIT 1";
+    let rows: Vec<i32> = eventually_readyset(&mut rs_conn, read, served.clone()).await;
     assert_eq!(rows.len(), 1);
-    assert!(
-        [20, 40, 60].contains(&rows[0]),
-        "an archived row, from upstream: {rows:?}"
-    );
+    assert!([20, 40, 60].contains(&rows[0]), "an archived row: {rows:?}");
+    let rows: Vec<i32> = eventually_readyset_exec(&mut rs_conn, read, (), served).await;
+    assert_eq!(rows.len(), 1);
+    assert!([20, 40, 60].contains(&rows[0]), "an archived row: {rows:?}");
 
     shutdown_tx.shutdown().await;
 }

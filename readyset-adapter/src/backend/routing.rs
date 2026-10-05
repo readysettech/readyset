@@ -400,7 +400,7 @@ impl<'session> SelectRouter<'session> {
     /// Checks if noria should try to execute a given select and in the process mutates the
     /// supplied select statement by rewriting it.
     ///
-    /// For TopK-eligible queries (ORDER BY + literal LIMIT), this function implements dual cache
+    /// For TopK-eligible queries (a literal LIMIT), this function implements dual cache
     /// lookup based on which cache was actually created:
     /// 1. First checks if a TopK cache exists (created with literal LIMIT, e.g., CREATE CACHE
     ///    ... LIMIT 10)
@@ -597,8 +597,7 @@ impl<'session> SelectRouter<'session> {
 
 /// Helper function to check if a query has literal LIMIT values that could be TopK candidates
 pub(super) fn has_topk_literal_limit(statement: &SelectStatement) -> bool {
-    statement.order.is_some()
-        && statement.limit_clause.is_topk()
+    statement.limit_clause.is_topk()
         && matches!(
             statement.limit_clause.limit(),
             Some(
