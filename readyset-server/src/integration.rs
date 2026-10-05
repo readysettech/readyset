@@ -5255,6 +5255,58 @@ async fn write_under_a_key_a_join_input_evicted_reaches_the_cache_through_an_agg
     .await;
 }
 
+/// A write that a join pairs with the other input's rows under a key that is a hole in that
+/// input's join-key index reaches every entry keyed by its own columns with all of the key's
+/// rows. `a JOIN b ON a.x = b.y` is cached on `b.id` and on `a.z`, and reads `a` through a partial
+/// copy indexed on `z` and on `x`. Filling `z = 1` keeps `a`'s row 1, under `x = 1`, while its
+/// row 2, under `x = 1` too, is dropped at both holes; `b`'s row 2 then arrives under the filled
+/// `b.id = 2` and is paired with `a`'s rows under `x = 1`.
+#[tokio::test(flavor = "multi_thread")]
+async fn join_write_into_a_join_key_hole_pairs_every_row_of_the_key() {
+    let (mut g, shutdown_tx) =
+        start_simple_unsharded("join_write_into_a_join_key_hole_pairs_every_row_of_the_key").await;
+    g.extend_recipe(
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE a (id int PRIMARY KEY, x int, z int)",
+                "CREATE TABLE b (id int PRIMARY KEY, y int)",
+                "CREATE VIEW v AS SELECT a.id AS aid, b.id AS bid, a.z AS az FROM a JOIN b \
+                 ON a.x = b.y",
+                "CREATE CACHE qb FROM SELECT aid, bid FROM v WHERE bid = ?",
+                "CREATE CACHE qz FROM SELECT aid, bid FROM v WHERE az = ?",
+            ],
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+    let by_b = CacheRead::at("qb", 2, &["aid", "bid"]);
+    let by_z = CacheRead::at("qz", 1, &["aid", "bid"]);
+    for read in [&by_b, &by_z] {
+        assert_eq!(cache_rows(&mut g, read).await, Vec::<Vec<DfValue>>::new());
+    }
+
+    let mut a = g.table("a").await.unwrap();
+    for row in [[1, 1, 1], [2, 1, 2]] {
+        a.insert(int_row(&row)).await.unwrap();
+    }
+    sleep().await;
+    g.table("b")
+        .await
+        .unwrap()
+        .insert(int_row(&[2, 1]))
+        .await
+        .unwrap();
+    let want = vec![int_row(&[1, 2]), int_row(&[2, 2])];
+    eventually!(
+        run_test: { cache_rows(&mut g, &by_b).await },
+        then_assert: |rows| assert_eq!(rows, want)
+    );
+    assert_eq!(cache_rows(&mut g, &by_z).await, vec![int_row(&[1, 2])]);
+    shutdown_tx.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn non_sql_materialized_range_query() {
     let (mut g, shutdown_tx) = {

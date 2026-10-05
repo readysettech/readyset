@@ -587,10 +587,8 @@ impl Join {
         }
 
         let is_replay = replay_key_cols.is_some();
-        // Only do a lookup into a weak index if we're processing regular updates,
-        // not if we're processing a replay, since regular updates should represent
-        // all rows that won't hit holes downstream but replays need to have *all*
-        // rows.
+        // Only a regular update falls back on a weak index where the join key is a hole; a
+        // replay needs *all* rows, so it misses there instead.
         // Also use Strict mode if the other side is a Constant node, since Constant
         // nodes are fully materialized and don't support weak indices.
         let from_is_constant = nodes[from].borrow().is_constant();
@@ -700,14 +698,45 @@ impl Join {
 
             let mut other_lookup = match nulls {
                 true => IngredientLookupResult::empty(),
-                false => self.lookup(
-                    other,
-                    &on_cols_os,
-                    &PointKey::from(join_key.iter().cloned()),
-                    nodes,
-                    state,
-                    lookup_mode,
-                )?,
+                false => {
+                    let key = PointKey::from(join_key.iter().cloned());
+                    let strict =
+                        self.lookup(other, &on_cols_os, &key, nodes, state, LookupMode::Strict)?;
+                    match strict {
+                        IngredientLookupResult::Miss if lookup_mode == LookupMode::Weak => {
+                            // A hole's weak rows are only those the input's other indexes keep.
+                            // An entry keyed by the other input's columns kept the rows it pairs
+                            // with when it was filled, but an entry keyed by this write's own
+                            // columns can need a row the hole dropped, so those entries are
+                            // evicted as on a miss.
+                            let weak = self.lookup(
+                                other,
+                                &on_cols_os,
+                                &key,
+                                nodes,
+                                state,
+                                LookupMode::Weak,
+                            )?;
+                            if let IngredientLookupResult::Records(_) = weak {
+                                antithesis_sdk::assert_reachable!(
+                                    "join paired a write with the weak rows of a join-key hole"
+                                );
+                                misses.extend(group.iter().map(|record| {
+                                    Miss::builder()
+                                        .on(other)
+                                        .lookup_idx(on_cols_os.clone())
+                                        .lookup_key(on_cols_ts.clone())
+                                        .replay(replay)
+                                        .replay_key_cols(replay_key_cols.as_deref())
+                                        .record(record.to_vec())
+                                        .build()
+                                }));
+                            }
+                            weak
+                        }
+                        strict => strict,
+                    }
+                }
             };
 
             let other_records = match other_lookup.take() {
