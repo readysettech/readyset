@@ -105,8 +105,25 @@ fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadyS
         Multiply => Ok((non_null!(left) * non_null!(right))?),
         Divide => Ok((non_null!(left) / non_null!(right))?),
         Modulo => Ok((non_null!(left) % non_null!(right))?),
-        And => Ok((non_null!(left).is_truthy() && non_null!(right).is_truthy()).into()),
-        Or => Ok((non_null!(left).is_truthy() || non_null!(right).is_truthy()).into()),
+        // Three-valued logic: a known operand that decides the result decides it even when the
+        // other operand is NULL.
+        And => {
+            let is_false = |v: &DfValue| !v.is_none() && !v.is_truthy();
+            if is_false(left) || is_false(right) {
+                return Ok(false.into());
+            }
+            non_null!(left);
+            non_null!(right);
+            Ok(true.into())
+        }
+        Or => {
+            if left.is_truthy() || right.is_truthy() {
+                return Ok(true.into());
+            }
+            non_null!(left);
+            non_null!(right);
+            Ok(false.into())
+        }
         Equal => Ok((non_null!(left) == non_null!(right)).into()),
         Greater => Ok((non_null!(left) > non_null!(right)).into()),
         GreaterOrEqual => Ok((non_null!(left) >= non_null!(right)).into()),
@@ -1249,6 +1266,28 @@ mod tests {
             .unwrap(),
             0.into()
         );
+    }
+
+    #[test]
+    fn and_or_three_valued_logic() {
+        for dialect in [MySQL, PostgreSQL] {
+            for (expr, expected) in [
+                ("NULL AND FALSE", DfValue::from(false)),
+                ("FALSE AND NULL", DfValue::from(false)),
+                ("NULL AND TRUE", DfValue::None),
+                ("TRUE AND NULL", DfValue::None),
+                ("NULL AND NULL", DfValue::None),
+                ("NULL OR TRUE", DfValue::from(true)),
+                ("TRUE OR NULL", DfValue::from(true)),
+                ("NULL OR FALSE", DfValue::None),
+                ("FALSE OR NULL", DfValue::None),
+                ("NULL OR NULL", DfValue::None),
+                ("NOT (NULL AND FALSE)", DfValue::from(true)),
+                ("(NULL AND FALSE) IS NULL", DfValue::from(false)),
+            ] {
+                assert_eq!(eval_expr(expr, dialect), expected, "{expr} ({dialect:?})");
+            }
+        }
     }
 
     #[test]
