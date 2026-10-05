@@ -323,6 +323,14 @@ impl ReplayPaths {
             .is_some_and(|by_cols| by_cols.contains_key(columns))
     }
 
+    /// Whether a replay path fills `index` in `node`, that is, ends at that index.
+    pub(super) fn fills(&self, node: LocalNodeIndex, index: &Index) -> bool {
+        self.by_tag.values().any(|rp| {
+            let destination = rp.last_segment();
+            destination.node == node && destination.partial_index.as_ref() == Some(index)
+        })
+    }
+
     /// Return a list of all replay paths that pass through `from` into `node`, represented as the
     /// tag for the replay path, and the set of columns in the `node` which that replay path fills
     pub(super) fn paths_through(&self, node: &Node, from: NodeIndex) -> Vec<(Tag, Vec<usize>)> {

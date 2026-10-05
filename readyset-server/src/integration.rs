@@ -34,8 +34,11 @@ use dataflow::{
     BinaryOperator, DurabilityMode, Expr as DfExpr, PersistenceParameters, ReaderProcessing,
 };
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
+use readyset_client::internal::DomainIndex;
 use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
-use readyset_client::{KeyComparison, Modification, SchemaType, ViewPlaceholder, ViewQuery};
+use readyset_client::{
+    KeyComparison, Modification, SchemaType, SingleKeyEviction, ViewPlaceholder, ViewQuery,
+};
 use readyset_data::{Bound, Collation, DfType, DfValue, Dialect, IntoBoundedRange, TinyText};
 use readyset_decimal::Decimal;
 use readyset_errors::ReadySetError::{self, RpcFailed, SelectQueryCreationFailed};
@@ -7449,6 +7452,309 @@ async fn join_straddled_columns() {
 
     assert_eq!(res, vec![(1, 2)]);
 
+    shutdown_tx.shutdown().await;
+}
+
+/// Reads from a cache whose plan is a straddled join with another straddled join as its right
+/// input, both in one domain. The cache joins `t`, `u` and `v` and has a parameter on a column of
+/// each table, so the key of the outer join has columns from all three tables.
+///
+/// When a lookup misses on that key, the domain asks the outer join to split it into one part for
+/// each input, then looks for a replay path that targets each input. The inner join must therefore
+/// hold an index on its part of the key and fill that index from its own inputs. If no replay path
+/// targets the inner join, the domain fails on the first lookup with
+/// `no tag found ... (targeting L n) (from destination index ..)`.
+#[tokio::test(flavor = "multi_thread")]
+async fn straddled_join_over_a_straddled_join() {
+    let (mut g, shutdown_tx) = start_simple_unsharded("straddled_join_over_a_straddled_join").await;
+    let sql = vec![
+        "CREATE TABLE t (c0 int PRIMARY KEY, c1 int, c2 int);",
+        "CREATE TABLE u (c0 int PRIMARY KEY, c1 int, c2 int);",
+        "CREATE TABLE v (c0 int PRIMARY KEY, c1 int, c2 int);",
+        "CREATE CACHE by_eq FROM SELECT a.c0 AS a, b.c0 AS b, c.c0 AS c FROM t AS a \
+         JOIN u AS b ON a.c0 = b.c0 JOIN v AS c ON b.c1 = c.c1 \
+         WHERE a.c2 = $1 AND b.c2 = $2 AND c.c2 = $3;",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_POSTGRESQL).unwrap())
+        .await
+        .unwrap();
+    let ints = |rows: &[[i32; 3]]| -> Vec<Vec<DfValue>> {
+        rows.iter()
+            .map(|r| r.iter().map(|&v| v.into()).collect())
+            .collect()
+    };
+    let mut t = g.table("t").await.unwrap();
+    t.insert_many(ints(&[[1, 0, 10], [2, 0, 10], [3, 0, 20]]))
+        .await
+        .unwrap();
+    let mut u = g.table("u").await.unwrap();
+    u.insert_many(ints(&[[1, 7, 30], [2, 7, 30], [3, 8, 31]]))
+        .await
+        .unwrap();
+    let mut v = g.table("v").await.unwrap();
+    v.insert_many(ints(&[[1, 7, 40], [2, 8, 40], [3, 7, 41]]))
+        .await
+        .unwrap();
+    sleep().await;
+
+    let mut q = g.view("by_eq").await.unwrap().into_reader_handle().unwrap();
+    let lookups: [([i32; 3], &[(i32, i32, i32)]); 2] = [
+        ([10, 30, 40], &[(1, 1, 1), (2, 2, 1)]),
+        ([20, 31, 40], &[(3, 3, 2)]),
+    ];
+    for (params, expected) in lookups {
+        // The order of the reader key columns varies, so take each value from its placeholder.
+        let key = q
+            .key_map()
+            .iter()
+            .map(|(p, _)| match p {
+                ViewPlaceholder::OneToOne(i, _) => DfValue::from(params[i - 1]),
+                p => panic!("unexpected reader key column {p:?}"),
+            })
+            .collect::<Vec<_>>();
+        let rows = q
+            .lookup(&key, Dialect::DEFAULT_POSTGRESQL)
+            .await
+            .unwrap()
+            .into_vec();
+        let got = rows
+            .iter()
+            .map(|r| {
+                let col = |c| get_col!(q, r, c, i32);
+                (col("a"), col("b"), col("c"))
+            })
+            .sorted()
+            .collect::<Vec<_>>();
+        assert_eq!(got, expected, "{params:?}");
+    }
+
+    shutdown_tx.shutdown().await;
+}
+
+/// A flush evicts the keys of the reader of a cache whose plan is a straddled join with another
+/// straddled join as its right input, and the reader asks the domain of the joins to evict them.
+/// The outer join splits each key into one part for each input, and the inner join holds its part
+/// in an index that replay paths fill from the inner join's own inputs. The reads must give the
+/// rows of a model before and after the flush.
+///
+/// A flush evicts the domains in an order that differs from server to server. The reader's request
+/// reaches the joins only if the reader's domain is flushed first, so each trial runs a new server.
+#[tokio::test(flavor = "multi_thread")]
+async fn straddled_join_over_a_straddled_join_reads_its_rows_after_a_flush() {
+    // Each of `t`, `u` and `v` holds the rows (c0, c0 % 2, c0 % 2) for c0 in 0..3.
+    let rows = || (0..3).map(|c0: i32| [c0, c0 % 2, c0 % 2]);
+    // The (a, b, c) of each row of the cache, with its key (a.c2, b.c2, c.c2).
+    let model = rows()
+        .cartesian_product(rows())
+        .cartesian_product(rows())
+        .filter(|((a, b), c)| a[0] == b[0] && b[1] == c[1])
+        .map(|((a, b), c)| ([a[0], b[0], c[0]], [a[2], b[2], c[2]]))
+        .collect::<Vec<_>>();
+    for trial in 0..8 {
+        let (mut g, shutdown_tx) = start_simple_unsharded(&format!(
+            "straddled_join_over_a_straddled_join_flush_{trial}"
+        ))
+        .await;
+        let sql = vec![
+            "CREATE TABLE t (c0 int PRIMARY KEY, c1 int, c2 int);",
+            "CREATE TABLE u (c0 int PRIMARY KEY, c1 int, c2 int);",
+            "CREATE TABLE v (c0 int PRIMARY KEY, c1 int, c2 int);",
+            "CREATE CACHE by_eq FROM SELECT a.c0 AS a, b.c0 AS b, c.c0 AS c FROM t AS a \
+             JOIN u AS b ON a.c0 = b.c0 JOIN v AS c ON b.c1 = c.c1 \
+             WHERE a.c2 = $1 AND b.c2 = $2 AND c.c2 = $3;",
+        ];
+        g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_POSTGRESQL).unwrap())
+            .await
+            .unwrap();
+        for table in ["t", "u", "v"] {
+            let rows = rows().map(|r| r.map(DfValue::from).to_vec());
+            g.table(table)
+                .await
+                .unwrap()
+                .perform_all(rows)
+                .await
+                .unwrap();
+        }
+        for phase in ["before the flush", "after the flush"] {
+            for key in iter::repeat_n(0..2, 3).multi_cartesian_product() {
+                let expected = model.iter().filter(|(_, k)| k[..] == key[..]);
+                let expected = expected
+                    .map(|(r, _)| r.to_vec())
+                    .sorted()
+                    .collect::<Vec<_>>();
+                eventually!(
+                    run_test: { read_sorted(&mut g, "by_eq", &key, &["a", "b", "c"]).await },
+                    then_assert: |got| assert_eq!(got, expected, "trial {trial} {phase} {key:?}")
+                );
+            }
+            g.flush_partial().await.unwrap();
+        }
+        shutdown_tx.shutdown().await;
+    }
+}
+
+/// The `(c0, c1)` pairs of each of `caches`, given with its number of key columns, read at every
+/// key. Every column's values lie in `0..3`, so these reads return all of a cache's pairs.
+async fn pairs_of(g: &mut crate::Handle, caches: &[(&str, usize)]) -> Vec<Vec<(i32, i32)>> {
+    let mut all = vec![];
+    for &(cache, key_len) in caches {
+        let mut view = g.view(cache).await.unwrap().into_reader_handle().unwrap();
+        let mut pairs = vec![];
+        for key in iter::repeat_n(0..3, key_len).multi_cartesian_product() {
+            let key = key.into_iter().map(DfValue::from).collect::<Vec<_>>();
+            let rows = view.lookup(&key, Dialect::DEFAULT_MYSQL).await.unwrap();
+            for row in rows.into_vec() {
+                let col = |c| i32::try_from(&row[c]).unwrap();
+                pairs.push((col(0), col(1)));
+            }
+        }
+        pairs.sort();
+        all.push(pairs);
+    }
+    all
+}
+
+/// `v` keeps `a.c0` and `b.p` of each pair of `a JOIN b ON a.p = b.c0`, and two joins read `v`:
+/// `vc` on `v.p = c.c0` and `vd` on `v.p = d.p`. Each join has a cache keyed on `k` and, in a later
+/// migration, a straddled cache keyed on both inputs' columns, which for `vc` and `vd` spans both
+/// joins. Reading the empty caches and then again after a write to each table, every cache must
+/// hold exactly the pairs the tables' rows make.
+#[tokio::test(flavor = "multi_thread")]
+async fn nested_straddled_caches_of_two_joins_over_one_join_read_their_pairs() {
+    let (mut g, shutdown_tx) =
+        start_simple_unsharded("nested_straddled_caches_of_two_joins_over_one_join").await;
+    let migrations: [&[&str]; 2] = [
+        &[
+            "CREATE TABLE a (c0 int PRIMARY KEY, g int, p int)",
+            "CREATE TABLE b (c0 int, g int, p int)",
+            "CREATE TABLE c (c0 int, g int, p int)",
+            "CREATE TABLE d (c0 int PRIMARY KEY, g int, p int)",
+            "CREATE VIEW ab AS SELECT l.c0 AS c0, r.c0 AS c1, r.p AS k FROM a AS l \
+             INNER JOIN b AS r ON l.p = r.c0",
+            "CREATE VIEW v AS SELECT c0, k AS p FROM ab",
+            "CREATE VIEW vc AS SELECT l.c0 AS c0, r.c0 AS c1, l.p AS k FROM v AS l \
+             INNER JOIN c AS r ON l.p = r.c0",
+            "CREATE VIEW vd AS SELECT l.c0 AS c0, r.c0 AS c1, l.p AS k FROM v AS l \
+             INNER JOIN d AS r ON l.p = r.p",
+            "CREATE CACHE ab_cache FROM SELECT c0, c1 FROM ab WHERE k = ?",
+            "CREATE CACHE vc_cache FROM SELECT c0, c1 FROM vc WHERE k = ?",
+            "CREATE CACHE vd_cache FROM SELECT c0, c1 FROM vd WHERE k = ?",
+        ],
+        &[
+            "CREATE CACHE ab_straddled FROM SELECT c0, c1 FROM ab WHERE c0 = ? AND c1 = ?",
+            "CREATE CACHE vc_straddled FROM SELECT c0, c1 FROM vc \
+             WHERE c0 = ? AND c1 = ? AND k = ?",
+            "CREATE CACHE vd_straddled FROM SELECT c0, c1 FROM vd \
+             WHERE c0 = ? AND c1 = ? AND k = ?",
+        ],
+    ];
+    for migration in migrations {
+        let changes = ChangeList::from_strings(migration.to_vec(), Dialect::DEFAULT_MYSQL).unwrap();
+        g.extend_recipe(changes).await.unwrap();
+    }
+    const CACHES: [(&str, usize); 6] = [
+        ("ab_cache", 1),
+        ("ab_straddled", 2),
+        ("vc_cache", 1),
+        ("vc_straddled", 3),
+        ("vd_cache", 1),
+        ("vd_straddled", 3),
+    ];
+    assert_eq!(pairs_of(&mut g, &CACHES).await, vec![vec![]; 6]);
+
+    // Every table holds the rows `(c0, g, p)` below.
+    let rows = [[0, 1, 0], [1, 0, 0], [2, 1, 2]];
+    for table in ["a", "b", "c", "d"] {
+        let mut table = g.table(table).await.unwrap();
+        table
+            .insert_many(rows.iter().map(|r| int_row(r)))
+            .await
+            .unwrap();
+    }
+    let ab = rows
+        .iter()
+        .cartesian_product(&rows)
+        .filter(|(l, r)| l[2] == r[0])
+        .map(|(l, r)| (l[0], r[0], r[2]))
+        .collect::<Vec<_>>();
+    let pairs = |on: usize| {
+        ab.iter()
+            .cartesian_product(&rows)
+            .filter(|((_, _, p), r)| *p == r[on])
+            .map(|((c0, _, _), r)| (*c0, r[0]))
+            .sorted()
+            .collect::<Vec<_>>()
+    };
+    let ab = ab
+        .iter()
+        .map(|&(c0, c1, _)| (c0, c1))
+        .sorted()
+        .collect::<Vec<_>>();
+    let want = [ab.clone(), ab, pairs(0), pairs(0), pairs(2), pairs(2)];
+    eventually!(
+        attempts: 100,
+        sleep: Duration::from_millis(50),
+        run_test: { pairs_of(&mut g, &CACHES).await },
+        then_assert: |got| assert_eq!(got, want, "{CACHES:?}")
+    );
+    shutdown_tx.shutdown().await;
+}
+
+/// `x` pairs the rows of `a` and `b` on `a.p = b.c0`, with a cache keyed on `b.p` and a straddled
+/// cache keyed on `(a.c0, b.c0)`. A read of the first fills `p = 1` in the join's left input before
+/// the straddled cache reads `(0, 1)`. The left input then evicts `p = 1`, and a second copy of
+/// row 0 of `a` arrives: both caches must read both copies.
+#[tokio::test(flavor = "multi_thread")]
+async fn straddled_cache_reads_a_write_after_its_left_input_evicts_the_join_key() {
+    let (mut g, shutdown_tx) =
+        start_simple_unsharded("straddled_cache_reads_a_write_after_an_eviction").await;
+    let sql = vec![
+        "CREATE TABLE a (c0 int, g int, p int)",
+        "CREATE TABLE b (c0 int PRIMARY KEY, g int, p int)",
+        "CREATE VIEW x AS SELECT l.c0 AS c0, r.c0 AS c1, r.p AS k FROM a AS l \
+         INNER JOIN b AS r ON l.p = r.c0",
+        "CREATE CACHE x_cache FROM SELECT c0, c1 FROM x WHERE k = ?",
+        "CREATE CACHE x_straddled FROM SELECT c0, c1 FROM x WHERE c0 = ? AND c1 = ?",
+    ];
+    g.extend_recipe(ChangeList::from_strings(sql, Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
+    const CACHES: [(&str, usize); 2] = [("x_cache", 1), ("x_straddled", 2)];
+    let mut a = g.table("a").await.unwrap();
+    let mut b = g.table("b").await.unwrap();
+    b.insert(int_row(&[1, 1, 0])).await.unwrap();
+    eventually!(run_test: { pairs_of(&mut g, &CACHES).await }, then_assert: |got| {
+        assert_eq!(got, vec![vec![]; 2])
+    });
+    a.insert(int_row(&[0, 1, 1])).await.unwrap();
+    eventually!(run_test: { pairs_of(&mut g, &CACHES).await }, then_assert: |got| {
+        assert_eq!(got, vec![vec![(0, 1)]; 2])
+    });
+
+    let left_join_key = g
+        .replay_paths()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|p| {
+            p.trigger_type.starts_with("End")
+                && p.destination_index.as_deref() == Some("HashMap[2]")
+        })
+        .expect("a replay path fills the join's left input on p");
+    let evicted = g
+        .evict_single(Some(SingleKeyEviction {
+            domain_idx: DomainIndex::from(left_join_key.domain as usize),
+            tag: left_join_key.tag,
+            key: vec![DfValue::from(1)],
+        }))
+        .await
+        .unwrap();
+    assert!(evicted.is_some(), "the left input held p = 1");
+
+    a.insert(int_row(&[0, 1, 1])).await.unwrap();
+    eventually!(run_test: { pairs_of(&mut g, &CACHES).await }, then_assert: |got| {
+        assert_eq!(got, vec![vec![(0, 1), (0, 1)]; 2])
+    });
     shutdown_tx.shutdown().await;
 }
 

@@ -264,12 +264,7 @@ impl State for MemoryState {
     }
 
     fn lookup<'a>(&'a self, columns: &[usize], key: &PointKey) -> LookupResult<'a> {
-        debug_assert!(!self.state.is_empty(), "lookup on uninitialized index");
-        let index = self
-            .state_for(columns, IndexType::HashMap)
-            .or_else(|| self.state_for(columns, IndexType::BTreeMap))
-            .expect("lookup on non-indexed column set");
-        let ret = self.state[index].lookup(key);
+        let ret = self.lookup_in_index(columns, key);
         if ret.is_some() {
             return ret;
         }
@@ -483,6 +478,21 @@ impl State for MemoryState {
 }
 
 impl MemoryState {
+    /// Looks `key` up in the index on `columns` alone, so a hole there is a miss even where an
+    /// index on a subset of `columns` holds the key's rows.
+    pub(crate) fn lookup_in_index<'a>(
+        &'a self,
+        columns: &[usize],
+        key: &PointKey,
+    ) -> LookupResult<'a> {
+        debug_assert!(!self.state.is_empty(), "lookup on uninitialized index");
+        let index = self
+            .state_for(columns, IndexType::HashMap)
+            .or_else(|| self.state_for(columns, IndexType::BTreeMap))
+            .expect("lookup on non-indexed column set");
+        self.state[index].lookup(key)
+    }
+
     /// Returns the index in `self.state` of the index keyed on `cols` and with the given
     /// `index_type`, or None if no such index exists.
     fn state_for(&self, cols: &[usize], index_type: IndexType) -> Option<usize> {

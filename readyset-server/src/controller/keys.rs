@@ -307,10 +307,18 @@ impl RawReplayPath {
 ///   an *extended* replay path. See [the docs section on straddled joins][straddled-joins] for more
 ///   information about extended replay paths
 ///
+/// `extended` is true when the caller made its trace an extension and started `current` at a
+/// parent. If that parent also generates the columns of its index, the path stops at the parent
+/// and is `broken`, which makes the materialization planner add the index to the parent. The
+/// parent must hold that index because, when a lookup misses on generated columns, the domain asks
+/// the node to split the miss into one miss for each parent and then looks for a replay path that
+/// targets an index on that parent.
+///
 /// [straddled-joins]: http://docs/dataflow/replay_paths.html#straddled-joins
 fn continue_replay_path<F>(
     graph: &Graph,
     mut current: Vec1<IndexRef>,
+    extended: bool,
     stop_at: &F,
 ) -> ReadySetResult<Vec<RawReplayPath>>
 where
@@ -324,6 +332,12 @@ where
     }
 
     let dcs = deduce_column_source(graph, &current_colref)?;
+    let broken = dcs.break_path && (current.len() > 1 || extended);
+    if broken && extended {
+        antithesis_sdk::assert_reachable!(
+            "extended replay path ended at a parent with generated columns"
+        );
+    }
 
     match dcs.ancestors.len() {
         // stop and return the current replay path in full
@@ -331,8 +345,11 @@ where
         1 => {
             // only one ancestor, and its column reference is:
             let next_colref = dcs.ancestors.into_iter().next().unwrap();
-            // don't break the path if we're only a 1-node replay path
-            if dcs.break_path && current.len() > 1 {
+            // When the trace has only this node and the node generates its columns, the path
+            // continues upstream if `extended` is false, because the caller asked for an index on
+            // this node. If `extended` is true, this node is a parent that must hold the index, so
+            // the path stops here.
+            if broken {
                 Ok(vec![RawReplayPath::from_broken_trace(current)])
             } else {
                 let extension = if current_colref.node == next_colref.node {
@@ -355,7 +372,7 @@ where
                     None
                 };
 
-                let paths = continue_replay_path(graph, current, stop_at)?;
+                let paths = continue_replay_path(graph, current, extension.is_some(), stop_at)?;
                 if let Some(extension) = extension {
                     Ok(paths
                         .into_iter()
@@ -368,7 +385,7 @@ where
         }
         _ => {
             // multiple ancestors
-            if dcs.break_path && current.len() > 1 {
+            if broken {
                 Ok(vec![RawReplayPath::from_broken_trace(current)])
             } else {
                 let mut ret = vec![];
@@ -389,7 +406,7 @@ where
                         None
                     };
 
-                    let paths = continue_replay_path(graph, next, stop_at)?;
+                    let paths = continue_replay_path(graph, next, extension.is_some(), stop_at)?;
                     if let Some(extension) = extension {
                         ret.extend(
                             paths
@@ -450,7 +467,7 @@ pub fn replay_paths_for_opt<F>(
 where
     F: Fn(NodeIndex) -> bool,
 {
-    continue_replay_path(graph, vec1![colref], &stop_at)
+    continue_replay_path(graph, vec1![colref], false, &stop_at)
 }
 
 /// Like `replay_paths_for`, but `stop_at` always returns `false`.

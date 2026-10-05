@@ -7,7 +7,7 @@ use remapped_keys::RemappedKeys;
 use strum::IntoStaticStr;
 
 use std::borrow::Cow;
-use std::cell::RefMut;
+use std::cell::{OnceCell, RefMut};
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::convert::{TryFrom, TryInto};
@@ -1084,27 +1084,31 @@ impl Domain {
         // For straddled joins, handle_upquery returns a pair of misses. One from left and one
         // for right. We only take the first miss/upquery path (left) and the other side will
         // be triggered in on_input when we have the join conditions.
-        let lhs_misses = if let Join(join) =
-            self.nodes[miss_in].borrow_mut().as_mut_internal().unwrap()
-        {
-            if !join.is_rhs_full_mat() {
-                remapped.clone()
-            } else {
-                debug_assert!(remapped.len() == 2);
-                let side = join.side_to_trigger_upquery();
-                let (this_key, other_key) = match side {
-                    Side::Left => (remapped[0].clone(), remapped[1].clone()),
-                    Side::Right => (remapped[1].clone(), remapped[0].clone()),
-                };
+        let lhs_misses =
+            if let Join(join) = self.nodes[miss_in].borrow_mut().as_mut_internal().unwrap() {
+                if !join.is_rhs_full_mat() {
+                    remapped.clone()
+                } else {
+                    debug_assert!(remapped.len() == 2);
+                    let side = join.side_to_trigger_upquery();
+                    let (this_key, other_key) = match side {
+                        Side::Left => (remapped[0].clone(), remapped[1].clone()),
+                        Side::Right => (remapped[1].clone(), remapped[0].clone()),
+                    };
 
-                // Handle the case where multiple entries for the same column may exist in
-                // an IN(?, ?, ?)
-                join.add_missing_upquery(this_key.missed_keys.clone().to_vec(), side, other_key);
-                vec![this_key]
-            }
-        } else {
-            remapped
-        };
+                    // Handle the case where multiple entries for the same column may exist in
+                    // an IN(?, ?, ?)
+                    join.add_missing_upquery(
+                        this_key.missed_keys.clone().to_vec(),
+                        side,
+                        &miss_columns,
+                        other_key,
+                    );
+                    vec![this_key]
+                }
+            } else {
+                remapped
+            };
 
         invariant!(
             !lhs_misses.is_empty(),
@@ -2870,42 +2874,47 @@ impl Domain {
         if is_base {
             self.handle_eviction_keys(ex, dst, tag, keys)?;
         } else {
-            let cols = &index.columns;
-            let is_generated = self.replay_paths.columns_are_generated(src, cols);
-            let mut evictions: HashMap<_, Vec<KeyComparison>> = Default::default();
-            let column_indices: Arc<[_]> = Arc::from(cols.as_slice());
-
-            for key in keys {
-                let m = ColumnMiss {
+            let column_indices: Arc<[_]> = Arc::from(index.columns.as_slice());
+            let mut misses = keys
+                .into_iter()
+                .map(|key| ColumnMiss {
                     node: src,
                     column_indices: Arc::clone(&column_indices),
                     missed_keys: vec1![key],
-                };
-                let keys = if is_generated {
-                    // No need to store remapping; if it's not there, we don't have the key.
-                    // A join upqueries each input whose state is partial on that input's part of
-                    // a straddled key, so that part is the key to evict there.
-                    let mut missed_keys = self.nodes[src].borrow_mut().handle_upquery(m)?;
-                    missed_keys.retain(|upstream_miss| {
-                        self.state
-                            .get(upstream_miss.node)
-                            .map(|state| state.is_partial())
-                            .unwrap_or(false)
-                    });
-                    if !missed_keys.is_empty()
-                        && self.nodes[src].borrow().is_join().unwrap_or(false)
-                    {
-                        assert_reachable!("an eviction splits a straddled key onto a join input");
-                    }
-                    missed_keys
-                } else {
-                    vec![m]
-                };
+                })
+                .collect::<Vec<_>>();
+            let mut evictions: HashMap<_, Vec<KeyComparison>> = Default::default();
 
-                for m in keys {
-                    let e = evictions.entry((m.node, m.column_indices)).or_default();
+            // Replay paths fill columns that a node generates from that node's inputs, so a key
+            // in such columns is split, as an upquery splits it, until each part is in an index
+            // that replay paths fill. A join upqueries each input whose state is partial on that
+            // input's part of a straddled key, so that part is the key to evict there. The input
+            // can be a straddled join that generates the columns of its part in turn.
+            while let Some(m) = misses.pop() {
+                let node = m.node;
+                if !self
+                    .replay_paths
+                    .columns_are_generated(node, &*m.column_indices)
+                {
+                    let e = evictions.entry((node, m.column_indices)).or_default();
                     e.extend(m.missed_keys);
+                    continue;
                 }
+                if node != src {
+                    assert_reachable!("an eviction splits the part of a straddled key again");
+                }
+                // No need to store remapping; if it's not there, we don't have the key.
+                let mut missed_keys = self.nodes[node].borrow_mut().handle_upquery(m)?;
+                missed_keys.retain(|upstream_miss| {
+                    self.state
+                        .get(upstream_miss.node)
+                        .map(|state| state.is_partial())
+                        .unwrap_or(false)
+                });
+                if !missed_keys.is_empty() && self.nodes[node].borrow().is_join().unwrap_or(false) {
+                    assert_reachable!("an eviction splits a straddled key onto a join input");
+                }
+                misses.extend(missed_keys);
             }
 
             for ((target, cols), keys) in evictions {
@@ -3158,23 +3167,60 @@ impl Domain {
 
     /// Lookup the provided keys one by one, returns a vector of results, the set of the hit keys
     /// and a set of the misses
+    ///
+    /// Where a replay path fills `index`, a key misses at a hole there even if an index on a subset
+    /// of its columns holds the key's rows: an eviction from that other index would not reach the
+    /// entries this replay fills, while one from `index` does. An index that no replay path fills,
+    /// as one on the columns a node generates from another of its own indexes, is read through the
+    /// indexes under it.
     fn do_lookup_iter<'a>(
         &self,
         state: &'a MaterializedNodeState,
-        cols: &[usize],
+        source: LocalNodeIndex,
+        index: &Index,
         mut keys: ReplayKeys,
     ) -> ReadySetResult<StateLookupResult<'a>> {
+        let cols = &index.columns[..];
+        let filled_by_replay = OnceCell::new();
         let mut records = Vec::new();
         let mut replay_keys = HashSet::new();
         // Drain misses, and keep the hits
         keys.retain(|key| match key {
             KeyComparisonRef::Equal(equal) => {
-                match state.lookup(cols, &PointKey::from((*equal).clone())) {
+                let point = PointKey::from((*equal).clone());
+                let mut subset_probed = false;
+                let found = match state.lookup_in_index(cols, &point) {
+                    LookupResult::Missing
+                        if !*filled_by_replay
+                            .get_or_init(|| self.replay_paths.fills(source, index)) =>
+                    {
+                        if self.nodes[source].borrow().is_join().unwrap_or(false) {
+                            antithesis_sdk::assert_unreachable!(
+                                "a join's unfilled index is read through a subset index",
+                                &serde_json::json!({ "node": source.id(), "columns": cols })
+                            );
+                        }
+                        subset_probed = true;
+                        state.lookup(cols, &point)
+                    }
+                    found => found,
+                };
+                match found {
                     LookupResult::Some(record) => {
                         records.push(record);
                         true
                     }
                     LookupResult::Missing => {
+                        // Only failure-injection builds run this probe, because it only feeds
+                        // the assertion.
+                        if cfg!(feature = "failure_injection")
+                            && !subset_probed
+                            && state.lookup(cols, &point).is_some()
+                        {
+                            assert_reachable!(
+                                "replay missed at its index while a subset index held the key"
+                            );
+                        }
                         replay_keys
                             .insert(ReplayMiss::Point(KeyComparison::Equal((*equal).clone())));
                         false
@@ -3213,18 +3259,18 @@ impl Domain {
         &self,
         state: &MaterializedNodeState,
         source: LocalNodeIndex,
-        cols: &[usize],
+        index: &Index,
         keys: ReplayKeys,
     ) -> ReadySetResult<(Vec<Record>, ReplayKeys, HashSet<ReplayMiss>)> {
         let (records, found_keys, replay_keys) = if let Some(state) = state.as_persistent() {
-            let records = self.do_lookup_multi(state, cols, &keys);
+            let records = self.do_lookup_multi(state, &index.columns, &keys);
             (records, keys, HashSet::new()) // can't miss
         } else {
             let StateLookupResult {
                 records,
                 found_keys,
                 replay_keys,
-            } = self.do_lookup_iter(state, cols, keys)?;
+            } = self.do_lookup_iter(state, source, index, keys)?;
             (records, found_keys, replay_keys)
         };
 
@@ -3271,8 +3317,7 @@ impl Domain {
         drop(node);
 
         let keys = pkt.keys.into_iter().collect();
-        let (records, found_keys, replay_keys) =
-            self.do_lookup(state, src, &index.columns, keys)?;
+        let (records, found_keys, replay_keys) = self.do_lookup(state, src, &index, keys)?;
 
         if !replay_keys.is_empty() {
             trace!(%pkt.tag, ?replay_keys, "replay request miss");

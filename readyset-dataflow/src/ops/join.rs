@@ -73,11 +73,13 @@ pub struct Join {
     // If true, its guaranteed that we cannot miss on lookup.
     rhs_full_mat: bool,
 
-    /// Missing upqueries for the other side of the join. The key is (column index,
-    /// side).
+    /// Missing upqueries for the other side of the join, by the keys of the replay that the join
+    /// awaits from one side, that side, and the join's columns that missed. Several indexes of
+    /// the join can await the same replay keys from one side, each with its own other side's
+    /// columns.
     // We skip serde since we don't want the state of the node, just the configuration.
     #[serde(skip)]
-    pub missing_upqueries: HashMap<(Vec<KeyComparison>, Side), Vec<ColumnMiss>>,
+    pub missing_upqueries: HashMap<(Vec<KeyComparison>, Side, Vec<usize>), Vec<ColumnMiss>>,
 
     /// Optional filter expression evaluated on left rows for LEFT JOINs.
     /// When present and the filter evaluates to false for a left row,
@@ -517,10 +519,11 @@ impl Join {
         &mut self,
         key_cols: Vec<KeyComparison>,
         side: Side,
+        columns: &[usize],
         missed_keys: ColumnMiss,
     ) {
         self.missing_upqueries
-            .entry((key_cols, side))
+            .entry((key_cols, side, columns.to_vec()))
             .and_modify(|entry| {
                 // Ensure all existing entries have the same column indices as the new one
                 debug_assert!(
@@ -902,7 +905,8 @@ impl Join {
         let (side, os_node, (on_cols_idx_ts, on_cols_idx_os)) = self.get_side_and_on_cols(from);
 
         // 1. From replay.cols which columns come from this side of the join
-        let (left_key_cols, right_key_cols) = self.resolve_cols(replay.cols().unwrap());
+        let replay_cols = replay.cols().unwrap();
+        let (left_key_cols, right_key_cols) = self.resolve_cols(replay_cols);
 
         // 2. Pre-group records by replay key and join key
         let grouped_records = Self::group_records_by_replay_key(
@@ -920,7 +924,7 @@ impl Join {
         for key in replay_keys {
             let other_predicate = self
                 .missing_upqueries
-                .remove(&(vec![key.to_owned()], side))
+                .remove(&(vec![key.to_owned()], side, replay_cols.to_vec()))
                 .ok_or_else(|| internal_err!("No missing keys found for key {:?}", key))?;
 
             let mut os_key_col_idx = SmallVec::<[usize; 8]>::from_slice(&on_cols_idx_os);
@@ -2464,13 +2468,23 @@ mod tests {
 
         // A union above the join gives every branch its own replay path, and each one misses on
         // the same key; the other side of the join should only be looked up once.
-        j.add_missing_upquery(key.clone(), Side::Left, miss(2));
-        j.add_missing_upquery(key.clone(), Side::Left, miss(2));
-        assert_eq!(j.missing_upqueries[&(key.clone(), Side::Left)].len(), 1);
+        let columns = [0, 2];
+        let waiting = (key.clone(), Side::Left, columns.to_vec());
+        j.add_missing_upquery(key.clone(), Side::Left, &columns, miss(2));
+        j.add_missing_upquery(key.clone(), Side::Left, &columns, miss(2));
+        assert_eq!(j.missing_upqueries[&waiting].len(), 1);
 
         // A miss on a different key, as `IN (?, ?)` produces, still gets its own lookup.
-        j.add_missing_upquery(key.clone(), Side::Left, miss(3));
-        assert_eq!(j.missing_upqueries[&(key, Side::Left)].len(), 2);
+        j.add_missing_upquery(key.clone(), Side::Left, &columns, miss(3));
+        assert_eq!(j.missing_upqueries[&waiting].len(), 2);
+
+        // A miss on another index of the join that awaits the same key waits apart.
+        j.add_missing_upquery(key.clone(), Side::Left, &[0, 2, 2], miss(2));
+        assert_eq!(j.missing_upqueries[&waiting].len(), 2);
+        assert_eq!(
+            j.missing_upqueries[&(key, Side::Left, vec![0, 2, 2])].len(),
+            1
+        );
     }
 
     #[test]

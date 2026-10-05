@@ -312,6 +312,16 @@ impl MaterializedNodeState {
             MaterializedNodeState::PersistentReadHandle(_rh) => (),
         }
     }
+
+    /// Like [`State::lookup`], but a hole in the index on `columns` is a miss even where an index
+    /// on a subset of `columns` holds the key's rows.
+    pub fn lookup_in_index<'a>(&'a self, columns: &[usize], key: &PointKey) -> LookupResult<'a> {
+        match self {
+            MaterializedNodeState::Memory(ms) => ms.lookup_in_index(columns, key),
+            MaterializedNodeState::Persistent(ps) => ps.lookup(columns, key),
+            MaterializedNodeState::PersistentReadHandle(rh) => rh.lookup(columns, key),
+        }
+    }
 }
 
 impl SizeOf for MaterializedNodeState {
