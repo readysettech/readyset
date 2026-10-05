@@ -159,53 +159,18 @@ async fn timezone_abbreviations_partitions_entries() {
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
 #[upstream(postgres)]
-async fn intervalstyle_partitions_entries() {
+async fn inherited_non_postgres_intervalstyle_proxies() {
     const QUERY: &str = "SELECT duration FROM events WHERE id = 2";
-    let (a, _upstream, opts, _handle, shutdown_tx) = setup(QUERY, "").await;
-
-    assert_eq!(simple_texts(&a, QUERY).await, vec!["1 day 02:00:00"]);
-    assert_filled(&a).await;
-
-    let b = psql_helpers::connect(opts).await;
-    b.simple_query("SET intervalstyle = 'iso_8601'")
-        .await
-        .unwrap();
-    assert_eq!(simple_texts(&b, QUERY).await, vec!["P1DT2H"]);
-    assert_filled(&b).await;
-    assert_eq!(simple_texts(&b, QUERY).await, vec!["P1DT2H"]);
-    assert_hit(&b).await;
-
-    assert_eq!(simple_texts(&a, QUERY).await, vec!["1 day 02:00:00"]);
-    assert_hit(&a).await;
-
-    shutdown_tx.shutdown().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[tags(serial)]
-#[upstream(postgres)]
-async fn inherited_intervalstyle_partitions_entries() {
-    const QUERY: &str = "SELECT duration FROM events WHERE id = 2";
-    let (a, _upstream, opts, _handle, shutdown_tx) = setup(QUERY, "").await;
-
-    assert_eq!(simple_texts(&a, QUERY).await, vec!["1 day 02:00:00"]);
-    assert_filled(&a).await;
+    let (_a, _upstream, opts, _handle, shutdown_tx) = setup(QUERY, "").await;
 
     let database = opts.get_dbname().unwrap();
     with_database_default(database, "intervalstyle", "'iso_8601'", async {
         let b = psql_helpers::connect(opts.clone()).await;
         assert_eq!(simple_texts(&b, QUERY).await, vec!["P1DT2H"]);
-        assert_filled(&b).await;
-        assert_eq!(simple_texts(&b, QUERY).await, vec!["P1DT2H"]);
-        assert_hit(&b).await;
-
-        assert_eq!(simple_texts(&a, QUERY).await, vec!["1 day 02:00:00"]);
-        assert_hit(&a).await;
-
-        // DEFAULT returns to the value the session started with.
-        b.simple_query("SET intervalstyle = DEFAULT").await.unwrap();
-        assert_eq!(simple_texts(&b, QUERY).await, vec!["P1DT2H"]);
-        assert_hit(&b).await;
+        assert_eq!(
+            last_query_info(&b).await.destination,
+            QueryDestination::Upstream
+        );
     })
     .await;
 
@@ -229,41 +194,6 @@ async fn inherited_non_iso_datestyle_proxies() {
         );
     })
     .await;
-
-    shutdown_tx.shutdown().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[tags(serial)]
-#[upstream(postgres)]
-async fn intervalstyle_survives_refresh() {
-    const QUERY: &str = "SELECT duration FROM events ORDER BY id DESC LIMIT 1";
-    let (_a, upstream, opts, _handle, shutdown_tx) =
-        setup(QUERY, "POLICY TTL 60 SECONDS REFRESH EVERY 1 SECONDS").await;
-
-    let b = psql_helpers::connect(opts).await;
-    b.simple_query("SET intervalstyle = 'iso_8601'")
-        .await
-        .unwrap();
-    assert_eq!(simple_texts(&b, QUERY).await, vec!["P1DT2H"]);
-    assert_filled(&b).await;
-
-    upstream
-        .simple_query(
-            "INSERT INTO events (id, at, duration) VALUES (3, '2026-01-16 00:00:00+00', '3 days')",
-        )
-        .await
-        .unwrap();
-
-    eventually!(run_test: {
-        let texts = simple_texts(&b, QUERY).await;
-        let info = last_query_info(&b).await;
-        AssertUnwindSafe(move || (info, texts))
-    }, then_assert: |result| {
-        let (info, texts) = result();
-        assert_matches!(info.destination, QueryDestination::ReadysetShallow(..));
-        assert_eq!(texts, vec!["P3D"]);
-    });
 
     shutdown_tx.shutdown().await;
 }

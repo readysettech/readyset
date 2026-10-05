@@ -525,13 +525,14 @@ impl QueryHandler for PostgreSqlQueryHandler {
             Some(Literal::String(value)) => Some(value.as_str()),
             _ => None,
         };
-        // A SET of either variable to any other value is also unsupported. The DateStyle input
-        // order after the comma stays in the cache key.
+        // A SET of any of these variables to any other value is also unsupported. The DateStyle
+        // input order after the comma stays in the cache key.
         let iso_dates = |style: &str| {
             let output = style.split(',').next().unwrap_or_default();
             output.trim().eq_ignore_ascii_case("iso")
         };
         value("datestyle").is_some_and(|style| !iso_dates(style))
+            || value("intervalstyle").is_some_and(|style| !style.eq_ignore_ascii_case("postgres"))
             || value("standard_conforming_strings").is_some_and(|v| !v.eq_ignore_ascii_case("on"))
     }
 }
@@ -592,6 +593,17 @@ mod tests {
     fn reported_non_iso_datestyle_is_unsupported() {
         let vars = reported(&[("datestyle", "SQL, DMY")]);
         assert!(PostgreSqlQueryHandler::unsupported_session_vars(&vars));
+    }
+
+    #[test]
+    fn reported_non_postgres_intervalstyle_is_unsupported() {
+        for style in ["iso_8601", "sql_standard", "postgres_verbose"] {
+            let vars = reported(&[("intervalstyle", style)]);
+            assert!(
+                PostgreSqlQueryHandler::unsupported_session_vars(&vars),
+                "{style}"
+            );
+        }
     }
 
     #[test]
