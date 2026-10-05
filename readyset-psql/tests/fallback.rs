@@ -2686,14 +2686,11 @@ async fn real_type() {
             .is_ok()
     );
 
+    // PostgreSQL compares a REAL with a NUMERIC as two DOUBLEs, so REAL 1004.3 <> NUMERIC 1004.3.
     eventually! {
-        let len = conn
-            .query("SELECT * FROM t WHERE f1 <> 1004.3", &[])
-            .await
-            .unwrap()
-            .len();
-        len == 0
+        conn.query("SELECT * FROM t WHERE f1 <> 1004.3", &[]).await.unwrap().len() == 1
     }
+    assert_last_statement_matches!("t", "readyset", "ok", &conn);
 
     shutdown_tx.shutdown().await;
 }

@@ -640,6 +640,12 @@ impl DfType {
         matches!(*self, Self::Numeric { .. })
     }
 
+    /// Returns `true` if this is any integer, floating-point, decimal or numeric type.
+    #[inline]
+    pub fn is_any_number(&self) -> bool {
+        self.is_any_int() || self.is_any_float() || self.is_numeric()
+    }
+
     /// Returns `true` if this is DATE/TIMESTAMP/TIMESTAMPTZ/DATETIME type.
     #[inline]
     pub fn is_any_temporal(&self) -> bool {

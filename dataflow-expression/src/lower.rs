@@ -1541,6 +1541,18 @@ impl BinaryOperator {
                 }
             };
 
+        // The casts that make two PostgreSQL numbers compare by value. An integer or a NUMERIC is
+        // cast to a DOUBLE when the other side is a float, as PostgreSQL does. Every other pair of
+        // number types needs no cast. `None` unless both sides are numbers.
+        let pg_number_coercion = |left: &DfType, right: &DfType| {
+            let as_double = |ty: &DfType, other: &DfType| {
+                ((ty.is_any_int() || ty.is_numeric()) && other.is_any_float())
+                    .then_some(DfType::Double)
+            };
+            (left.is_any_number() && right.is_any_number())
+                .then(|| (as_double(left, right), as_double(right, left)))
+        };
+
         use BinaryOperator::*;
         let (left_coerce, right_coerce) = match self {
             Add | Subtract | Multiply | Divide | Modulo | And | Or => match dialect.engine() {
@@ -1589,7 +1601,8 @@ impl BinaryOperator {
             }
 
             Greater | GreaterOrEqual | Less | LessOrEqual => match dialect.engine() {
-                SqlEngine::PostgreSQL => pg_array_coercion(left_type, right_type),
+                SqlEngine::PostgreSQL => pg_number_coercion(left_type, right_type)
+                    .unwrap_or_else(|| pg_array_coercion(left_type, right_type)),
                 SqlEngine::MySQL => mysql_type_conversion(left_type, right_type)
                     .map_or((None, None), |ty| (Some(ty.clone()), Some(ty))),
             },
@@ -1623,6 +1636,8 @@ impl BinaryOperator {
                     let (l, r) = pg_array_coercion(left_type, right_type);
                     if l.is_some() || r.is_some() {
                         (l, r)
+                    } else if let Some(coercions) = pg_number_coercion(left_type, right_type) {
+                        coercions
                     } else {
                         // Non-array Equal: coerce right to left's type to handle
                         // cases like Unknown vs concrete type. Not needed for
@@ -4352,9 +4367,7 @@ pub(crate) mod tests {
     // REA-5955: IN expression lowering must apply type coercions
     // ---------------------------------------------------------------
 
-    /// When an Int column is compared via IN against a Numeric column, the
-    /// lowered expression should contain Cast nodes to coerce types, just
-    /// like a plain `=` comparison would.
+    /// `IN` compares an Int column with a Numeric column by value, as a plain `=` does.
     #[test]
     fn in_list_applies_type_coercions_pg() {
         // `col_int IN (col_num)` where col_int is Int and col_num is Numeric
@@ -4372,13 +4385,20 @@ pub(crate) mod tests {
         });
         let lowered = Expr::lower(input, Dialect::DEFAULT_POSTGRESQL, &ctx).unwrap();
 
-        // The lowered tree should be an Equal with a Cast on the right-hand
-        // side (coercing Numeric to Int, since Equal coerces right to left's
-        // type in PG).
-        let repr = format!("{lowered:?}");
-        assert!(
-            repr.contains("Cast"),
-            "Expected a Cast node in the lowered IN expression, got: {lowered}"
+        let decimal = |m, s| DfValue::from(readyset_decimal::Decimal::new(m, s));
+        assert_eq!(
+            lowered
+                .eval::<DfValue>(&[2.into(), decimal(15, 1)])
+                .unwrap(),
+            DfValue::from(false),
+            "2 IN (1.5)"
+        );
+        assert_eq!(
+            lowered
+                .eval::<DfValue>(&[2.into(), decimal(200, 2)])
+                .unwrap(),
+            DfValue::from(true),
+            "2 IN (2.00)"
         );
     }
 
