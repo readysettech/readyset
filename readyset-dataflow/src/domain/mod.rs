@@ -1031,7 +1031,19 @@ impl Domain {
         cache_name: Relation,
         dst_index: Option<&Index>,
     ) -> ReadySetResult<()> {
-        let tags = self.find_tags(&miss_keys, miss_columns, dst, target, dst_index, "upquery")?;
+        let tags = self
+            .find_tags(&miss_keys, miss_columns, dst, target, dst_index, "upquery")
+            .inspect_err(|_| {
+                antithesis_sdk::assert_unreachable!(
+                    "upquery found no replay path for a miss",
+                    &serde_json::json!({
+                        "node": dst.0.id(),
+                        "target": target.0.id(),
+                        "cols": miss_columns,
+                        "extended": dst_index.is_some(),
+                    })
+                );
+            })?;
 
         for &tag in &tags {
             let (miss_keys, cache_name) = (miss_keys.clone(), cache_name.clone());
@@ -2824,14 +2836,21 @@ impl Domain {
             return Ok(());
         };
 
-        let tags = self.find_tags(
-            &keys,
-            cols,
-            Destination(node),
-            Target(node),
-            None,
-            "eviction",
-        )?;
+        let tags = self
+            .find_tags(
+                &keys,
+                cols,
+                Destination(node),
+                Target(node),
+                None,
+                "eviction",
+            )
+            .inspect_err(|_| {
+                antithesis_sdk::assert_unreachable!(
+                    "eviction found no replay path for a key",
+                    &serde_json::json!({ "node": node.id(), "cols": cols })
+                );
+            })?;
 
         for tag in tags {
             if self.replay_paths[tag].trigger.is_local() {
