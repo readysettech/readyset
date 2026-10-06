@@ -480,7 +480,7 @@ where
         let offset = all_bytes.len() - remaining.len();
         let line = all_bytes[..offset].iter().filter(|&&b| b == b'\n').count() + 1;
 
-        let (r, rec) = complete(record)(remaining).map_err(&map_nom_err)?;
+        let (r, rec) = complete(record)(remaining).map_err(map_nom_err)?;
         result.push((line, rec));
         remaining = ignore(r).map(|(r, _)| r).unwrap_or(r);
     }
