@@ -205,14 +205,9 @@ pub(crate) fn can_inline_left_join_rhs_safe(
     }
 
     // Prevent RHS inlining if literal or not null-preserving projections are used in SELECT
-    if !outermost_expression(base_stmt)
+    Ok(outermost_expression(base_stmt)
         .flat_map(columns_iter)
-        .all(|c| ext_to_int_fields.get(c).is_none_or(is_expr_null_preserving))
-    {
-        return Ok(false);
-    }
-
-    Ok(true)
+        .all(|c| ext_to_int_fields.get(c).is_none_or(is_expr_null_preserving)))
 }
 
 /// Thin wrapper over [`can_inline_subquery`] + [`inline_from_item_position_checks`]

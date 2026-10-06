@@ -922,12 +922,7 @@ fn types_compatible(a: &SqlType, b: &SqlType) -> bool {
         return true;
     }
     // String types are compatible with each other
-    let a_string = is_string(a);
-    let b_string = is_string(b);
-    if a_string && b_string {
-        return true;
-    }
-    false
+    is_string(a) && is_string(b)
 }
 
 fn is_numeric(t: &SqlType) -> bool {

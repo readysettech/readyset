@@ -13,13 +13,13 @@ reqwest = { workspace = true, features = ["blocking"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 database-utils = { path = "../database-utils" }
-metric = { path = "../metric" }
 readyset-data = { path = "../readyset-data" }
 clap = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 benchmarks = { path = "../benchmarks" }
 
+metric = { path = "../metric" }
 readyset-client = { path = "../readyset-client" }
 mysql-srv = { path = "../mysql-srv" }
 readyset-mysql = { path = "../readyset-mysql" }

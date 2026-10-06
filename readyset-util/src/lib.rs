@@ -9,6 +9,9 @@ use std::hash::Hash;
 use std::mem::size_of_val;
 use std::sync::Arc;
 
+// Depended on only so the `failure_injection` feature can enable `fail/failpoints`.
+use fail as _;
+
 pub mod failpoints;
 
 pub mod arbitrary;

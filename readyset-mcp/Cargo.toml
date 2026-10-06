@@ -20,7 +20,7 @@ path = "src/main.rs"
 # "vendored" feature behind another optional feature flag, "vendored-openssl" which should be set
 # when building the readyset-mcp server.
 [features]
-vendored-openssl = ["openssl/vendored"]
+vendored-openssl = ["native-tls/vendored"]
 
 [dependencies]
 anyhow = { workspace = true }

@@ -54,7 +54,6 @@ parking_lot = { workspace = true }
 smallvec = { workspace = true }
 rocksdb.workspace = true
 metrics = { workspace = true }
-metrics-util = { workspace = true }
 itertools = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 triomphe = { workspace = true }

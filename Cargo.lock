@@ -751,12 +751,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bufstream"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40e38929add23cdf8a366df9b0e088953150724bcbe5fc330b0d8eb3b328eec8"
-
-[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1334,7 +1328,6 @@ dependencies = [
 name = "dante"
 version = "0.1.0"
 dependencies = [
- "antithesis_sdk",
  "data-generator",
  "indexmap 2.14.0",
  "proptest",
@@ -4396,7 +4389,6 @@ dependencies = [
  "subtle",
  "tempfile",
  "thiserror 2.0.19",
- "time",
  "tokio",
  "tokio-native-tls",
  "tokio-postgres",
@@ -5939,7 +5931,6 @@ dependencies = [
  "partial-map",
  "petgraph 0.6.5",
  "proptest",
- "quanta",
  "rand 0.10.2",
  "readyset-client",
  "readyset-util",
@@ -6153,7 +6144,6 @@ dependencies = [
  "itertools 0.15.0",
  "metric",
  "metrics",
- "metrics-util",
  "parking_lot",
  "petgraph 0.6.5",
  "proptest",
@@ -6329,7 +6319,6 @@ dependencies = [
  "antithesis_sdk",
  "async-bincode",
  "bincode",
- "bufstream",
  "byteorder",
  "clap",
  "dataflow-expression",
@@ -6769,7 +6758,6 @@ dependencies = [
  "metrics",
  "papaya",
  "parking_lot",
- "readyset-client",
  "readyset-sql",
  "readyset-sql-parsing",
  "seize",
@@ -6904,7 +6892,6 @@ version = "0.0.1"
 dependencies = [
  "antithesis_sdk",
  "criterion",
- "dashmap",
  "futures",
  "metric",
  "metrics",
@@ -7064,7 +7051,6 @@ dependencies = [
  "failpoint-client",
  "readyset-client",
  "readyset-data",
- "readyset-server",
  "tokio",
 ]
 

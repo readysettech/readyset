@@ -5,7 +5,6 @@ publish = false
 authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2021"
 
-homepage = "https://github.com/readysettech/readyset/tree/master/nom-sql"
 repository = "https://github.com/readysettech/readyset/tree/master/nom-sql"
 
 description = "A SQL parser written using nom."

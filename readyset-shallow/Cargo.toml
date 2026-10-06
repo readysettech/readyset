@@ -7,7 +7,6 @@ edition = "2024"
 
 [dependencies]
 antithesis_sdk = { workspace = true }
-dashmap = { workspace = true }
 serde_json = { workspace = true }
 metrics = { workspace = true }
 moka = { workspace = true }
@@ -42,3 +41,6 @@ tokio = { workspace = true, features = ["test-util"] }
 name = "cache_hit"
 harness = false
 required-features = ["bench"]
+
+[lints]
+workspace = true

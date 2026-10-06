@@ -12,7 +12,6 @@ failpoint-client = { path = "../failpoint-client" }
 readyset-client = { path = "../readyset-client" }
 readyset-data = { path = "../readyset-data" }
 tokio = { workspace = true, features = ["full"] }
-readyset-server = { path = "../readyset-server" }
 
 [[bin]]
 name = "view_checker"

@@ -28,3 +28,6 @@ readyset-util = { path = "../readyset-util" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }
+
+[lints]
+workspace = true

@@ -19,9 +19,11 @@ tracing = { workspace = true }
 
 database-utils = { path = "../database-utils" }
 metric = { path = "../metric" }
-readyset-client = { path = "../readyset-client" }
 readyset-sql = { path = "../readyset-sql" }
 readyset-sql-parsing = { path = "../readyset-sql-parsing" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }
+
+[lints]
+workspace = true

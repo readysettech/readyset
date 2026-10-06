@@ -12,7 +12,6 @@ ahash = { workspace = true }
 antithesis_sdk = { workspace = true }
 async-bincode = { workspace = true }
 bincode = { workspace = true }
-bufstream = { workspace = true }
 byteorder = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 derive_more = { workspace = true }

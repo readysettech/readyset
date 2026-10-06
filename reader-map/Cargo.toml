@@ -21,7 +21,6 @@ iter-enum = { workspace = true }
 left-right = { workspace = true }
 metrics = { workspace = true }
 petgraph = { workspace = true }
-quanta = { workspace = true }
 rand = { workspace = true }
 smallvec = { workspace = true, features = ["union"] }
 thiserror = { workspace = true }

@@ -5,7 +5,6 @@ publish = false
 authors = ["Readyset Technology, Inc. <info@readyset.io>"]
 edition = "2024"
 
-homepage = "https://github.com/readysettech/readyset/tree/master/nom-sql-arbitrary"
 repository = "https://github.com/readysettech/readyset/tree/master/nom-sql-arbitrary"
 
 description = "A library with proptest utility to generate AST structs."
