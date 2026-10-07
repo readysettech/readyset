@@ -23,7 +23,8 @@ DELETE FROM `table_1` WHERE (`column_2` = 3)
 statement ok
 DELETE FROM `table_1` WHERE (`column_2` = 4)
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` IS NOT NULL)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -37,12 +38,14 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` IS NOT NULL)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -56,7 +59,8 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1`) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -70,17 +74,20 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -94,12 +101,14 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -113,7 +122,8 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -127,7 +137,8 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` IS NOT NULL)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -141,7 +152,8 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -155,12 +167,14 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` IS NOT NULL)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -174,12 +188,14 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -193,12 +209,14 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -212,12 +230,14 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -231,7 +251,8 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -245,7 +266,8 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -259,7 +281,8 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -273,7 +296,8 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -287,7 +311,8 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6`, `table_1`.`column_1` AS `alias_7` FROM `table_1` WHERE ((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_8 ON (`table_1`.`column_1` = `alias_8`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -301,12 +326,14 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -320,7 +347,8 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -334,7 +362,8 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -348,7 +377,8 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6`, `table_1`.`column_1` AS `alias_7` FROM `table_1` WHERE ((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_8 ON (`table_1`.`column_1` = `alias_8`.`alias_4`) WHERE ((((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -362,12 +392,14 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` IS NOT NULL)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -384,12 +416,14 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` IS NOT NULL)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -406,7 +440,8 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5` FROM `table_1`) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -423,17 +458,20 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -450,12 +488,14 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -472,7 +512,8 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -489,7 +530,8 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` IS NOT NULL)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -506,7 +548,8 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -523,12 +566,14 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` IS NULL)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` IS NOT NULL)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -545,12 +590,14 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6`, `table_1`.`column_1` AS `alias_7` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL))) AS alias_8 ON (`table_1`.`column_1` = `alias_8`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6`, `table_1`.`column_1` AS `alias_7` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_8 ON (`table_1`.`column_1` = `alias_8`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -567,12 +614,14 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6`, `table_1`.`column_1` AS `alias_7` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_8 ON (`table_1`.`column_1` = `alias_8`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -589,12 +638,14 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -611,7 +662,8 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6`, `table_1`.`column_1` AS `alias_7` FROM `table_1` WHERE (((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_8 ON (`table_1`.`column_1` = `alias_8`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -628,7 +680,8 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -645,7 +698,8 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -662,7 +716,8 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -679,7 +734,8 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6`, `table_1`.`column_1` AS `alias_7`, `table_1`.`column_1` AS `alias_8` FROM `table_1` WHERE ((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_9 ON (`table_1`.`column_1` = `alias_9`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -696,12 +752,14 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6`, `table_1`.`column_1` AS `alias_7` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL))) AS alias_8 ON (`table_1`.`column_1` = `alias_8`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6`, `table_1`.`column_1` AS `alias_7` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_8 ON (`table_1`.`column_1` = `alias_8`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -718,7 +776,8 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6`, `table_1`.`column_1` AS `alias_7` FROM `table_1` WHERE (((`table_1`.`column_1` IS NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_8 ON (`table_1`.`column_1` = `alias_8`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -735,7 +794,8 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6`, `table_1`.`column_1` AS `alias_7` FROM `table_1` WHERE (((`table_1`.`column_1` IS NOT NULL) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_8 ON (`table_1`.`column_1` = `alias_8`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -752,7 +812,8 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 710936833
 710936833
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6`, `table_1`.`column_1` AS `alias_7`, `table_1`.`column_1` AS `alias_8` FROM `table_1` WHERE ((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL))) AS alias_9 ON (`table_1`.`column_1` = `alias_9`.`alias_5`) WHERE (((((`table_1`.`column_1` IS NULL) AND (`table_1`.`column_1` IS NOT NULL)) OR (`table_1`.`column_1` IS NULL)) OR (`table_1`.`column_1` IS NOT NULL)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----

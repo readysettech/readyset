@@ -147,7 +147,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE `table_1`.`column_1` NOT BETWEEN 1 AND 5) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -158,12 +158,12 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE `table_1`.`column_1` BETWEEN 1 AND 5) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE `table_1`.`column_1` NOT BETWEEN 1 AND 5) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -174,12 +174,12 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE `table_1`.`column_1` BETWEEN 1 AND 5) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1`) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -190,12 +190,12 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -206,7 +206,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -217,7 +217,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE `table_1`.`column_1` NOT BETWEEN 1 AND 5) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -228,7 +228,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -239,17 +239,17 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE `table_1`.`column_1` BETWEEN 1 AND 5) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -260,7 +260,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE `table_1`.`column_1` NOT BETWEEN 1 AND 5) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -271,12 +271,12 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE `table_1`.`column_1` BETWEEN 1 AND 5) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -287,17 +287,17 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -308,7 +308,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -319,7 +319,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -330,7 +330,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -341,7 +341,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -352,12 +352,12 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -368,7 +368,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6`, `table_1`.`column_1` AS `alias_7` FROM `table_1` WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_8 ON (`table_1`.`column_1` = `alias_8`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -379,7 +379,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -390,12 +390,12 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -406,7 +406,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -417,7 +417,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6`, `table_1`.`column_1` AS `alias_7` FROM `table_1` WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_8 ON (`table_1`.`column_1` = `alias_8`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -428,162 +428,162 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE `table_1`.`column_1` NOT BETWEEN 1 AND 5) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE `table_1`.`column_1` BETWEEN 1 AND 5) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE `table_1`.`column_1` NOT BETWEEN 1 AND 5) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE `table_1`.`column_1` BETWEEN 1 AND 5) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1`) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE `table_1`.`column_1` NOT BETWEEN 1 AND 5) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE `table_1`.`column_1` BETWEEN 1 AND 5) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE `table_1`.`column_1` NOT BETWEEN 1 AND 5) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE `table_1`.`column_1` BETWEEN 1 AND 5) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6`, `table_1`.`column_1` AS `alias_7` FROM `table_1` WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_8 ON (`table_1`.`column_1` = `alias_8`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6`, `table_1`.`column_1` AS `alias_7` FROM `table_1` WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_8 ON (`table_1`.`column_1` = `alias_8`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE `table_1`.`column_1` NOT BETWEEN 1 AND 5) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -594,12 +594,12 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE `table_1`.`column_1` BETWEEN 1 AND 5) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE `table_1`.`column_1` NOT BETWEEN 1 AND 5) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -610,12 +610,12 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE `table_1`.`column_1` BETWEEN 1 AND 5) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1`) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -626,12 +626,12 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -642,7 +642,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -653,7 +653,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE `table_1`.`column_1` NOT BETWEEN 1 AND 5) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -664,7 +664,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -675,17 +675,17 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE `table_1`.`column_1` BETWEEN 1 AND 5) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -696,7 +696,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE `table_1`.`column_1` NOT BETWEEN 1 AND 5) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -707,12 +707,12 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE `table_1`.`column_1` BETWEEN 1 AND 5) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -723,17 +723,17 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -744,7 +744,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -755,7 +755,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -766,7 +766,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -777,7 +777,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -788,12 +788,12 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -804,7 +804,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6`, `table_1`.`column_1` AS `alias_7` FROM `table_1` WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_8 ON (`table_1`.`column_1` = `alias_8`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -815,7 +815,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -826,12 +826,12 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -842,7 +842,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -853,7 +853,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6`, `table_1`.`column_1` AS `alias_7` FROM `table_1` WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 AND `table_1`.`column_1` BETWEEN 1 AND 5) OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5)) AS alias_8 ON (`table_1`.`column_1` = `alias_8`.`alias_4`) WHERE (((`table_1`.`column_1` NOT BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -864,7 +864,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 625332648
 625332648
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE `table_1`.`column_1` NOT BETWEEN 1 AND 5) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` BETWEEN 1 AND 5 OR `table_1`.`column_1` NOT BETWEEN 1 AND 5) OR `table_1`.`column_1` BETWEEN 1 AND 5) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----

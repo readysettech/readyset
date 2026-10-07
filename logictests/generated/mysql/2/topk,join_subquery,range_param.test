@@ -205,7 +205,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 -1217060549
 -1585109306
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -215,7 +216,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 465271314
 88383817
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -225,7 +227,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 465271314
 88383817
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -235,7 +238,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 465271314
 88383817
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -245,7 +249,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 465271314
 88383817
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -255,7 +260,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 465271314
 88383817
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -265,7 +271,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 465271314
 88383817
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -373,7 +380,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 -1217060549
 -1585109306
 
-query  nosort
+# REA-6472
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
@@ -383,7 +391,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1251402200
 1283863301
 
-query  nosort
+# REA-6472
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
@@ -393,7 +402,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1251402200
 1283863301
 
-query  nosort
+# REA-6472
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
@@ -403,7 +413,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1251402200
 1283863301
 
-query  nosort
+# REA-6472
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
@@ -413,7 +424,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1251402200
 1283863301
 
-query  nosort
+# REA-6472
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
@@ -423,7 +435,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1251402200
 1283863301
 
-query  nosort
+# REA-6472
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
@@ -433,7 +446,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1251402200
 1283863301
 
-query  nosort
+# REA-6472
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
@@ -443,7 +457,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1251402200
 1283863301
 
-query  nosort
+# REA-6472
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -453,7 +468,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 341077169
 88383817
 
-query  nosort
+# REA-6472
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -463,7 +479,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 341077169
 88383817
 
-query  nosort
+# REA-6472
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -473,7 +490,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 341077169
 88383817
 
-query  nosort
+# REA-6472
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -483,7 +501,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 341077169
 88383817
 
-query  nosort
+# REA-6472
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -493,7 +512,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 341077169
 88383817
 
-query  nosort
+# REA-6472
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -503,7 +523,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 341077169
 88383817
 
-query  nosort
+# REA-6472
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -513,7 +534,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 341077169
 88383817
 
-query  nosort
+# REA-6472
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -523,7 +545,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 341077169
 88383817
 
-query  nosort
+# REA-6472
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -533,7 +556,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 341077169
 88383817
 
-query  nosort
+# REA-6472
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -543,7 +567,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 341077169
 88383817
 
-query  nosort
+# REA-6472
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -553,7 +578,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 341077169
 88383817
 
-query  nosort
+# REA-6472
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -563,7 +589,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 341077169
 88383817
 
-query  nosort
+# REA-6472
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -573,7 +600,8 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 341077169
 88383817
 
-query  nosort
+# REA-6472
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -730,7 +758,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 -1217060549
 
 # REA-6472
-query  rowsort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -738,7 +766,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1283863301
 
 # REA-6472
-query  rowsort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -746,7 +774,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1283863301
 
 # REA-6472
-query  rowsort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -754,7 +782,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1283863301
 
 # REA-6472
-query  rowsort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -762,7 +790,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1283863301
 
 # REA-6472
-query  rowsort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -770,7 +798,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1283863301
 
 # REA-6472
-query  rowsort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -778,7 +806,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1283863301
 
 # REA-6472
-query  rowsort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -849,7 +877,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 -1217060549
 
 # REA-6472
-query  nosort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
@@ -857,7 +885,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1283863301
 
 # REA-6472
-query  nosort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
@@ -865,7 +893,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1283863301
 
 # REA-6472
-query  nosort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
@@ -873,7 +901,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1283863301
 
 # REA-6472
-query  nosort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
@@ -881,7 +909,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1283863301
 
 # REA-6472
-query  nosort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
@@ -889,7 +917,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1283863301
 
 # REA-6472
-query  nosort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
@@ -897,7 +925,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1283863301
 
 # REA-6472
-query  nosort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
@@ -905,7 +933,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1283863301
 
 # REA-6472
-query  nosort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -913,7 +941,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1251402200
 
 # REA-6472
-query  nosort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -921,7 +949,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1251402200
 
 # REA-6472
-query  nosort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -929,7 +957,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1251402200
 
 # REA-6472
-query  nosort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -937,7 +965,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1251402200
 
 # REA-6472
-query  nosort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -945,7 +973,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1251402200
 
 # REA-6472
-query  nosort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -953,7 +981,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1251402200
 
 # REA-6472
-query  nosort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -961,7 +989,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1251402200
 
 # REA-6472
-query  nosort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -969,7 +997,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1251402200
 
 # REA-6472
-query  nosort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -977,7 +1005,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1251402200
 
 # REA-6472
-query  nosort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -985,7 +1013,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1251402200
 
 # REA-6472
-query  nosort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -993,7 +1021,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1251402200
 
 # REA-6472
-query  nosort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -1001,7 +1029,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1251402200
 
 # REA-6472
-query  nosort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -1009,7 +1037,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 1251402200
 
 # REA-6472
-query  nosort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  nosort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----

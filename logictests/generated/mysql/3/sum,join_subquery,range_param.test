@@ -30,7 +30,8 @@ SELECT `table_1`.`column_5` AS `alias_3` FROM `table_1` INNER JOIN (SELECT sum(`
 ----
 
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_5` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_5` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_5` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_5` > ?)
 ? = 10
 ----
@@ -54,7 +55,8 @@ SELECT sum(`table_1`.`column_8`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT 
 ----
 NULL
 
-query  rowsort
+# REA-6472
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT sum(`table_1`.`column_10`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_6` AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_6` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
@@ -108,7 +110,7 @@ SELECT `table_1`.`column_5` AS `alias_3` FROM `table_1` INNER JOIN (SELECT sum(`
 
 
 # REA-6472
-query  rowsort error: Self-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT `table_1`.`column_5` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_5` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_5` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_5` > ?)
 ? = 10
 ----
@@ -129,7 +131,7 @@ SELECT sum(`table_1`.`column_8`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT 
 NULL
 
 # REA-6472
-query  rowsort error: Self-joins using the same column are unsupported|Incorrect\ values\ returned
+query  rowsort error: Self-joins using the same column are unsupported
 SELECT sum(`table_1`.`column_10`) AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_6` AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_6` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----

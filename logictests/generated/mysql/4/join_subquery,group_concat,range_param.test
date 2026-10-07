@@ -24,13 +24,13 @@ SELECT group_concat(`table_1`.`column_4` separator ', ') AS `alias_1` FROM `tabl
 ----
 NULL
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_7` AS `alias_3` FROM `table_1` INNER JOIN (SELECT group_concat(`table_1`.`column_7` separator ', ') AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_7` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
 
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_7` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_7` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_7` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
@@ -54,7 +54,7 @@ SELECT group_concat(`table_1`.`column_9` separator ', ') AS `alias_1` FROM `tabl
 ----
 NULL
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT group_concat(`table_1`.`column_11` separator ', ') AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_7` AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_7` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
@@ -101,13 +101,13 @@ SELECT group_concat(`table_1`.`column_4` separator ', ') AS `alias_1` FROM `tabl
 ----
 NULL
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_7` AS `alias_3` FROM `table_1` INNER JOIN (SELECT group_concat(`table_1`.`column_7` separator ', ') AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_7` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
 
 
-query  rowsort error: Self\-joins using the same column are unsupported|The\ number\ of\ values\ returned\ does\ not\ match
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT `table_1`.`column_7` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_7` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_7` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
@@ -128,7 +128,7 @@ SELECT group_concat(`table_1`.`column_9` separator ', ') AS `alias_1` FROM `tabl
 ----
 NULL
 
-query  rowsort
+query  rowsort error: Self\-joins using the same column are unsupported
 SELECT group_concat(`table_1`.`column_11` separator ', ') AS `alias_1` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_7` AS `alias_2` FROM `table_1`) AS alias_3 ON (`table_1`.`column_7` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_6` > ?)
 ? = 10
 ----
