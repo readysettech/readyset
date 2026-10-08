@@ -1786,15 +1786,14 @@ fn signed_modifier() {
     // REA-5874: specifically `decimal(M, D) unsigned` was reported as failing.
     check_parse_type_mysql!("decimal(20, 4) unsigned");
     check_parse_type_mysql!("decimal(6, 2) unsigned");
+    check_parse_type_mysql!("float unsigned");
 }
 
 // Not supported by sqlparser-rs, and may never be; not totally supported by nom-sql either.
 #[test]
 #[ignore = "REA-5856: deprecated"]
 fn signed_modifier_on_non_integer_types() {
-    check_parse_type_mysql!("decimal(6,2) unsigned");
     check_parse_type_mysql!("numeric(2) unsigned");
-    check_parse_type_mysql!("float unsigned");
 }
 
 #[test]

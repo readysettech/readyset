@@ -197,16 +197,16 @@ impl TryFromDialect<sqlparser::ast::DataType> for SqlType {
             Bytes(_) => unsupported!("BYTES data type"),
             Numeric(info) => exact_number_info_into_numeric(info)
                 .map_err(|e| failed_err!("NUMERIC conversion: {e}")),
-            Decimal(info) => exact_number_info_into_decimal(info)
+            Decimal(info) | DecimalUnsigned(info) => exact_number_info_into_decimal(info)
                 .map_err(|e| failed_err!("DECIMAL conversion: {e}")),
             BigNumeric(info) => exact_number_info_into_numeric(info)
                 .map_err(|e| failed_err!("BIG NUMERIC conversion: {e}")),
             BigDecimal(info) => exact_number_info_into_decimal(info)
                 .map_err(|e| failed_err!("BIG DECIMAL conversion: {e}")),
-            Dec(info) => {
+            Dec(info) | DecUnsigned(info) => {
                 exact_number_info_into_decimal(info).map_err(|e| failed_err!("DEC conversion: {e}"))
             }
-            Float(_) => Ok(Self::Float),
+            Float(_) | FloatUnsigned(_) => Ok(Self::Float),
             TinyIntUnsigned(n) => Ok(Self::TinyIntUnsigned(n.map(|n| n as u16))),
             Int2(_) => Ok(Self::Int2),
             Int2Unsigned(n) => Ok(Self::SmallIntUnsigned(n.map(|n| n as u16))),
@@ -228,11 +228,11 @@ impl TryFromDialect<sqlparser::ast::DataType> for SqlType {
             Unsigned => Ok(Self::Unsigned),
             UnsignedInteger => Ok(Self::UnsignedInteger),
             Float4 | Float8 | Float32 | Float64 => unsupported!("FLOAT<size> type"),
-            Real => Ok(Self::Real),
+            Real | RealUnsigned => Ok(Self::Real),
             // XXX we don't support precision on doubles; [MySQL] says it's deprecated, but still present as of 9.1
             // [MySQL]: https://dev.mysql.com/doc/refman/8.4/en/floating-point-types.html
-            Double(_info) => Ok(Self::Double),
-            DoublePrecision => Ok(Self::Double),
+            Double(_info) | DoubleUnsigned(_info) => Ok(Self::Double),
+            DoublePrecision | DoublePrecisionUnsigned => Ok(Self::Double),
             Bool => Ok(Self::Bool),
             Boolean => Ok(Self::Bool),
             Date => Ok(Self::Date),
@@ -342,13 +342,6 @@ impl TryFromDialect<sqlparser::ast::DataType> for SqlType {
             NamedTable { .. } => unsupported!("NAMED TABLE type"),
             TsQuery => unsupported!("psql TSQUERY type"),
             TsVector => Ok(Self::Tsvector),
-            // MySQL unsigned types
-            DecimalUnsigned(_)
-            | DecUnsigned(_)
-            | FloatUnsigned(_)
-            | RealUnsigned
-            | DoubleUnsigned(_)
-            | DoublePrecisionUnsigned => unsupported!("MySQL UNSIGNED decimal/float type"),
         }
     }
 }
