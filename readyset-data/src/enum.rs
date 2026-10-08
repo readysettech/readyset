@@ -1,7 +1,7 @@
 use readyset_errors::ReadySetResult;
 use readyset_sql::ast::EnumVariants;
 
-use crate::{integer, DfType, DfValue};
+use crate::{integer, Collation, DfType, DfValue};
 
 /// Coerce an enum value to a different type.
 ///
@@ -14,10 +14,11 @@ pub(crate) fn coerce_enum(
     from_ty: &DfType,
 ) -> ReadySetResult<DfValue> {
     if to_ty.is_any_text() {
+        let collation = to_ty.collation().unwrap_or(Collation::Utf8);
         let idx = usize::try_from(enum_value).unwrap_or(0);
 
         if idx == 0 {
-            Ok(DfValue::from(""))
+            Ok(DfValue::from_str_and_collation("", collation))
         } else if let Some(s) = enum_elements.get(idx - 1) {
             // This match is solely here to accommodate for different length specifications in
             // char/varchar types. When Nikolai's apply_str_limit function is finished and merged,
@@ -28,16 +29,16 @@ pub(crate) fn coerce_enum(
                     let mut new_string = String::with_capacity(*l as usize);
                     new_string += s;
                     new_string.extend(std::iter::repeat_n(' ', *l as usize - s.len()));
-                    Ok(DfValue::from(new_string))
+                    Ok(DfValue::from_str_and_collation(&new_string, collation))
                 }
                 DfType::Char(l, ..) | DfType::VarChar(l, ..) if (*l as usize) < s.len() => {
                     // Len is less than current string, have to truncate
-                    Ok(DfValue::from(&s[..*l as usize]))
+                    Ok(DfValue::from_str_and_collation(&s[..*l as usize], collation))
                 }
-                _ => Ok(DfValue::from(s.as_str())),
+                _ => Ok(DfValue::from_str_and_collation(s, collation)),
             }
         } else {
-            Ok(DfValue::from("")) // must be out of bounds of enum_elements
+            Ok(DfValue::from_str_and_collation("", collation))
         }
     } else {
         integer::coerce_integer(enum_value, to_ty, from_ty)
