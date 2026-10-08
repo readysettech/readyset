@@ -5,7 +5,6 @@ mod array_constructor;
 mod create_table_columns;
 mod derived_tables_rewrite;
 mod detect_bucket_functions;
-mod detect_problematic_self_joins;
 pub mod detect_references;
 pub mod detect_unsupported_placeholders;
 mod disallow_row;
@@ -63,7 +62,6 @@ pub use crate::alias_removal::AliasRemoval;
 pub use crate::array_constructor::ArrayConstructorRewrite;
 pub use crate::create_table_columns::CreateTableColumns;
 pub use crate::detect_bucket_functions::DetectBucketFunctions;
-pub use crate::detect_problematic_self_joins::DetectProblematicSelfJoins;
 pub use crate::detect_unsupported_placeholders::DetectUnsupportedPlaceholders;
 pub use crate::expr::{ScalarOptimizeExpressions, const_eval_to_dfvalue, eval_constant_expr};
 pub use crate::implied_tables::ImpliedTableExpansion;
@@ -267,8 +265,6 @@ impl Rewrite for SelectStatement {
         trace!(parent: &span, pass="remove_numeric_field_references", query = %self.display(sql_dialect));
         self.normalize_topk_with_aggregate(&context)?;
         trace!(parent: &span, pass="normalize_topk_with_aggregate", query = %self.display(sql_dialect));
-        self.detect_problematic_self_joins()?;
-        trace!(parent: &span, pass="detect_problematic_self_joins", query = %self.display(sql_dialect));
         self.rewrite_table_aliases(query_name, context.table_alias_rewrites())?;
         trace!(parent: &span, pass="rewrite_table_aliases", query = %self.display(sql_dialect));
 

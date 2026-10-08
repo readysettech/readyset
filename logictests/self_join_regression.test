@@ -194,3 +194,233 @@ query I nosort
 SELECT count(*) AS n FROM va AS a JOIN vb AS b ON a.k = b.k
 ----
 16
+
+# The shape glutton draws as its race sentinel: one base reached through a `DISTINCT` on each
+# side.  Each lookup resolves at its own aggregate, so the write reaches them one at a time.
+# `column_4` is the primary key, so the `DISTINCT` changes no row -- which is what lets the
+# sentinel keep witnessing key presence while staying cacheable.
+query I nosort
+SELECT count(*) AS n FROM (SELECT DISTINCT column_4 FROM t) AS j0
+  JOIN (SELECT DISTINCT column_4 FROM t) AS j1 ON j0.column_4 = j1.column_4
+----
+5
+
+statement ok
+INSERT INTO t (column_1, column_4, column_2, column_3) VALUES (2, 10, 1, 1)
+
+query I nosort
+SELECT count(*) AS n FROM (SELECT DISTINCT column_4 FROM t) AS j0
+  JOIN (SELECT DISTINCT column_4 FROM t) AS j1 ON j0.column_4 = j1.column_4
+----
+6
+
+# MIN and MAX on each side of a join over one shared base.  `Extremum` is the one aggregate that
+# reads back into its parent: retracting the current extreme leaves it with no value to fold the
+# delta into, so it looks the group up in the base and recomputes.  That read is not what the rule
+# reasons about -- the rule asks where a lookup from the join comes to rest -- so these pin the
+# interaction rather than the rule.  Both caches live over the same base at once.
+statement ok
+CREATE TABLE tg (id INT PRIMARY KEY, k INT, v INT)
+
+statement ok
+INSERT INTO tg (id, k, v) VALUES (1, 1, 10), (2, 1, 20), (3, 2, 30), (4, 2, 40)
+
+query II nosort
+SELECT a.m AS am, b.m AS bm FROM (SELECT k, MIN(v) AS m FROM tg GROUP BY k) AS a JOIN (SELECT k, MIN(v) AS m FROM tg GROUP BY k) AS b ON a.k = b.k ORDER BY a.k
+----
+10
+10
+30
+30
+
+query II nosort
+SELECT a.m AS am, b.m AS bm FROM (SELECT k, MAX(v) AS m FROM tg GROUP BY k) AS a JOIN (SELECT k, MAX(v) AS m FROM tg GROUP BY k) AS b ON a.k = b.k ORDER BY a.k
+----
+20
+20
+40
+40
+
+# Retracting the minimum of the first group: the read-back path for MIN, an ordinary fold for MAX.
+statement ok
+DELETE FROM tg WHERE id = 1
+
+query II nosort
+SELECT a.m AS am, b.m AS bm FROM (SELECT k, MIN(v) AS m FROM tg GROUP BY k) AS a JOIN (SELECT k, MIN(v) AS m FROM tg GROUP BY k) AS b ON a.k = b.k ORDER BY a.k
+----
+20
+20
+30
+30
+
+query II nosort
+SELECT a.m AS am, b.m AS bm FROM (SELECT k, MAX(v) AS m FROM tg GROUP BY k) AS a JOIN (SELECT k, MAX(v) AS m FROM tg GROUP BY k) AS b ON a.k = b.k ORDER BY a.k
+----
+20
+20
+40
+40
+
+# And the maximum of the second group, so each query has taken the read-back path once.
+statement ok
+DELETE FROM tg WHERE id = 4
+
+query II nosort
+SELECT a.m AS am, b.m AS bm FROM (SELECT k, MIN(v) AS m FROM tg GROUP BY k) AS a JOIN (SELECT k, MIN(v) AS m FROM tg GROUP BY k) AS b ON a.k = b.k ORDER BY a.k
+----
+20
+20
+30
+30
+
+query II nosort
+SELECT a.m AS am, b.m AS bm FROM (SELECT k, MAX(v) AS m FROM tg GROUP BY k) AS a JOIN (SELECT k, MAX(v) AS m FROM tg GROUP BY k) AS b ON a.k = b.k ORDER BY a.k
+----
+20
+20
+30
+30
+
+# One batch carrying a new minimum for one group and a new maximum for the other: both queries
+# fold without reading back, which is the contrast the retractions above are measured against.
+statement ok
+INSERT INTO tg (id, k, v) VALUES (5, 1, 5), (6, 2, 60)
+
+query II nosort
+SELECT a.m AS am, b.m AS bm FROM (SELECT k, MIN(v) AS m FROM tg GROUP BY k) AS a JOIN (SELECT k, MIN(v) AS m FROM tg GROUP BY k) AS b ON a.k = b.k ORDER BY a.k
+----
+5
+5
+30
+30
+
+query II nosort
+SELECT a.m AS am, b.m AS bm FROM (SELECT k, MAX(v) AS m FROM tg GROUP BY k) AS a JOIN (SELECT k, MAX(v) AS m FROM tg GROUP BY k) AS b ON a.k = b.k ORDER BY a.k
+----
+20
+20
+60
+60
+
+# Retracting each of those in turn returns both groups to a value the join already held.
+statement ok
+DELETE FROM tg WHERE id = 5
+
+query II nosort
+SELECT a.m AS am, b.m AS bm FROM (SELECT k, MIN(v) AS m FROM tg GROUP BY k) AS a JOIN (SELECT k, MIN(v) AS m FROM tg GROUP BY k) AS b ON a.k = b.k ORDER BY a.k
+----
+20
+20
+30
+30
+
+statement ok
+DELETE FROM tg WHERE id = 6
+
+query II nosort
+SELECT a.m AS am, b.m AS bm FROM (SELECT k, MAX(v) AS m FROM tg GROUP BY k) AS a JOIN (SELECT k, MAX(v) AS m FROM tg GROUP BY k) AS b ON a.k = b.k ORDER BY a.k
+----
+20
+20
+30
+30
+
+# A write that empties one group and lands in the other, so a key the join holds disappears while
+# the surviving group takes a new extreme at both ends.
+statement ok
+UPDATE tg SET k = 2, v = 7 WHERE id = 2
+
+query II nosort
+SELECT a.m AS am, b.m AS bm FROM (SELECT k, MIN(v) AS m FROM tg GROUP BY k) AS a JOIN (SELECT k, MIN(v) AS m FROM tg GROUP BY k) AS b ON a.k = b.k ORDER BY a.k
+----
+7
+7
+
+query II nosort
+SELECT a.m AS am, b.m AS bm FROM (SELECT k, MAX(v) AS m FROM tg GROUP BY k) AS a JOIN (SELECT k, MAX(v) AS m FROM tg GROUP BY k) AS b ON a.k = b.k ORDER BY a.k
+----
+30
+30
+
+# The shapes the rule admits where each input stops at state of its own, read once before a
+# write and again after.  Expected values checked against upstream.
+statement ok
+CREATE TABLE ts (id INT PRIMARY KEY, k INT, v INT)
+
+statement ok
+INSERT INTO ts VALUES (1, 1, 10), (2, 1, 20), (3, 2, 30)
+
+# A grouped count on each input: each group pairs with itself.
+query I nosort
+SELECT count(*) AS n FROM (SELECT k, count(*) AS c FROM ts GROUP BY k) a JOIN (SELECT k, count(*) AS c FROM ts GROUP BY k) b ON a.k = b.k
+----
+2
+
+# A derived table carrying a literal column, which is the admission a cross join reaches
+# through `add_bogokey_if_necessary`, written in SQL instead.  Every row pairs with every row.
+query I nosort
+SELECT count(*) AS n FROM (SELECT v, 1 AS lit FROM ts) a JOIN (SELECT v, 1 AS lit FROM ts) b ON a.lit = b.lit
+----
+9
+
+# Top-k on each input: the two smallest, each pairing with itself.
+query I nosort
+SELECT count(*) AS n FROM (SELECT v FROM ts ORDER BY v LIMIT 2) a JOIN (SELECT v FROM ts ORDER BY v LIMIT 2) b ON a.v = b.v
+----
+2
+
+statement ok
+INSERT INTO ts VALUES (4, 1, 40)
+
+query I nosort
+SELECT count(*) AS n FROM (SELECT k, count(*) AS c FROM ts GROUP BY k) a JOIN (SELECT k, count(*) AS c FROM ts GROUP BY k) b ON a.k = b.k
+----
+2
+
+query I nosort
+SELECT count(*) AS n FROM (SELECT v, 1 AS lit FROM ts) a JOIN (SELECT v, 1 AS lit FROM ts) b ON a.lit = b.lit
+----
+16
+
+query I nosort
+SELECT count(*) AS n FROM (SELECT v FROM ts ORDER BY v LIMIT 2) a JOIN (SELECT v FROM ts ORDER BY v LIMIT 2) b ON a.v = b.v
+----
+2
+
+statement ok
+DELETE FROM ts WHERE id = 1
+
+query I nosort
+SELECT count(*) AS n FROM (SELECT k, count(*) AS c FROM ts GROUP BY k) a JOIN (SELECT k, count(*) AS c FROM ts GROUP BY k) b ON a.k = b.k
+----
+2
+
+query I nosort
+SELECT count(*) AS n FROM (SELECT v, 1 AS lit FROM ts) a JOIN (SELECT v, 1 AS lit FROM ts) b ON a.lit = b.lit
+----
+9
+
+query I nosort
+SELECT count(*) AS n FROM (SELECT v FROM ts ORDER BY v LIMIT 2) a JOIN (SELECT v FROM ts ORDER BY v LIMIT 2) b ON a.v = b.v
+----
+2
+
+# A parameterised cache over a shared base is refused like any other: the key is never read, so
+# a placeholder changes nothing.
+statement ok
+CREATE TABLE users (id INT PRIMARY KEY, friend INT)
+
+onlyif readyset
+statement error: reaches both sides of a join
+create cache fof from SELECT u1.id AS user, u2.friend AS fof FROM users u1 JOIN users u2 ON u1.friend = u2.id WHERE u1.id = ?
+
+# And a cache whose own SQL never names the base table, reaching it only through two views.
+statement ok
+CREATE VIEW fof_a AS SELECT id, friend FROM users
+
+statement ok
+CREATE VIEW fof_b AS SELECT id, friend FROM users
+
+onlyif readyset
+statement error: reaches both sides of a join
+create cache fof2 from SELECT a.id AS user, b.friend AS fof FROM fof_a a JOIN fof_b b ON a.friend = b.id

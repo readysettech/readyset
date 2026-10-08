@@ -1407,27 +1407,18 @@ pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult
 
                 (join_preds, extra_preds)
             }
-            JoinConstraint::Using(cols) => {
-                invariant_eq!(cols.len(), 1);
-                #[allow(clippy::unwrap_used)] // cols.len() == 1
-                let col = cols.first().unwrap();
-
-                left_table = prev_table.clone();
-                right_table = rhs_relation;
-
-                (
-                    vec![JoinPredicate {
-                        left: Column {
-                            table: Some(left_table.clone()),
-                            name: col.name.clone(),
-                        },
-                        right: Column {
-                            table: Some(right_table.clone()),
-                            name: col.name.clone(),
-                        },
-                    }],
-                    vec![],
-                )
+            JoinConstraint::Using(_) => {
+                // `expand_join_on_using` desugars `USING` into `ON`, and only the adapter
+                // pipeline runs it, so a statement arriving by the server path still carries
+                // the `USING` as written.  Declined rather than lowered: `USING` coalesces the
+                // joined column into one, and nothing on this path does that, so an unmatched
+                // left-join row would carry the right relation's NULL where the left value
+                // belongs.  Declined rather than `internal!`ed because the server path can
+                // legitimately see this -- it is a shape we do not handle, not a broken
+                // invariant.
+                unsupported!(
+                    "JOIN ... USING cannot be lowered directly; write the join condition as ON"
+                );
             }
             JoinConstraint::Empty => {
                 left_table = prev_table.clone();
@@ -2292,6 +2283,20 @@ mod tests {
         )
         .unwrap();
         to_query_graph(query, readyset_data::Dialect::DEFAULT_MYSQL).unwrap_err();
+    }
+
+    #[test]
+    fn join_using_is_declined() {
+        // Lowering `USING` here would answer it with the projection of the equivalent `ON`,
+        // so the server path declines it rather than desugaring it itself.
+        let query = parse_select(
+            Dialect::MySQL,
+            "SELECT t1.x, t2.y FROM t1 JOIN t2 USING (x);",
+        )
+        .unwrap();
+        let err = to_query_graph(query, readyset_data::Dialect::DEFAULT_MYSQL)
+            .expect_err("JOIN ... USING must be declined on the server path");
+        assert!(err.is_unsupported(), "got {err:?}");
     }
 
     #[test]

@@ -23,7 +23,7 @@ DELETE FROM `table_1` WHERE (`column_3` = 3)
 statement ok
 DELETE FROM `table_1` WHERE (`column_3` = 4)
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1`) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -33,7 +33,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -43,7 +43,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -53,7 +53,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -63,7 +63,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` > `table_1`.`column_2`)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -73,7 +73,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -83,7 +83,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -93,7 +93,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` > `table_1`.`column_2`)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -103,7 +103,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` > 1) OR (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -113,7 +113,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` > 1)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -123,7 +123,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` > 1)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -133,7 +133,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > 1))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -143,7 +143,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -153,7 +153,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -163,7 +163,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -173,7 +173,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -183,7 +183,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -193,7 +193,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -203,7 +203,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -213,7 +213,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -223,7 +223,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` > 1) OR (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -233,7 +233,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6`, `table_1`.`column_1` AS `alias_7` FROM `table_1` WHERE ((((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))) AS alias_8 ON (`table_1`.`column_1` = `alias_8`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -243,7 +243,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > 1))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -253,7 +253,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -263,7 +263,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -273,7 +273,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -283,7 +283,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6`, `table_1`.`column_1` AS `alias_7` FROM `table_1` WHERE ((((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))) AS alias_8 ON (`table_1`.`column_1` = `alias_8`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -293,7 +293,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (`table_1`.`column_1` > `table_1`.`column_2`)) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -302,7 +302,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (`table_1`.`column_1` > `table_1`.`column_2`)) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -311,7 +311,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (`table_1`.`column_1` > 1)) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -320,7 +320,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (`table_1`.`column_1` > 1)) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -329,7 +329,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1`) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -338,7 +338,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -347,7 +347,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -356,7 +356,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -365,7 +365,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (`table_1`.`column_1` > `table_1`.`column_2`)) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -374,7 +374,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -383,7 +383,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -392,7 +392,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (`table_1`.`column_1` > `table_1`.`column_2`)) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -401,7 +401,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_1` > 1) OR (`table_1`.`column_1` > 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -410,7 +410,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (`table_1`.`column_1` > 1)) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -419,7 +419,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (`table_1`.`column_1` > 1)) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -428,7 +428,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -437,7 +437,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -446,7 +446,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -455,7 +455,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -464,7 +464,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -473,7 +473,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -482,7 +482,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -491,7 +491,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -500,7 +500,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -509,7 +509,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_1` > 1) OR (`table_1`.`column_1` > 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -518,7 +518,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -527,7 +527,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -536,7 +536,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -545,7 +545,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -554,7 +554,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -563,7 +563,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE ((((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -572,7 +572,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` > `table_1`.`column_2`)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -582,7 +582,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` > `table_1`.`column_2`)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -592,7 +592,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` > 1)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -602,7 +602,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` > 1)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -612,7 +612,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1`) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -622,7 +622,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -632,7 +632,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -642,7 +642,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -652,7 +652,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` > `table_1`.`column_2`)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -662,7 +662,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -672,7 +672,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -682,7 +682,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` > `table_1`.`column_2`)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -692,7 +692,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` > 1) OR (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -702,7 +702,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` > 1)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -712,7 +712,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE (`table_1`.`column_1` > 1)) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -722,7 +722,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > 1))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -732,7 +732,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -742,7 +742,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -752,7 +752,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -762,7 +762,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -772,7 +772,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -782,7 +782,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -792,7 +792,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -802,7 +802,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -812,7 +812,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5` FROM `table_1` WHERE ((`table_1`.`column_1` > 1) OR (`table_1`.`column_1` > 1))) AS alias_6 ON (`table_1`.`column_1` = `alias_6`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -822,7 +822,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6`, `table_1`.`column_1` AS `alias_7` FROM `table_1` WHERE ((((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))) AS alias_8 ON (`table_1`.`column_1` = `alias_8`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -832,7 +832,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > 1))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -842,7 +842,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) OR (`table_1`.`column_1` > 1))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -852,7 +852,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -862,7 +862,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6` FROM `table_1` WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))) AS alias_7 ON (`table_1`.`column_1` = `alias_7`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -872,7 +872,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `table_1`.`column_1` AS `alias_3` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_4`, `table_1`.`column_1` AS `alias_5`, `table_1`.`column_1` AS `alias_6`, `table_1`.`column_1` AS `alias_7` FROM `table_1` WHERE ((((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`)) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))) AS alias_8 ON (`table_1`.`column_1` = `alias_8`.`alias_4`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) OR (`table_1`.`column_1` > 1))
 ----
 1839435518
@@ -882,7 +882,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2`, `ta
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (`table_1`.`column_1` > `table_1`.`column_2`)) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -891,7 +891,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (`table_1`.`column_1` > `table_1`.`column_2`)) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -900,7 +900,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (`table_1`.`column_1` > 1)) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -909,7 +909,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (`table_1`.`column_1` > 1)) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -918,7 +918,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1`) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -927,7 +927,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > `table_1`.`column_2`))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -936,7 +936,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -945,7 +945,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -954,7 +954,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` WHERE (`table_1`.`column_1` > `table_1`.`column_2`)) AS alias_4 ON (`table_1`.`column_1` = `alias_4`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -963,7 +963,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----
@@ -972,7 +972,7 @@ SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM
 2085037482
 2085037482
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_1`, `table_1`.`column_1` AS `alias_2` FROM `table_1` LEFT JOIN (SELECT `table_1`.`column_1` AS `alias_3`, `table_1`.`column_1` AS `alias_4` FROM `table_1` WHERE ((`table_1`.`column_1` > `table_1`.`column_2`) OR (`table_1`.`column_1` > 1))) AS alias_5 ON (`table_1`.`column_1` = `alias_5`.`alias_3`) WHERE (((`table_1`.`column_1` > `table_1`.`column_2`) AND (`table_1`.`column_1` > 1)) AND (`table_1`.`column_1` > ?))
 ? = 10
 ----

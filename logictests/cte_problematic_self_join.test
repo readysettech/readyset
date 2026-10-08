@@ -1,7 +1,7 @@
 statement ok
 create table t (x int);
 
-query II nosort error: Self-joins using the same column are unsupported
+query II nosort error: Base\ table\ t\ reaches\ both\ sides\ of\ a\ join
 WITH l AS (SELECT t.x FROM t), r AS (SELECT t.x FROM t)
 SELECT * FROM l JOIN r ON l.x = r.x;
 ----
@@ -11,7 +11,7 @@ insert into t (x) values (1);
 
 # Inlining each entry puts `t` beside itself on `x`.  The engine answers that shape wrongly
 # (REA-6472), so the statement is refused rather than cached, with or without rows present.
-query II nosort error: Self-joins using the same column are unsupported
+query II nosort error: Base\ table\ t\ reaches\ both\ sides\ of\ a\ join
 WITH l AS (SELECT t.x FROM t), r AS (SELECT t.x FROM t)
 SELECT * FROM l JOIN r ON l.x = r.x;
 ----

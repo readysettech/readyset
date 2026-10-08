@@ -15,7 +15,7 @@ WITH `alias_3` AS (SELECT sum(distinct `table_1`.`column_2`) AS `alias_2` FROM `
 NULL
 
 # REA-6472
-query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_3` AS (SELECT `table_1`.`column_3` AS `alias_2` FROM `table_1`) SELECT sum(distinct `table_1`.`column_3`) AS `alias_1` FROM `table_1` INNER JOIN `alias_3` ON (`table_1`.`column_3` = `alias_3`.`alias_2`)
 ----
 -2313930593
@@ -32,7 +32,7 @@ WITH `alias_2` AS (SELECT sum(distinct `table_1`.`column_6`) AS `alias_1` FROM `
 
 
 # REA-6472
-query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_3` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_3` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_3` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
@@ -55,7 +55,7 @@ WITH `alias_3` AS (SELECT sum(distinct `table_1`.`column_9`) AS `alias_2` FROM `
 NULL
 
 # REA-6472
-query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 WITH `alias_3` AS (SELECT `table_1`.`column_3` AS `alias_2` FROM `table_1`) SELECT sum(distinct `table_1`.`column_10`) AS `alias_1` FROM `table_1` INNER JOIN `alias_3` ON (`table_1`.`column_3` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
@@ -94,7 +94,7 @@ WITH `alias_3` AS (SELECT sum(distinct `table_1`.`column_2`) AS `alias_2` FROM `
 NULL
 
 # REA-6472
-query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_3` AS (SELECT `table_1`.`column_3` AS `alias_2` FROM `table_1`) SELECT sum(distinct `table_1`.`column_3`) AS `alias_1` FROM `table_1` INNER JOIN `alias_3` ON (`table_1`.`column_3` = `alias_3`.`alias_2`)
 ----
 -3512260025
@@ -111,7 +111,7 @@ WITH `alias_2` AS (SELECT sum(distinct `table_1`.`column_6`) AS `alias_1` FROM `
 
 
 # REA-6472
-query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_3` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_3` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_3` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----
@@ -131,7 +131,7 @@ WITH `alias_3` AS (SELECT sum(distinct `table_1`.`column_9`) AS `alias_2` FROM `
 NULL
 
 # REA-6472
-query  rowsort error: Self\-joins\ using\ the\ same\ column\ are\ unsupported
+query  rowsort error: SUM\(DISTINCT\ \.\.\.\)\ is\ not\ supported\ as\ a\ post\-lookup\ aggregate
 WITH `alias_3` AS (SELECT `table_1`.`column_3` AS `alias_2` FROM `table_1`) SELECT sum(distinct `table_1`.`column_10`) AS `alias_1` FROM `table_1` INNER JOIN `alias_3` ON (`table_1`.`column_3` = `alias_3`.`alias_2`) WHERE (`table_1`.`column_3` > ?)
 ? = 10
 ----

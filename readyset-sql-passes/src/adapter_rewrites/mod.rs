@@ -294,8 +294,8 @@ fn rewrite_equivalent_parameters(
 /// 1. **Server-side pipeline compensates for adapter omissions.**
 ///    `SelectStatement::rewrite` in `lib.rs` runs AFTER this function on
 ///    deep-cached queries and covers `rewrite_between`,
-///    `normalize_topk_with_aggregate`, `detect_problematic_self_joins`,
-///    `remove_numeric_field_references`, `rewrite_table_aliases`. Their
+///    `normalize_topk_with_aggregate`, `remove_numeric_field_references`,
+///    `rewrite_table_aliases`. Their
 ///    omission here is intentional, not a gap.
 ///
 /// 2. **`order_limit_removal` must run AFTER the optimization-rewrite

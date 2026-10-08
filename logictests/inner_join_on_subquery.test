@@ -95,7 +95,7 @@ NYC
 # The shape the query above used to have: the IN reads `j`, which the outer FROM already
 # joins, so the decorrelated semi-join compares j.city to itself and the engine declines.
 # Kept so that restoring a cache for this shape has to be deliberate.
-query IT rowsort error: Self-joins using the same column are unsupported
+query IT rowsort error: Base\ table\ j\ reaches\ both\ sides\ of\ a\ join
 select s.sn, s.city
 from s
 inner join j on s.city = j.city

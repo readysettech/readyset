@@ -3252,7 +3252,7 @@ impl Subquery {
         let left_table_name = left_table.name.clone();
         // If the outer query's table is the same as the subquery's table, we must use a
         // different column for the join key to avoid generating a self-join on the same column,
-        // which Readyset doesn't support (see detect_problematic_self_joins).
+        // which dataflow cannot maintain (REA-6138).
         let left_join_key = if left_table_name == right_table_name {
             left_table.some_column_with_type_different_than(SqlType::Int(None), &right_join_col)
         } else {
@@ -3764,13 +3764,11 @@ mod tests {
         }
     }
 
-    /// Regression test: subquery joins must not produce queries that trigger the
-    /// "Self-joins using the same column are unsupported" error in Readyset.
-    /// See REA-6210.
+    /// Regression test for REA-6210: when the subquery reads the outer query's own table, the
+    /// generator must key the join on a different column on each side.  A key that compares a
+    /// column with itself is the self-join shape dataflow cannot maintain.
     #[test]
     fn subquery_join_avoids_problematic_self_joins() {
-        use readyset_sql_passes::DetectProblematicSelfJoins;
-
         let dialect = ParseDialect::MySQL;
         let mut gen = GeneratorState::with_dialect(dialect);
         let seed = QuerySeed {
@@ -3783,13 +3781,45 @@ mod tests {
                 },
             }],
         };
-        let mut query = gen.generate_query(seed).statement;
+        let query = gen.generate_query(seed).statement;
         eprintln!("query: {}", query.display(dialect));
 
-        // The generated query must not be flagged as a problematic self-join
-        query
-            .detect_problematic_self_joins()
-            .expect("subquery join should not produce a problematic self-join");
+        let join = query.join.first().unwrap();
+        let JoinConstraint::On(Expr::BinaryOp { lhs, rhs, .. }) = &join.constraint else {
+            unreachable!("Unexpected constraint: {:?}", join.constraint)
+        };
+        let (Expr::Column(left_field), Expr::Column(right_field)) = (lhs.as_ref(), rhs.as_ref())
+        else {
+            unreachable!("Unexpected join key: {:?} = {:?}", lhs, rhs)
+        };
+        let JoinRightSide::Table(right) = &join.right else {
+            unreachable!("Unexpected right side: {:?}", join.right)
+        };
+        let TableExprInner::Subquery(subquery) = &right.inner else {
+            unreachable!("Unexpected right side: {:?}", right.inner)
+        };
+        assert_eq!(
+            subquery.tables.first(),
+            query.tables.first(),
+            "this regression only has teeth when both sides read one table"
+        );
+        // The right side of the key names the subquery's output, so it has to be resolved back
+        // to the column it projects before the two sides can be compared at all.
+        let right_source = subquery
+            .fields
+            .iter()
+            .find_map(|field| match field {
+                FieldDefinitionExpr::Expr {
+                    expr: Expr::Column(col),
+                    alias: Some(alias),
+                } if *alias == right_field.name => Some(col),
+                _ => None,
+            })
+            .expect("the subquery must project the column its side of the key names");
+        assert_ne!(
+            left_field.name, right_source.name,
+            "a join back to the outer table must compare different columns"
+        );
     }
 
     /// The generator must reach `NOT ((NOT a) AND b)`, the shape that used to panic

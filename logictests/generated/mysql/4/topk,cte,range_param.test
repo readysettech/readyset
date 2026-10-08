@@ -9,7 +9,7 @@ statement ok
 INSERT INTO `table_1` (`column_2`, `column_1`) VALUES (0, 1752594202), (1, 176354641), (2, -695370994), (3, -2036730581), (4, -1618478547), (5, -825160788), (6, 834151492), (7, -142309586), (8, 2068626279), (9, -1322480957)
 
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ----
 -2036730581
@@ -23,7 +23,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 1752594202
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ----
 -2036730581
@@ -37,7 +37,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 1752594202
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ----
 -2036730581
@@ -51,7 +51,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELE
 1752594202
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ----
 -2036730581
@@ -65,7 +65,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 1752594202
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ----
 -2036730581
@@ -79,7 +79,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 1752594202
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ----
 -2036730581
@@ -93,7 +93,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 1752594202
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ----
 -2036730581
@@ -107,7 +107,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 1752594202
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -121,7 +121,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 -1618478547
 -2036730581
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -135,7 +135,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 -1618478547
 -2036730581
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -149,7 +149,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELE
 -1618478547
 -2036730581
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -163,7 +163,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 -1618478547
 -2036730581
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -177,7 +177,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 -1618478547
 -2036730581
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -191,7 +191,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 -1618478547
 -2036730581
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -205,7 +205,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 -1618478547
 -2036730581
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -214,7 +214,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 2068626279
 834151492
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -223,7 +223,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 2068626279
 834151492
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -232,7 +232,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELE
 2068626279
 834151492
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -241,7 +241,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 2068626279
 834151492
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -250,7 +250,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 2068626279
 834151492
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -259,7 +259,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 2068626279
 834151492
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -268,7 +268,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 2068626279
 834151492
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -282,7 +282,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 -1618478547
 -2036730581
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -296,7 +296,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 -1618478547
 -2036730581
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -310,7 +310,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELE
 -1618478547
 -2036730581
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -324,7 +324,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 -1618478547
 -2036730581
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -338,7 +338,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 -1618478547
 -2036730581
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -352,7 +352,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 -1618478547
 -2036730581
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -366,7 +366,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 -1618478547
 -2036730581
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
@@ -375,7 +375,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 1752594202
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
@@ -384,7 +384,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 1752594202
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
@@ -393,7 +393,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELE
 1752594202
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
@@ -402,7 +402,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 1752594202
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
@@ -411,7 +411,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 1752594202
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
@@ -420,7 +420,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 1752594202
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
@@ -429,7 +429,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 1752594202
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -438,7 +438,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 834151492
 176354641
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -447,7 +447,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 834151492
 176354641
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -456,7 +456,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELE
 834151492
 176354641
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -465,7 +465,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 834151492
 176354641
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -474,7 +474,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 834151492
 176354641
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -483,7 +483,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 834151492
 176354641
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -492,7 +492,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 834151492
 176354641
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -501,7 +501,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 834151492
 176354641
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -510,7 +510,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 834151492
 176354641
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -519,7 +519,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELE
 834151492
 176354641
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -528,7 +528,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 834151492
 176354641
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -537,7 +537,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 834151492
 176354641
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -546,7 +546,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 834151492
 176354641
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
@@ -575,7 +575,7 @@ statement ok
 DELETE FROM `table_1` WHERE (`column_2` = 4)
 
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ----
 -1322480957
@@ -584,7 +584,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 834151492
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ----
 -1322480957
@@ -593,7 +593,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 834151492
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ----
 -1322480957
@@ -602,7 +602,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELE
 834151492
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ----
 -1322480957
@@ -611,7 +611,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 834151492
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ----
 -1322480957
@@ -620,7 +620,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 834151492
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ----
 -1322480957
@@ -629,7 +629,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 834151492
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ----
 -1322480957
@@ -638,7 +638,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 834151492
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -647,7 +647,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 -825160788
 -1322480957
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -656,7 +656,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 -825160788
 -1322480957
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -665,7 +665,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELE
 -825160788
 -1322480957
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -674,7 +674,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 -825160788
 -1322480957
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -683,7 +683,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 -825160788
 -1322480957
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -692,7 +692,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 -825160788
 -1322480957
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -701,56 +701,56 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 -825160788
 -1322480957
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
 2068626279
 834151492
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
 2068626279
 834151492
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
 2068626279
 834151492
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
 2068626279
 834151492
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
 2068626279
 834151492
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
 2068626279
 834151492
 
-query  rowsort error: Self\-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
 2068626279
 834151492
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -759,7 +759,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 -825160788
 -1322480957
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -768,7 +768,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 -825160788
 -1322480957
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -777,7 +777,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELE
 -825160788
 -1322480957
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -786,7 +786,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 -825160788
 -1322480957
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -795,7 +795,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 -825160788
 -1322480957
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -804,7 +804,7 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 -825160788
 -1322480957
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ----
 2068626279
@@ -813,147 +813,147 @@ WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER
 -825160788
 -1322480957
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
 834151492
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
 834151492
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
 834151492
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
 834151492
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
 834151492
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
 834151492
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` ASC LIMIT 10
 ? = 10
 ----
 834151492
 2068626279
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
 2068626279
 834151492
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
 2068626279
 834151492
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
 2068626279
 834151492
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
 2068626279
 834151492
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
 2068626279
 834151492
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
 2068626279
 834151492
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
 2068626279
 834151492
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
 2068626279
 834151492
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
 2068626279
 834151492
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
 2068626279
 834151492
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
 2068626279
 834151492
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` ASC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
 2068626279
 834151492
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----
 2068626279
 834151492
 
-query  nosort error: Self\-joins using the same column are unsupported
+query  nosort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 WITH `alias_2` AS (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1` ORDER BY `table_1`.`column_1` DESC LIMIT 10) SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN `alias_2` ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?) ORDER BY `table_1`.`column_1` DESC LIMIT 10
 ? = 10
 ----

@@ -9,7 +9,7 @@ statement ok
 INSERT INTO `table_1` (`column_1`, `column_2`) VALUES (252214386, 0), (1729046962, 1), (1613688308, 2), (-1210248929, 3), (-1790670908, 4), (1564476498, 5), (364530266, 6), (1429702185, 7), (870608286, 8), (489811450, 9)
 
 
-query  rowsort error: Self-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT DISTINCT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT DISTINCT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`)
 ----
 -1210248929
@@ -23,7 +23,7 @@ SELECT DISTINCT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SEL
 489811450
 870608286
 
-query  rowsort error: Self-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT DISTINCT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`)
 ----
 -1210248929
@@ -37,7 +37,7 @@ SELECT DISTINCT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SEL
 489811450
 870608286
 
-query  rowsort error: Self-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT DISTINCT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT DISTINCT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`)
 ----
 -1210248929
@@ -52,7 +52,7 @@ SELECT DISTINCT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SEL
 870608286
 
 # REA-6472
-query  rowsort error: Self-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT DISTINCT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -66,7 +66,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT DISTI
 870608286
 
 # REA-6472
-query  rowsort error: Self-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -80,7 +80,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 870608286
 
 # REA-6472
-query  rowsort error: Self-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT DISTINCT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -94,7 +94,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT DISTI
 870608286
 
 # REA-6472
-query  rowsort error: Self-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT DISTINCT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT DISTINCT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -108,7 +108,7 @@ SELECT DISTINCT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SEL
 870608286
 
 # REA-6472
-query  rowsort error: Self-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT DISTINCT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -122,7 +122,7 @@ SELECT DISTINCT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SEL
 870608286
 
 # REA-6472
-query  rowsort error: Self-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT DISTINCT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT DISTINCT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -155,7 +155,7 @@ statement ok
 DELETE FROM `table_1` WHERE (`column_2` = 4)
 
 
-query  rowsort error: Self-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT DISTINCT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT DISTINCT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`)
 ----
 1429702185
@@ -164,7 +164,7 @@ SELECT DISTINCT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SEL
 489811450
 870608286
 
-query  rowsort error: Self-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT DISTINCT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`)
 ----
 1429702185
@@ -173,7 +173,7 @@ SELECT DISTINCT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SEL
 489811450
 870608286
 
-query  rowsort error: Self-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT DISTINCT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT DISTINCT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`)
 ----
 1429702185
@@ -183,7 +183,7 @@ SELECT DISTINCT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SEL
 870608286
 
 # REA-6472
-query  rowsort error: Self-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT DISTINCT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -194,7 +194,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT DISTI
 870608286
 
 # REA-6472
-query  rowsort error: Self-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -205,7 +205,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `tabl
 870608286
 
 # REA-6472
-query  rowsort error: Self-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT DISTINCT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -216,7 +216,7 @@ SELECT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT DISTI
 870608286
 
 # REA-6472
-query  rowsort error: Self-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT DISTINCT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT DISTINCT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -227,7 +227,7 @@ SELECT DISTINCT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SEL
 870608286
 
 # REA-6472
-query  rowsort error: Self-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT DISTINCT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
@@ -238,7 +238,7 @@ SELECT DISTINCT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SEL
 870608286
 
 # REA-6472
-query  rowsort error: Self-joins using the same column are unsupported
+query  rowsort error: Base\ table\ table_1\ reaches\ both\ sides\ of\ a\ join
 SELECT DISTINCT `table_1`.`column_1` AS `alias_3` FROM `table_1` INNER JOIN (SELECT DISTINCT `table_1`.`column_1` AS `alias_1` FROM `table_1`) AS alias_2 ON (`table_1`.`column_1` = `alias_2`.`alias_1`) WHERE (`table_1`.`column_1` > ?)
 ? = 10
 ----
