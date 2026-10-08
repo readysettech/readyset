@@ -26,7 +26,7 @@ steps:
     key: check-rustfmt
     commands:
       - '[ -d public ] && cd public'
-      - "cargo --locked fmt -- --check"
+      - "cargo fmt -- --check"
     plugins:
       - docker#${DOCKER_PLUGIN_VERSION}:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
@@ -64,8 +64,8 @@ steps:
       export RUST_BACKTRACE=full
       hard_fail=0
       soft_fail=0
-      cargo --locked deny check bans licenses sources  || hard_fail=1
-      cargo --locked deny check advisories             || soft_fail=1
+      cargo deny --locked check bans licenses sources  || hard_fail=1
+      cargo deny --locked check advisories             || soft_fail=1
 
       if [ $$hard_fail -eq 1 ]; then
         exit 1  # Hard fail for bans/licenses/sources
@@ -102,8 +102,8 @@ steps:
     commands:
       - '[ -d public ] && cd public'
       - export RUST_BACKTRACE=full
-      - cargo --locked clippy --workspace --all-targets --all-features -- -D warnings
-      - cargo --locked check --workspace --all-targets --no-default-features
+      - cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+      - cargo check --locked --workspace --all-targets --no-default-features
     plugins:
       - docker#${DOCKER_PLUGIN_VERSION}:
           image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'

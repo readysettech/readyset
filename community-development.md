@@ -148,7 +148,7 @@ For `rpm`:
 
 To build a stripped `readyset` binary:
 ```bash
-    cargo --locked build --profile=release-dist-quick  --bin readyset
+    cargo build --locked --profile=release-dist-quick  --bin readyset
 ```
 
 After building, to generate a `deb` package run:

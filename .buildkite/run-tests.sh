@@ -76,7 +76,7 @@ if [[ "$TEST_CATEGORY" == "nextest" ]]; then
         NEXTEST_ARGS+=(--filterset "$FILTERSET")
     fi
     set -x
-    cargo --locked nextest run "${NEXTEST_ARGS[@]}" || upload_artifacts
+    cargo nextest run --locked "${NEXTEST_ARGS[@]}" || upload_artifacts
     set +x
 
     upload_junit
@@ -85,7 +85,7 @@ if [[ "$TEST_CATEGORY" == "nextest" ]]; then
 elif [[ "$TEST_CATEGORY" == "doctest" ]]; then
     echo "+++ :rust: Run tests (doctest)"
     set -x
-    cargo --locked test --doc --profile ci \
+    cargo test --locked --doc --profile ci \
         --workspace --features failure_injection \
         || upload_artifacts
     set +x
