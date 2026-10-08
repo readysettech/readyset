@@ -1229,7 +1229,8 @@ pub fn walk_column_constraint<'a, V: VisitorMut<'a>>(
         | ColumnConstraint::AutoIncrement
         | ColumnConstraint::PrimaryKey
         | ColumnConstraint::Unique
-        | ColumnConstraint::OnUpdateCurrentTimestamp(_) => Ok(()),
+        | ColumnConstraint::OnUpdateCurrentTimestamp(_)
+        | ColumnConstraint::ZeroFill => Ok(()),
     }
 }
 

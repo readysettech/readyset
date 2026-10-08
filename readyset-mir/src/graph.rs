@@ -556,7 +556,7 @@ impl MirGraph {
         None
     }
 
-    fn sorted_ancestors(&self, node: NodeIndex) -> impl Iterator<Item = NodeIndex> + '_ {
+    pub(crate) fn sorted_ancestors(&self, node: NodeIndex) -> impl Iterator<Item = NodeIndex> + '_ {
         self.graph
             .edges_directed(node, Direction::Incoming)
             .sorted_by_key(|e| e.weight())

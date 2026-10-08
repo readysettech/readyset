@@ -233,6 +233,7 @@ impl TryFromDialect<sqlparser::ast::DataType> for SqlType {
             // [MySQL]: https://dev.mysql.com/doc/refman/8.4/en/floating-point-types.html
             Double(_info) | DoubleUnsigned(_info) => Ok(Self::Double),
             DoublePrecision | DoublePrecisionUnsigned => Ok(Self::Double),
+            Zerofill(_) => unsupported!("ZEROFILL outside a column definition"),
             Bool => Ok(Self::Bool),
             Boolean => Ok(Self::Bool),
             Date => Ok(Self::Date),
@@ -643,6 +644,19 @@ impl SqlType {
             current = ty;
         }
         current
+    }
+
+    /// The unsigned counterpart of a MySQL integer type; other types unchanged.
+    pub(crate) fn into_unsigned(self) -> Self {
+        use SqlType::*;
+        match self {
+            Int(w) => IntUnsigned(w),
+            TinyInt(w) => TinyIntUnsigned(w),
+            SmallInt(w) => SmallIntUnsigned(w),
+            MediumInt(w) => MediumIntUnsigned(w),
+            BigInt(w) => BigIntUnsigned(w),
+            other => other,
+        }
     }
 }
 

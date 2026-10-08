@@ -325,6 +325,9 @@ pub enum ColumnConstraint {
     /// NOTE(aspen): Yes, this really is its own special thing, not just an expression - see
     /// <https://dev.mysql.com/doc/refman/8.0/en/timestamp-initialization.html>
     OnUpdateCurrentTimestamp(Option<Literal>),
+    /// MySQL `ZEROFILL`. Not generated, since the column type depends on it.
+    #[weight(0)]
+    ZeroFill,
 }
 
 impl DialectDisplay for ColumnConstraint {
@@ -345,6 +348,7 @@ impl DialectDisplay for ColumnConstraint {
                 }
                 Ok(())
             }
+            Self::ZeroFill => write!(f, "ZEROFILL"),
         })
     }
 }
@@ -362,6 +366,54 @@ pub struct ColumnSpecification {
     pub invisible: bool,
 }
 
+/// The type of a MySQL `ZEROFILL` column: unsigned, with the display width as in MySQL.
+fn zerofill_sql_type(
+    data_type: sqlparser::ast::DataType,
+    dialect: Dialect,
+) -> Result<SqlType, AstConversionError> {
+    use sqlparser::ast::{DataType, ExactNumberInfo};
+
+    let width = |w: Option<u64>| w.map(|w| w as u16);
+    let sql_type = match data_type {
+        // The default precision in MySQL
+        DataType::Decimal(ExactNumberInfo::None)
+        | DataType::DecimalUnsigned(ExactNumberInfo::None)
+        | DataType::Dec(ExactNumberInfo::None)
+        | DataType::DecUnsigned(ExactNumberInfo::None)
+        | DataType::Numeric(ExactNumberInfo::None) => SqlType::Decimal(10, 0),
+        // FLOAT(p) with p > 24 is a DOUBLE column in MySQL
+        DataType::Float(ExactNumberInfo::Precision(p))
+        | DataType::FloatUnsigned(ExactNumberInfo::Precision(p))
+            if p > 24 =>
+        {
+            SqlType::Double
+        }
+        // There is no display width on SqlType::Float and SqlType::Double
+        DataType::Float(ExactNumberInfo::PrecisionAndScale(..))
+        | DataType::FloatUnsigned(ExactNumberInfo::PrecisionAndScale(..))
+        | DataType::Double(ExactNumberInfo::PrecisionAndScale(..))
+        | DataType::DoubleUnsigned(ExactNumberInfo::PrecisionAndScale(..)) => {
+            unsupported!("ZEROFILL on FLOAT(M,D) or DOUBLE(M,D)")?
+        }
+        // MySQL synonyms for SMALLINT, INT, BIGINT, DECIMAL and DOUBLE
+        DataType::Int2(w) => SqlType::SmallIntUnsigned(width(w)),
+        DataType::Int4(w) => SqlType::IntUnsigned(width(w)),
+        DataType::Int8(w) => SqlType::BigIntUnsigned(width(w)),
+        DataType::Numeric(info) => SqlType::try_from_dialect(DataType::Decimal(info), dialect)?,
+        DataType::Real | DataType::RealUnsigned => SqlType::Double,
+        data_type => SqlType::try_from_dialect(data_type, dialect)?.into_unsigned(),
+    };
+    // The default display widths in MySQL
+    Ok(match sql_type {
+        SqlType::TinyIntUnsigned(None) => SqlType::TinyIntUnsigned(Some(3)),
+        SqlType::SmallIntUnsigned(None) => SqlType::SmallIntUnsigned(Some(5)),
+        SqlType::MediumIntUnsigned(None) => SqlType::MediumIntUnsigned(Some(8)),
+        SqlType::IntUnsigned(None) => SqlType::IntUnsigned(Some(10)),
+        SqlType::BigIntUnsigned(None) => SqlType::BigIntUnsigned(Some(20)),
+        sql_type => sql_type,
+    })
+}
+
 impl TryFromDialect<sqlparser::ast::ColumnDef> for ColumnSpecification {
     fn try_from_dialect(
         value: sqlparser::ast::ColumnDef,
@@ -376,6 +428,13 @@ impl TryFromDialect<sqlparser::ast::ColumnDef> for ColumnSpecification {
         let mut constraints = vec![];
         let mut generated = None;
         let mut invisible = false;
+        let sql_type = match value.data_type {
+            sqlparser::ast::DataType::Zerofill(data_type) => {
+                constraints.push(ColumnConstraint::ZeroFill);
+                zerofill_sql_type(*data_type, dialect)?
+            }
+            data_type => data_type.try_into_dialect(dialect)?,
+        };
         for option in value.options {
             match option.option {
                 sqlparser::ast::ColumnOption::Null => constraints.push(ColumnConstraint::Null),
@@ -499,7 +558,7 @@ impl TryFromDialect<sqlparser::ast::ColumnDef> for ColumnSpecification {
         }
         Ok(Self {
             column: value.name.into_dialect(dialect),
-            sql_type: value.data_type.try_into_dialect(dialect)?,
+            sql_type,
             constraints,
             comment,
             generated,

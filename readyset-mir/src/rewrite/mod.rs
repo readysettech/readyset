@@ -11,6 +11,7 @@ mod predicate_pushup;
 mod prune_columns;
 mod pull_columns;
 mod pull_keys;
+mod zerofill;
 
 impl MirQuery<'_> {
     /// Run a set of rewrite and optimization passes on this [`MirQuery`], and returns the modified
@@ -31,6 +32,10 @@ impl MirQuery<'_> {
             if !changed {
                 break;
             }
+        }
+
+        if dialect == readyset_sql::Dialect::MySQL {
+            zerofill::refuse_unsupported_zerofill_uses(&self)?;
         }
 
         Ok(self)
