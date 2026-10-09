@@ -18,6 +18,11 @@ pub trait ToMySqlValue {
     /// Encode value using the binary protocol.
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()>;
 
+    /// Encode the value for the text protocol, left-padded with zeros to `width`.
+    fn to_mysql_text_zerofill<W: Write>(&self, w: &mut W, _width: usize) -> io::Result<()> {
+        self.to_mysql_text(w)
+    }
+
     /// Is this value NULL?
     fn is_null(&self) -> bool {
         false
@@ -29,6 +34,9 @@ macro_rules! mysql_text_trivial {
         fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
             w.write_lenenc_str(self.to_string().as_bytes()).map(|_| ())
         }
+        fn to_mysql_text_zerofill<W: Write>(&self, w: &mut W, width: usize) -> io::Result<()> {
+            write_zerofilled(w, self.to_string().as_bytes(), width)
+        }
     };
 }
 
@@ -39,7 +47,20 @@ macro_rules! mysql_text_numeric {
             let s = buffer.format(*self);
             w.write_lenenc_str(s.as_bytes()).map(|_| ())
         }
+        fn to_mysql_text_zerofill<W: Write>(&self, w: &mut W, width: usize) -> io::Result<()> {
+            let mut buffer = itoa::Buffer::new();
+            write_zerofilled(w, buffer.format(*self).as_bytes(), width)
+        }
     };
+}
+
+fn write_zerofilled<W: Write>(w: &mut W, bytes: &[u8], width: usize) -> io::Result<()> {
+    // The widest display width in MySQL
+    static ZEROS: [u8; 255] = [b'0'; 255];
+    let padding = width.min(ZEROS.len()).saturating_sub(bytes.len());
+    w.write_lenenc_int((bytes.len() + padding) as u64)?;
+    w.write_all(&ZEROS[..padding])?;
+    w.write_all(bytes)
 }
 
 use std::fmt;
@@ -57,6 +78,14 @@ where
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         if let Some(ref v) = *self {
             v.to_mysql_text(w)
+        } else {
+            w.write_u8(0xFB)
+        }
+    }
+
+    fn to_mysql_text_zerofill<W: Write>(&self, w: &mut W, width: usize) -> io::Result<()> {
+        if let Some(ref v) = *self {
+            v.to_mysql_text_zerofill(w, width)
         } else {
             w.write_u8(0xFB)
         }
@@ -368,6 +397,9 @@ impl ToMySqlValue for String {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         self.as_bytes().to_mysql_text(w)
     }
+    fn to_mysql_text_zerofill<W: Write>(&self, w: &mut W, width: usize) -> io::Result<()> {
+        self.as_bytes().to_mysql_text_zerofill(w, width)
+    }
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         self.as_bytes().to_mysql_bin(w, c)
     }
@@ -376,6 +408,9 @@ impl ToMySqlValue for String {
 impl ToMySqlValue for str {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         self.as_bytes().to_mysql_text(w)
+    }
+    fn to_mysql_text_zerofill<W: Write>(&self, w: &mut W, width: usize) -> io::Result<()> {
+        self.as_bytes().to_mysql_text_zerofill(w, width)
     }
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         self.as_bytes().to_mysql_bin(w, c)
@@ -386,8 +421,17 @@ impl ToMySqlValue for [u8] {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         w.write_lenenc_str(self).map(|_| ())
     }
+    fn to_mysql_text_zerofill<W: Write>(&self, w: &mut W, width: usize) -> io::Result<()> {
+        write_zerofilled(w, self, width)
+    }
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         match c.coltype {
+            // Decimals are text even on the binary protocol
+            ColumnType::MYSQL_TYPE_DECIMAL | ColumnType::MYSQL_TYPE_NEWDECIMAL
+                if c.colflags.contains(ColumnFlags::ZEROFILL_FLAG) =>
+            {
+                write_zerofilled(w, self, c.column_length as usize)
+            }
             ColumnType::MYSQL_TYPE_STRING
             | ColumnType::MYSQL_TYPE_VAR_STRING
             | ColumnType::MYSQL_TYPE_BLOB
@@ -411,6 +455,9 @@ impl ToMySqlValue for Vec<u8> {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         (self[..]).to_mysql_text(w)
     }
+    fn to_mysql_text_zerofill<W: Write>(&self, w: &mut W, width: usize) -> io::Result<()> {
+        (self[..]).to_mysql_text_zerofill(w, width)
+    }
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         (self[..]).to_mysql_bin(w, c)
     }
@@ -422,6 +469,9 @@ where
 {
     fn to_mysql_text<W: Write>(&self, w: &mut W) -> io::Result<()> {
         (*self).to_mysql_text(w)
+    }
+    fn to_mysql_text_zerofill<W: Write>(&self, w: &mut W, width: usize) -> io::Result<()> {
+        (*self).to_mysql_text_zerofill(w, width)
     }
     fn to_mysql_bin<W: Write>(&self, w: &mut W, c: &Column) -> io::Result<()> {
         (*self).to_mysql_bin(w, c)
@@ -681,6 +731,17 @@ impl ToMySqlValue for myc::value::Value {
                 )
                 .to_mysql_text(w)
             }
+        }
+    }
+
+    fn to_mysql_text_zerofill<W: Write>(&self, w: &mut W, width: usize) -> io::Result<()> {
+        match *self {
+            myc::value::Value::Bytes(ref bytes) => bytes.to_mysql_text_zerofill(w, width),
+            myc::value::Value::Int(n) => n.to_mysql_text_zerofill(w, width),
+            myc::value::Value::UInt(n) => n.to_mysql_text_zerofill(w, width),
+            myc::value::Value::Float(f) => f.to_mysql_text_zerofill(w, width),
+            myc::value::Value::Double(d) => d.to_mysql_text_zerofill(w, width),
+            _ => self.to_mysql_text(w),
         }
     }
 
@@ -1029,5 +1090,73 @@ mod tests {
             myc::value::Value::Date(2024u16, 2u8, 31u8, 0u8, 0u8, 0u8, 0u32),
             ColumnType::MYSQL_TYPE_DATETIME
         );
+    }
+
+    mod zerofill {
+        use super::*;
+
+        fn text<V: ToMySqlValue>(v: V, width: usize) -> Vec<u8> {
+            let mut data = Vec::new();
+            v.to_mysql_text_zerofill(&mut data, width).unwrap();
+            data
+        }
+
+        fn decimal_column(width: u32, zerofill: bool) -> Column {
+            let mut colflags = ColumnFlags::UNSIGNED_FLAG;
+            if zerofill {
+                colflags |= ColumnFlags::ZEROFILL_FLAG;
+            }
+            Column {
+                table: String::new(),
+                column: "d".to_string(),
+                coltype: ColumnType::MYSQL_TYPE_NEWDECIMAL,
+                column_length: width,
+                colflags,
+                character_set: 63,
+                decimals: 0,
+                schema: String::new(),
+                org_table: String::new(),
+                org_name: String::new(),
+            }
+        }
+
+        #[test]
+        fn text_pads_to_width() {
+            assert_eq!(text(42u32, 10), b"\x0a0000000042");
+            assert_eq!(text(42usize, 3), b"\x03042");
+            assert_eq!(text(5i64, 1), b"\x015");
+            assert_eq!(text(3.25f32, 12), b"\x0c000000003.25");
+            assert_eq!(text(3.25f64, 22), b"\x160000000000000000003.25");
+            assert_eq!(text("12.50".to_string(), 11), b"\x0b00000012.50");
+            assert_eq!(text(Value::UInt(7), 8), b"\x0800000007");
+            assert_eq!(text(Value::Int(1), 10), b"\x0a0000000001");
+            assert_eq!(text(Value::Float(3.25), 12), b"\x0c000000003.25");
+            assert_eq!(text(Value::Double(3.25), 22), b"\x160000000000000000003.25");
+            assert_eq!(
+                text(Value::Bytes(b"123".to_vec()), 14),
+                b"\x0e00000000000123"
+            );
+            assert_eq!(text(1234567u32, 3), b"\x071234567");
+            assert_eq!(text(None::<u32>, 10), b"\xfb");
+            assert_eq!(text(Value::NULL, 10), b"\xfb");
+            let data = text(5u32, 300);
+            assert_eq!(data[..3], b"\xfc\xff\x00"[..]);
+            assert_eq!(data[3..], [vec![b'0'; 254], b"5".to_vec()].concat());
+        }
+
+        #[test]
+        fn binary_pads_decimals_only_when_zerofill() {
+            let mut data = Vec::new();
+            b"123"[..]
+                .to_mysql_bin(&mut data, &decimal_column(14, true))
+                .unwrap();
+            assert_eq!(data, b"\x0e00000000000123");
+
+            let mut data = Vec::new();
+            b"123"[..]
+                .to_mysql_bin(&mut data, &decimal_column(14, false))
+                .unwrap();
+            assert_eq!(data, b"\x03123");
+        }
     }
 }

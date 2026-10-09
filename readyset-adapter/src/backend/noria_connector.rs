@@ -458,6 +458,8 @@ impl NoriaConnector {
                     column_type: DfType::DEFAULT_TEXT,
                     nullable: true,
                     base: None,
+                    zerofill: false,
+                    display_width: None,
                 },
                 ColumnSchema {
                     column: ast::Column {
@@ -467,6 +469,8 @@ impl NoriaConnector {
                     column_type: DfType::DEFAULT_TEXT,
                     nullable: true,
                     base: None,
+                    zerofill: false,
+                    display_width: None,
                 },
             ]),
             columns: Cow::Owned(vec!["domain".into(), "worker".into()]),
@@ -522,6 +526,8 @@ impl NoriaConnector {
                     column_type: column_type.clone(),
                     nullable: true,
                     base: None,
+                    zerofill: false,
+                    display_width: None,
                 })
                 .collect(),
         };
@@ -889,6 +895,8 @@ impl NoriaConnector {
                         column_type: DfType::DEFAULT_TEXT,
                         nullable: true,
                         base: None,
+                        zerofill: false,
+                        display_width: None,
                     })
                     .collect(),
             ),
@@ -1790,6 +1798,8 @@ fn param_types(
         column_type: DfType::UnsignedBigInt,
         nullable: true,
         base: None,
+        zerofill: false,
+        display_width: None,
     };
     params
         .user_param_placeholders()?

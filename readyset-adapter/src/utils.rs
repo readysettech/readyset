@@ -627,6 +627,8 @@ pub(crate) fn create_dummy_column(name: &str) -> ColumnSchema {
         column_type: DfType::DEFAULT_TEXT,
         nullable: true,
         base: None,
+        zerofill: false,
+        display_width: None,
     }
 }
 

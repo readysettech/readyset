@@ -62,6 +62,10 @@ pub struct ColumnSchema {
     pub nullable: bool,
     /// If the column is an alias, this field represents its base column
     pub base: Option<ColumnBase>,
+    /// Whether the column is a MySQL `ZEROFILL` column
+    pub zerofill: bool,
+    /// The declared display width of an integer column, e.g. 5 for `INT(5)`
+    pub display_width: Option<u16>,
 }
 
 impl ColumnSchema {
@@ -76,6 +80,8 @@ impl ColumnSchema {
             .get_collation()
             .map(|name| Collation::get_or_default(dialect, name));
         Ok(Self {
+            zerofill: spec.constraints.contains(&ColumnConstraint::ZeroFill),
+            display_width: spec.sql_type.display_width(),
             nullable: !spec.constraints.contains(&ColumnConstraint::NotNull),
             base: Some(ColumnBase {
                 column: spec.column.name.clone(),

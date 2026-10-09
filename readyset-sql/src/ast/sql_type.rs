@@ -658,6 +658,17 @@ impl SqlType {
             other => other,
         }
     }
+
+    /// The declared display width of a MySQL integer type, e.g. 10 for `INT(10)`.
+    pub fn display_width(&self) -> Option<u16> {
+        use SqlType::*;
+        match *self {
+            Int(w) | IntUnsigned(w) | TinyInt(w) | TinyIntUnsigned(w) | SmallInt(w)
+            | SmallIntUnsigned(w) | MediumInt(w) | MediumIntUnsigned(w) | BigInt(w)
+            | BigIntUnsigned(w) => w,
+            _ => None,
+        }
+    }
 }
 
 /// Test helpers.

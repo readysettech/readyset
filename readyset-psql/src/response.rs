@@ -115,6 +115,8 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                                 column_type: DfType::DEFAULT_TEXT,
                                 nullable: true,
                                 base: None,
+                                zerofill: false,
+                                display_width: None,
                             })
                             .collect(),
                     ),
@@ -144,6 +146,8 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                             column_type: DfType::DEFAULT_TEXT,
                             nullable: true,
                             base: None,
+                            zerofill: false,
+                            display_width: None,
                         },
                         ColumnSchema {
                             column: ast::Column {
@@ -153,6 +157,8 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                             column_type: DfType::DEFAULT_TEXT,
                             nullable: true,
                             base: None,
+                            zerofill: false,
+                            display_width: None,
                         },
                     ]),
                     columns: Cow::Owned(vec!["name".into(), "value".into()]),
@@ -184,6 +190,8 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                             column_type: DfType::DEFAULT_TEXT,
                             nullable: true,
                             base: None,
+                            zerofill: false,
+                            display_width: None,
                         },
                         ColumnSchema {
                             column: ast::Column {
@@ -193,6 +201,8 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                             column_type: DfType::DEFAULT_TEXT,
                             nullable: true,
                             base: None,
+                            zerofill: false,
+                            display_width: None,
                         },
                     ]),
                     columns: Cow::Owned(vec![col1_header, col2_header]),

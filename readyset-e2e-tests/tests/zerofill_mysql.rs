@@ -1,9 +1,10 @@
+use std::assert_matches;
 use std::mem::discriminant;
 use std::panic::AssertUnwindSafe;
 
 use mysql_async::consts::ColumnFlags;
 use mysql_async::prelude::Queryable;
-use mysql_async::{Column, Conn, Row};
+use mysql_async::{Column, Conn, Row, Value};
 use readyset_adapter::backend::BackendBuilder;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter, last_query_info};
@@ -35,6 +36,8 @@ const SETUP: &[&str] = &[
         (5, 2, 1.5, 1, 1, 1, 1, 1, 'd', 2)",
     "CREATE TABLE ev (ev_id int PRIMARY KEY, id int unsigned NOT NULL)",
     "INSERT INTO ev VALUES (1, 1), (2, 4294967295), (3, 3), (4, 4294967294), (5, 77)",
+    "CREATE TABLE ch (ch_id int PRIMARY KEY, id int(10) zerofill NOT NULL)",
+    "INSERT INTO ch VALUES (1, 1), (2, 4294967295)",
     "CREATE VIEW v_zf AS SELECT id, name, grp FROM t_zf",
     "CREATE VIEW v_concat AS SELECT CONCAT(id) AS c, grp FROM t_zf",
     "CREATE VIEW v_union AS
@@ -69,10 +72,26 @@ const ALL_COLUMNS: &str = "SELECT id, m, d, f, dbl, s, b, t, name FROM t_zf WHER
 
 /// The value of every placeholder is 1.
 const DEEP: &[&str] = &[
+    "SELECT m, count(*), max(grp) FROM t_zf WHERE grp = ? AND m IS NOT NULL GROUP BY m",
+    "SELECT ch.ch_id, t_zf.id FROM ch JOIN t_zf ON ch.id = t_zf.id WHERE t_zf.grp = ?",
+    "SELECT id FROM t_zf WHERE (id > 100 OR d > 10) AND grp = ?",
+    "SELECT m, count(*) FROM t_zf WHERE grp = ? GROUP BY m",
+    "SELECT count(*) FROM t_zf WHERE grp = ?",
+    "SELECT DISTINCT d FROM t_zf WHERE grp = ?",
+    "SELECT id, name FROM t_zf WHERE grp = ? ORDER BY id LIMIT 2",
+    "SELECT id, row_number() OVER (PARTITION BY grp ORDER BY id) AS rn FROM t_zf WHERE grp = ?",
+    "SELECT id, name FROM v_zf WHERE id = ?",
+    "SELECT x.id FROM (SELECT id, grp FROM t_zf) AS x WHERE x.grp = ?",
+    "SELECT id, v, label FROM t_ddl WHERE id = ?",
+    "SELECT id, w, label FROM t_alter WHERE id = ?",
+    "SELECT t_zf.m AS ev_id FROM ev JOIN t_zf ON ev.id = t_zf.id WHERE ev.ev_id = ?",
+    "SELECT id AS name FROM t_zf WHERE grp = ?",
+    "SELECT id AS m FROM t_zf WHERE grp = ?",
+    ALL_COLUMNS,
     "SELECT name FROM t_zf WHERE id = ?",
     "SELECT ev.ev_id FROM ev JOIN t_zf ON ev.id = t_zf.id WHERE t_zf.grp = ?",
     "SELECT ev.ev_id, t_zf.name FROM ev LEFT JOIN t_zf ON ev.id = t_zf.id WHERE ev.ev_id >= ?",
-    "SELECT t_zf.grp, ev.id FROM t_zf LEFT JOIN ev ON t_zf.id = ev.id WHERE t_zf.grp = ?",
+    "SELECT concat(ev.id) AS c FROM ev LEFT JOIN t_zf ON ev.id = t_zf.id WHERE ev.ev_id = ?",
     "SELECT name FROM t_zf WHERE (id > 100 OR d > 10) AND grp = ?",
     "SELECT name FROM t_zf WHERE id IN (1, 3) AND grp = ?",
     "SELECT name FROM t_zf WHERE id NOT IN (1, 3) AND grp = ?",
@@ -93,9 +112,7 @@ const DEEP: &[&str] = &[
 
 /// A deep cache is disallowed for each of these, and the query is proxied.
 const REFUSED: &[&str] = &[
-    ALL_COLUMNS,
-    "SELECT id AS m FROM t_zf WHERE grp = ?",
-    "SELECT id AS name FROM t_zf WHERE grp = ?",
+    "SELECT t_zf.grp, ev.id FROM t_zf LEFT JOIN ev ON t_zf.id = ev.id WHERE t_zf.grp = ?",
     "SELECT concat(id) FROM t_zf WHERE grp = ?",
     "SELECT CAST(id AS CHAR) FROM t_zf WHERE grp = ?",
     "SELECT substring(id, 1, 4) FROM t_zf WHERE grp = ?",
@@ -109,13 +126,17 @@ const REFUSED: &[&str] = &[
     "SELECT id FROM v_union WHERE grp = ?",
     "SELECT v_union.id AS ev_id FROM v_union JOIN ev ON v_union.grp = ev.ev_id WHERE ev.ev_id = ?",
     "SELECT t_zf.id FROM ev JOIN t_zf ON ev.id = t_zf.id WHERE t_zf.grp = ?",
-    "SELECT t_zf.m AS ev_id FROM ev JOIN t_zf ON ev.id = t_zf.id WHERE ev.ev_id = ?",
+    "SELECT ev.id FROM t_zf JOIN ev ON t_zf.id = ev.id WHERE t_zf.grp = ?",
+    "SELECT concat(t_zf.id) AS c FROM ev JOIN t_zf ON ev.id = t_zf.id WHERE ev.ev_id = ?",
     "SELECT ev.ev_id, t_zf.id FROM ev LEFT JOIN t_zf ON ev.id = t_zf.id WHERE ev.ev_id = ?",
     "SELECT ev.ev_id, (SELECT m FROM t_zf WHERE t_zf.id = ev.id) AS m FROM ev WHERE ev.ev_id = ?",
     "SELECT (SELECT m FROM t_zf WHERE t_zf.id = ev.id) AS ev_id FROM ev WHERE ev.ev_id = ?",
 ];
 
-async fn setup(test_name: &str) -> (Conn, Conn, Handle, TestShutdownSender<MySQLAdapter>) {
+async fn setup(
+    test_name: &str,
+    cache_mode: CacheMode,
+) -> (Conn, Conn, Handle, TestShutdownSender<MySQLAdapter>) {
     readyset_tracing::init_test_logging();
     mysql_helpers::recreate_database(test_name).await;
     let mut upstream = Conn::new(mysql_helpers::upstream_config().db_name(Some(test_name)))
@@ -126,7 +147,7 @@ async fn setup(test_name: &str) -> (Conn, Conn, Handle, TestShutdownSender<MySQL
     }
     let backend = BackendBuilder::default()
         .require_authentication(false)
-        .cache_mode(CacheMode::Deep);
+        .cache_mode(cache_mode);
     let (opts, handle, shutdown_tx) = TestBuilder::new(backend)
         .replicate_db(test_name)
         .recreate_database(false)
@@ -138,6 +159,10 @@ async fn setup(test_name: &str) -> (Conn, Conn, Handle, TestShutdownSender<MySQL
     let mut rs = Conn::new(opts).await.unwrap();
     rs.query_drop(format!("USE {test_name}")).await.unwrap();
     (upstream, rs, handle, shutdown_tx)
+}
+
+fn cells(rows: &[Row]) -> Vec<Vec<Value>> {
+    rows.iter().map(|row| row.clone().unwrap()).collect()
 }
 
 /// Assert that the text and the binary form of the query are served as expected.
@@ -155,10 +180,7 @@ async fn assert_served(
         .next()
         .is_some_and(|tail| tail.contains("ORDER BY"));
     let values = |rows: &[Row]| {
-        let mut values = rows
-            .iter()
-            .map(|row| row.clone().unwrap())
-            .collect::<Vec<_>>();
+        let mut values = cells(rows);
         if !ordered {
             values.sort_by_key(|row| row.iter().map(|v| v.as_sql(false)).collect::<Vec<_>>());
         }
@@ -205,7 +227,7 @@ async fn assert_served(
 #[upstream(mysql, modern)]
 async fn zerofill_column_uses() {
     let test_name = derive_test_name();
-    let (mut upstream, mut rs, handle, shutdown_tx) = setup(&test_name).await;
+    let (mut upstream, mut rs, handle, shutdown_tx) = setup(&test_name, CacheMode::Deep).await;
     let tables: Vec<(String, String, Option<String>)> =
         rs.query("SHOW READYSET ALL TABLES").await.unwrap();
     let t_float = tables
@@ -273,5 +295,54 @@ async fn zerofill_column_uses() {
     for query in REFUSED {
         assert_served(&mut upstream, &mut rs, query, QueryDestination::Upstream).await;
     }
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn zerofill_columns_in_shallow_cache() {
+    let test_name = derive_test_name();
+    let (mut upstream, mut rs, _handle, shutdown_tx) = setup(&test_name, CacheMode::Shallow).await;
+    rs.query_drop(format!("CREATE SHALLOW CACHE FROM {ALL_COLUMNS}"))
+        .await
+        .unwrap();
+    assert_served(
+        &mut upstream,
+        &mut rs,
+        ALL_COLUMNS,
+        QueryDestination::ReadysetThenUpstream(None),
+    )
+    .await;
+    assert_served(
+        &mut upstream,
+        &mut rs,
+        ALL_COLUMNS,
+        QueryDestination::ReadysetShallow(None),
+    )
+    .await;
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn zerofill_text_read_of_shallow_entry_filled_by_execute() {
+    let test_name = derive_test_name();
+    let (mut upstream, mut rs, _handle, shutdown_tx) = setup(&test_name, CacheMode::Shallow).await;
+    rs.query_drop(format!("CREATE SHALLOW CACHE FROM {ALL_COLUMNS}"))
+        .await
+        .unwrap();
+    rs.exec_drop(ALL_COLUMNS, (1,)).await.unwrap();
+    let text_query = ALL_COLUMNS.replace('?', "1");
+    let expected: Vec<Row> = upstream.query(&text_query).await.unwrap();
+    let actual: Vec<Row> = rs.query(&text_query).await.unwrap();
+    let info = last_query_info(&mut rs).await;
+    assert_matches!(
+        info.destination,
+        QueryDestination::ReadysetShallow(..),
+        "{info:?}"
+    );
+    assert_eq!(cells(&expected), cells(&actual));
     shutdown_tx.shutdown().await;
 }

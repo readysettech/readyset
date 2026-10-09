@@ -181,10 +181,13 @@ pub(super) fn column_schema(
         }
     }
 
+    let column = &vn.columns()[column_index];
     let (base, nullable) = get_base_for_paths(&paths, graph, recipe)?;
     Ok(Some(ColumnSchema {
         base,
         nullable,
+        zerofill: column.zerofill(),
+        display_width: column.display_width(),
         column: Column {
             name: vn.columns()[column_index].name().into(),
             table: Some(vn.name().clone()),

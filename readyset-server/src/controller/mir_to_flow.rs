@@ -1417,24 +1417,17 @@ fn make_project_node(
     let mut cols = Vec::with_capacity(emit.len());
     let mut exprs = Vec::with_capacity(emit.len());
     for expr in emit {
-        let (name, ty, source, expr) = match expr {
+        let (col, expr) = match expr {
             ProjectExpr::Column(c) => {
                 let index = graph
                     .find_source_for_child_column(parent, c)
                     .ok_or_else(|| {
                         internal_err!("could not find source for child column: {:?}", c)
                     })?;
-                let parent = &parent_cols[index];
-
-                (
-                    c.name.clone(),
-                    parent.ty().clone(),
-                    parent.source().cloned(),
-                    DfExpr::Column {
-                        index,
-                        ty: parent.ty().clone(),
-                    },
-                )
+                let mut col = parent_cols[index].clone();
+                col.set_name(c.name.clone());
+                let ty = col.ty().clone();
+                (col, DfExpr::Column { index, ty })
             }
             ProjectExpr::Expr { expr, alias } => {
                 let expr = lower_expression(
@@ -1446,11 +1439,11 @@ fn make_project_node(
                     mig.dialect,
                 )?;
 
-                (alias.clone(), expr.ty().clone(), None, expr)
+                (DfColumn::new(alias.clone(), expr.ty().clone(), None), expr)
             }
         };
 
-        cols.push(DfColumn::new(name, ty, source));
+        cols.push(col);
         exprs.push(expr);
     }
 

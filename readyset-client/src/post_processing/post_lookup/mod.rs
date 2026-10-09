@@ -108,6 +108,8 @@ mod tests {
             column_type: ty,
             nullable: true,
             base: None,
+            zerofill: false,
+            display_width: None,
         }
     }
 

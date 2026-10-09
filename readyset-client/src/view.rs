@@ -2239,6 +2239,8 @@ mod tests {
                             attnum: None,
                             sql_type: SqlType::Int(None),
                         }),
+                        zerofill: false,
+                        display_width: None,
                     },
                     ColumnSchema {
                         column: Column {
@@ -2255,6 +2257,8 @@ mod tests {
                             attnum: None,
                             sql_type: SqlType::Text,
                         }),
+                        zerofill: false,
+                        display_width: None,
                     },
                 ],
                 vec![
@@ -2273,6 +2277,8 @@ mod tests {
                             attnum: None,
                             sql_type: SqlType::Int(None),
                         }),
+                        zerofill: false,
+                        display_width: None,
                     },
                     ColumnSchema {
                         column: Column {
@@ -2289,6 +2295,8 @@ mod tests {
                             attnum: None,
                             sql_type: SqlType::Text,
                         }),
+                        zerofill: false,
+                        display_width: None,
                     },
                 ],
             );

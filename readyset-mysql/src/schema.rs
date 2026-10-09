@@ -52,7 +52,7 @@ pub(crate) fn convert_column(
 
     // TODO(marcelo): We should read the proper collation to specify the length.
     // For now, we just use the default collation.
-    let (coltype, character_set, decimals, column_length) = match col.column_type {
+    let (coltype, character_set, decimals, mut column_length) = match col.column_type {
         DfType::TinyInt => {
             let sql_type = get_sql_type(col, SqlType::TinyInt(None));
 
@@ -320,6 +320,15 @@ pub(crate) fn convert_column(
         {
             colflags |= mysql_srv::ColumnFlags::NO_DEFAULT_VALUE_FLAG;
         }
+    }
+    if col.zerofill {
+        colflags |= mysql_srv::ColumnFlags::UNSIGNED_FLAG | mysql_srv::ColumnFlags::ZEROFILL_FLAG;
+        // The width of an unsigned DECIMAL(M,D) is M digits plus the decimal point
+        column_length = match (&col.column_type, col.display_width) {
+            (DfType::Numeric { prec, scale }, _) => u32::from(*prec) + u32::from(*scale > 0),
+            (_, Some(width)) => u32::from(width),
+            _ => column_length,
+        };
     }
 
     Ok(mysql_srv::Column {

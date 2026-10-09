@@ -465,6 +465,8 @@ mod tests {
                 column_type: DfType::BigInt,
                 nullable: true,
                 base: None,
+                zerofill: false,
+                display_width: None,
             }]),
             columns: Cow::Owned(vec!["col1".into()]),
         });
@@ -485,6 +487,8 @@ mod tests {
                 column_type: DfType::BigInt,
                 nullable: true,
                 base: None,
+                zerofill: false,
+                display_width: None,
             }]),
             columns: Cow::Owned(vec!["col1".into()]),
         });
@@ -508,6 +512,8 @@ mod tests {
                 column_type: DfType::BigInt,
                 nullable: true,
                 base: None,
+                zerofill: false,
+                display_width: None,
             }]),
             columns: Cow::Owned(vec!["col1".into()]),
         });

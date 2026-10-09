@@ -6,12 +6,14 @@ use std::collections::HashSet;
 use std::convert::Infallible;
 use std::fmt;
 
+use dataflow::ops::union::DuplicateMode;
 use petgraph::visit::{Bfs, Reversed};
 use petgraph::Direction;
 use readyset_errors::{unsupported, ReadySetResult};
 use readyset_sql::analysis::visit::{self, Visitor};
 use readyset_sql::ast::{
     BinaryOperator, ColumnConstraint, Expr, FunctionExpr, InValue, Literal, SelectStatement,
+    SqlType,
 };
 use readyset_sql::{Dialect, DialectDisplay};
 
@@ -195,15 +197,44 @@ fn sources<'a>(
 
 /// The origin of the values of a column.
 #[derive(Debug, PartialEq, Eq, Hash)]
-enum Source {
-    /// A `ZEROFILL` table column.
-    ZeroFill,
+enum Source<'a> {
+    /// A `ZEROFILL` table column of this type.
+    ZeroFill(&'a SqlType),
     /// A table column without `ZEROFILL`, or a computed column.
     Plain,
+    /// A column of a construct whose values may be unpadded in the result from MySQL.
+    Unpadded(Unpadded),
 }
 
-/// The distinct sources of the columns at `pending`, each a node and a position in its columns.
-fn source_types(graph: &MirGraph, mut pending: Vec<(NodeIndex, usize)>) -> HashSet<Source> {
+/// A construct whose values may be unpadded in the result from MySQL. Ordered so that the same
+/// construct is named in every refusal message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+enum Unpadded {
+    UnionAll,
+    /// A scalar subquery in the select list is built as this, and the values are unpadded in the
+    /// result from MySQL.
+    LeftJoinRight,
+}
+
+impl fmt::Display for Unpadded {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Unpadded::UnionAll => "a UNION ALL, whose values are unpadded in MySQL",
+            Unpadded::LeftJoinRight => {
+                "the right side of a LEFT JOIN, whose values are unpadded in MySQL when it is a \
+                 scalar subquery"
+            }
+        })
+    }
+}
+
+/// The distinct sources of the columns at `pending`, each a node and a position in the columns
+/// of that node, for `column_use`.
+fn source_types<'a>(
+    graph: &'a MirGraph,
+    column_use: &Use<'_>,
+    mut pending: Vec<(NodeIndex, usize)>,
+) -> HashSet<Source<'a>> {
     let mut found = HashSet::new();
     let mut visited = HashSet::new();
     while let Some((source, position)) = pending.pop() {
@@ -215,7 +246,7 @@ fn source_types(graph: &MirGraph, mut pending: Vec<(NodeIndex, usize)>) -> HashS
             MirNodeInner::Base { column_specs, .. } => {
                 let source = match column_specs.get(position) {
                     Some(spec) if spec.constraints.contains(&ColumnConstraint::ZeroFill) => {
-                        Source::ZeroFill
+                        Source::ZeroFill(&spec.sql_type)
                     }
                     _ => Source::Plain,
                 };
@@ -230,17 +261,47 @@ fn source_types(graph: &MirGraph, mut pending: Vec<(NodeIndex, usize)>) -> HashS
             | MirNodeInner::Extremum { group_by, .. }
             | MirNodeInner::Accumulator { group_by, .. }
             | MirNodeInner::Distinct { group_by } => group_by.get(position),
-            MirNodeInner::Join { project, .. }
-            | MirNodeInner::LeftJoin { project, .. }
-            | MirNodeInner::DependentJoin { project, .. }
-            | MirNodeInner::DependentLeftJoin { project, .. } => project.get(position),
+            MirNodeInner::Join { project, on }
+            | MirNodeInner::LeftJoin { project, on, .. }
+            | MirNodeInner::DependentJoin { project, on }
+            | MirNodeInner::DependentLeftJoin { project, on, .. } => {
+                let Some(column) = project.get(position) else {
+                    continue;
+                };
+                // The definition of a returned join key is that of either key
+                if let Use::Output(_) = column_use {
+                    for (left, right) in on.iter().filter(|(l, r)| l == column || r == column) {
+                        pending.extend(sources(graph, source, left));
+                        pending.extend(sources(graph, source, right));
+                    }
+                }
+                let left_join = matches!(
+                    graph[source].inner,
+                    MirNodeInner::LeftJoin { .. } | MirNodeInner::DependentLeftJoin { .. }
+                );
+                if left_join
+                    && graph
+                        .sorted_ancestors(source)
+                        .nth(1)
+                        .is_some_and(|right| graph.column_id_for_column(right, column).is_ok())
+                {
+                    found.insert(Source::Unpadded(Unpadded::LeftJoinRight));
+                }
+                Some(column)
+            }
             MirNodeInner::JoinAggregates { .. } => {
                 if let Some(column) = graph.columns(source).get(position) {
                     pending.extend(sources(graph, source, column));
                 }
                 continue;
             }
-            MirNodeInner::Union { emit, .. } => {
+            MirNodeInner::Union {
+                emit,
+                duplicate_mode,
+            } => {
+                if *duplicate_mode == DuplicateMode::UnionAll {
+                    found.insert(Source::Unpadded(Unpadded::UnionAll));
+                }
                 for (parent, emit) in graph.sorted_ancestors(source).zip(emit) {
                     if let Some(position) = emit
                         .get(position)
@@ -280,7 +341,34 @@ fn source_types(graph: &MirGraph, mut pending: Vec<(NodeIndex, usize)>) -> HashS
     found
 }
 
-/// Refuse a query in which a `ZEROFILL` column is used in a way not allowed by [`supported`].
+/// The padding of a result column is that of its `ZEROFILL` source, so every source of the
+/// column must be the same.
+fn refuse_unpadded_output(column: &Column, found: &HashSet<Source<'_>>) -> ReadySetResult<()> {
+    let zerofill = found
+        .iter()
+        .any(|source| matches!(source, Source::ZeroFill(_)));
+    let unpadded = found
+        .iter()
+        .filter_map(|source| match source {
+            Source::Unpadded(origin) => Some(*origin),
+            _ => None,
+        })
+        .min();
+    match unpadded {
+        Some(origin) if zerofill => {
+            unsupported!(
+                "column {column} in the result set comes from a ZEROFILL column through {origin}"
+            )
+        }
+        None if zerofill && found.len() > 1 => {
+            unsupported!("the sources of column {column} in the result set differ in ZEROFILL type")
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Refuse a query in which a `ZEROFILL` column is used in a way not allowed by [`supported`] or
+/// [`refuse_unpadded_output`].
 pub(super) fn refuse_unsupported_zerofill_uses(query: &MirQuery<'_>) -> ReadySetResult<()> {
     let graph = &*query.graph;
     let mut nodes = vec![];
@@ -320,14 +408,19 @@ pub(super) fn refuse_unsupported_zerofill_uses(query: &MirQuery<'_>) -> ReadySet
                     .collect(),
                 _ => sources(graph, node, &column).collect(),
             };
-            let found = source_types(graph, pending);
+            let found = source_types(graph, &column_use, pending);
             if found.is_empty() {
                 unsupported!(
                     "column {column} in {column_use} cannot be traced to a table column, so the \
                      ZEROFILL padding is unknown"
                 );
             }
-            if found.iter().any(|source| *source == Source::ZeroFill) {
+            if let Use::Output(_) = column_use {
+                refuse_unpadded_output(&column, &found)?;
+            } else if found
+                .iter()
+                .any(|source| matches!(source, Source::ZeroFill(_)))
+            {
                 unsupported!("ZEROFILL column {column} in {column_use}");
             }
         }

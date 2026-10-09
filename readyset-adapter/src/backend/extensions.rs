@@ -964,6 +964,8 @@ where
                 column_type: DfType::UnsignedInt,
                 nullable: true,
                 base: None,
+                zerofill: false,
+                display_width: None,
             };
             select_schema.schema.to_mut().push(count_schema);
             select_schema.columns.to_mut().push("count".into());
@@ -1222,6 +1224,8 @@ where
                 column_type: DfType::DEFAULT_TEXT,
                 nullable: true,
                 base: None,
+                zerofill: false,
+                display_width: None,
             }]),
             columns: Cow::Owned(vec!["token".into()]),
         };
@@ -1470,6 +1474,8 @@ where
             column_type: DfType::DEFAULT_TEXT,
             nullable: true,
             base: None,
+            zerofill: false,
+            display_width: None,
         };
         let schema = SelectSchema {
             schema: Cow::Owned(vec![
@@ -1579,6 +1585,8 @@ where
                 column_type: DfType::DEFAULT_TEXT,
                 nullable: true,
                 base: None,
+                zerofill: false,
+                display_width: None,
             }]),
             columns: Cow::Owned(vec![column.into()]),
         };

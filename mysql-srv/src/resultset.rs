@@ -251,6 +251,7 @@ pub struct RowWriter<'a, S: AsyncRead + AsyncWrite + Unpin> {
     /// The index where the null bitmap for the current row begins
     bitmap_idx: usize,
     columns: &'a [Column],
+    zerofill: bool,
     /// A cached pre-encoded representation of the column definitions
     cached: Option<Arc<[u8]>>,
 
@@ -282,9 +283,14 @@ where
         cached_column_def: Option<Arc<[u8]>>,
     ) -> io::Result<RowWriter<'a, S>> {
         let bitmap_len = (columns.len() + 7 + 2) / 8;
+        let zerofill = !result.is_bin
+            && columns
+                .iter()
+                .any(|c| c.colflags.contains(ColumnFlags::ZEROFILL_FLAG));
         let mut rw = RowWriter {
             result,
             columns,
+            zerofill,
             cached: cached_column_def,
             bitmap_len,
             bitmap_idx: 0,
@@ -382,6 +388,13 @@ where
                 }
             } else {
                 v.to_mysql_bin(row_data, c)?;
+            }
+        } else if self.zerofill {
+            match self.columns.get(self.col) {
+                Some(c) if c.colflags.contains(ColumnFlags::ZEROFILL_FLAG) => {
+                    v.to_mysql_text_zerofill(row_data, c.column_length as usize)?
+                }
+                _ => v.to_mysql_text(row_data)?,
             }
         } else {
             v.to_mysql_text(row_data)?;

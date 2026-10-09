@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use readyset_data::{Collation, DfType, Dialect};
-use readyset_sql::ast::{ColumnSpecification, Relation, SqlIdentifier};
+use readyset_sql::ast::{ColumnConstraint, ColumnSpecification, Relation, SqlIdentifier};
 use readyset_util::SizeOf;
 use serde::{Deserialize, Serialize};
 
@@ -40,11 +40,23 @@ pub struct Column {
     /// TODO: Use this information to lookup the column specification required for returning a
     /// resultset to the client.
     source: Option<Relation>,
+    /// Whether the column is a MySQL `ZEROFILL` column
+    #[serde(default)]
+    zerofill: bool,
+    /// The declared display width of an integer column, e.g. 5 for `INT(5)`
+    #[serde(default)]
+    display_width: Option<u16>,
 }
 
 impl Column {
     pub fn new(name: SqlIdentifier, ty: DfType, source: Option<Relation>) -> Self {
-        Self { name, ty, source }
+        Self {
+            name,
+            ty,
+            source,
+            zerofill: false,
+            display_width: None,
+        }
     }
 
     /// Creates a dataflow column from the [`ColumnSpecification`].
@@ -57,17 +69,19 @@ impl Column {
     where
         F: Fn(Relation) -> Option<DfType>,
     {
-        Ok(Self::new(
-            spec.column.name.clone(),
-            DfType::from_sql_type(
+        Ok(Self {
+            name: spec.column.name.clone(),
+            ty: DfType::from_sql_type(
                 &spec.sql_type,
                 dialect,
                 resolve_type,
                 spec.get_collation()
                     .map(|name| Collation::get_or_default(dialect, name)),
             )?,
-            spec.column.table,
-        ))
+            source: spec.column.table,
+            zerofill: spec.constraints.contains(&ColumnConstraint::ZeroFill),
+            display_width: spec.sql_type.display_width(),
+        })
     }
 
     /// Column name
@@ -83,6 +97,16 @@ impl Column {
     /// Originating column
     pub fn source(&self) -> Option<&Relation> {
         self.source.as_ref()
+    }
+
+    /// Whether the column is a MySQL `ZEROFILL` column
+    pub fn zerofill(&self) -> bool {
+        self.zerofill
+    }
+
+    /// The declared display width of an integer column
+    pub fn display_width(&self) -> Option<u16> {
+        self.display_width
     }
 
     /// Sets this column's name

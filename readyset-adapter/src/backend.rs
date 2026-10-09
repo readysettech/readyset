@@ -1163,6 +1163,8 @@ where
             column_type,
             nullable: true,
             base: None,
+            zerofill: false,
+            display_width: None,
         };
         let schema = SelectSchema {
             schema: Cow::Owned(vec![
@@ -1374,6 +1376,8 @@ where
                     column_type: DfType::DEFAULT_TEXT,
                     nullable: true,
                     base: None,
+                    zerofill: false,
+                    display_width: None,
                 },
                 ColumnSchema {
                     column: ast::Column {
@@ -1383,6 +1387,8 @@ where
                     column_type: DfType::DEFAULT_TEXT,
                     nullable: true,
                     base: None,
+                    zerofill: false,
+                    display_width: None,
                 },
                 ColumnSchema {
                     column: ast::Column {
@@ -1392,6 +1398,8 @@ where
                     column_type: DfType::DEFAULT_TEXT,
                     nullable: true,
                     base: None,
+                    zerofill: false,
+                    display_width: None,
                 },
             ]),
             columns: Cow::Owned(vec![
@@ -1469,6 +1477,8 @@ where
                 column_type: DfType::UnsignedBigInt,
                 nullable: true,
                 base: None,
+                zerofill: false,
+                display_width: None,
             });
             select_schema.columns.to_mut().push(name.into());
         }
