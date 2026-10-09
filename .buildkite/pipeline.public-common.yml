@@ -43,6 +43,20 @@ steps:
     agents: { queue: c7a-xlarge-nospot }
     retry: *retry_on_agent_kill
 
+  - label: ':rust: :lock: Check Cargo.lock'
+    key: check-cargo-lock
+    commands:
+      - '[ -d public ] && cd public'
+      - cargo update --workspace --locked
+    plugins:
+      - docker#${DOCKER_PLUGIN_VERSION}:
+          image: '305232526136.dkr.ecr.us-east-2.amazonaws.com/readyset-build:${BUILDKITE_COMMIT}'
+      - ecr#${ECR_PLUGIN_VERSION}:
+          login: true
+          retries: 3
+    agents: { queue: c7a-xlarge-nospot }
+    retry: *retry_on_agent_kill
+
   - label: ':rust: :lock: Check cargo-deny'
     key: check-deny
     command: |
