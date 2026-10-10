@@ -610,8 +610,10 @@ impl DfValue {
             // never coerced with `Clone`.
             debug_assert!(self.is_homogeneous());
 
+            // A char's padding is dropped on the way to a variable-length string.
             to_ty.is_unknown()
-                || self.infer_dataflow_type().try_into_known().as_ref() == Some(to_ty)
+                || (self.infer_dataflow_type().try_into_known().as_ref() == Some(to_ty)
+                    && !from_ty.is_char())
         };
 
         // This lets us avoid repeating this logic in multiple match arms for different int types.

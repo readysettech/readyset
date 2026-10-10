@@ -269,6 +269,15 @@ impl BuiltinFunction {
             null_on_failure: true,
             dialect,
         };
+        // Postgres renders a concat argument with its type's output function, which keeps a char's
+        // padding where a cast to text drops it.
+        let concat_arg = |expr: Expr, ty: &DfType| {
+            if dialect.engine() == SqlEngine::PostgreSQL && expr.ty().is_char() {
+                expr
+            } else {
+                cast(expr, ty.clone())
+            }
+        };
 
         let result = match name {
             "convert_tz" => {
@@ -664,10 +673,10 @@ impl BuiltinFunction {
                 let ty = DfType::Text(collation);
                 (
                     Self::Concat(
-                        cast(arg1, ty.clone()),
+                        concat_arg(arg1, &ty),
                         rest_args
                             .into_iter()
-                            .map(|arg| cast(arg, ty.clone()))
+                            .map(|arg| concat_arg(arg, &ty))
                             .collect(),
                     ),
                     ty,
@@ -689,10 +698,10 @@ impl BuiltinFunction {
                 (
                     Self::ConcatWs(
                         cast(arg1, ty.clone()),
-                        cast(arg2, ty.clone()),
+                        concat_arg(arg2, &ty),
                         rest_args
                             .into_iter()
-                            .map(|arg| cast(arg, ty.clone()))
+                            .map(|arg| concat_arg(arg, &ty))
                             .collect(),
                     ),
                     ty,
@@ -2670,6 +2679,26 @@ pub(crate) mod tests {
                 ty: MYSQL_TEXT,
             }
         );
+    }
+
+    #[test]
+    fn postgres_concat_keeps_a_char_arguments_padding() {
+        let context = resolve_columns(|_| Ok((0, DfType::Char(3, Collation::Utf8))));
+        for (sql, expected) in [
+            ("concat(t.x, '|')", "ch |"),
+            ("concat_ws(',', t.x, '|')", "ch ,|"),
+            ("concat(t.x::text, '|')", "ch|"),
+            // The separator is text, so a char separator loses its padding.
+            ("concat_ws(t.x, 'a', 'b')", "achb"),
+        ] {
+            let input = parse_expr(ParserDialect::PostgreSQL, sql).unwrap();
+            let expr = Expr::lower(input, Dialect::DEFAULT_POSTGRESQL, &context).unwrap();
+            assert_eq!(
+                expr.eval::<DfValue>(&["ch ".into()]).unwrap(),
+                DfValue::from(expected),
+                "{sql}"
+            );
+        }
     }
 
     #[test]

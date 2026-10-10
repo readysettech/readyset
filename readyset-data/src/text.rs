@@ -554,10 +554,15 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
     fn coerce_to(
         &self,
         to_ty: &DfType,
-        _from_ty: &DfType,
+        from_ty: &DfType,
         dialect: Option<Dialect>,
     ) -> ReadySetResult<DfValue> {
-        let str = self.try_str()?;
+        let mut str = self.try_str()?;
+        // A char's trailing blanks are padding, which a conversion to a variable-length string
+        // drops.
+        if from_ty.is_char() && matches!(to_ty, DfType::Text(_) | DfType::VarChar(..)) {
+            str = str.trim_end_matches(' ');
+        }
 
         match *to_ty {
             DfType::Unknown => Ok(DfValue::from(str)),
@@ -573,13 +578,11 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
                 _ => Ok(DfValue::from(!str.is_empty())),
             },
 
-            DfType::Text(collation) => {
-                Ok(DfValue::from_str_and_collation(self.try_str()?, collation))
-            }
+            DfType::Text(collation) => Ok(DfValue::from_str_and_collation(str, collation)),
 
             DfType::VarChar(l, collation) if l as usize >= str.chars().count() => {
                 // VarChar, but length is sufficient to store current string
-                Ok(DfValue::from_str_and_collation(self.try_str()?, collation))
+                Ok(DfValue::from_str_and_collation(str, collation))
             }
 
             DfType::Char(l, collation) if l as usize == str.chars().count() => {
@@ -1012,6 +1015,33 @@ mod tests {
     fn tiny_text_panics_non_utf8() {
         let s = [255, 255, 255, 255];
         TinyText::from_slice(&s, Collation::Utf8).expect("ok");
+    }
+
+    #[test]
+    fn char_to_variable_length_text_drops_padding() {
+        let char3 = DfType::Char(3, Collation::Utf8);
+        let padded = DfValue::from("ch ");
+        assert_eq!(
+            padded.coerce_to(&DfType::DEFAULT_TEXT, &char3).unwrap(),
+            DfValue::from("ch")
+        );
+        assert_eq!(
+            padded
+                .coerce_to(&DfType::VarChar(10, Collation::Utf8), &char3)
+                .unwrap(),
+            DfValue::from("ch")
+        );
+        // Blanks a text value holds are data, and a char keeps its padding.
+        assert_eq!(
+            padded
+                .coerce_to(&DfType::DEFAULT_TEXT, &DfType::DEFAULT_TEXT)
+                .unwrap(),
+            DfValue::from("ch ")
+        );
+        assert_eq!(
+            padded.coerce_to(&char3, &char3).unwrap(),
+            DfValue::from("ch ")
+        );
     }
 
     #[test]

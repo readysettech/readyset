@@ -1,0 +1,45 @@
+# A char value's trailing blanks are padding. Postgres drops them when it casts a char to text,
+# and keeps them where it renders the value with the type's output function, as concat and
+# concat_ws do. Each result is suffixed with '|' so the padding shows.
+
+statement ok
+CREATE TABLE char_padding (id int primary key, ch char(3));
+
+statement ok
+INSERT INTO char_padding VALUES (1, 'ch'), (2, 'ab');
+
+query T nosort
+SELECT ch::text || '|' FROM char_padding ORDER BY id
+----
+ch|
+ab|
+
+query T nosort
+SELECT ch::varchar || '|' FROM char_padding ORDER BY id
+----
+ch|
+ab|
+
+query T nosort
+SELECT concat(ch, '|') FROM char_padding ORDER BY id
+----
+ch |
+ab |
+
+query T nosort
+SELECT concat_ws(',', ch, '|') FROM char_padding ORDER BY id
+----
+ch ,|
+ab ,|
+
+query T nosort
+SELECT concat(ch::text, '|') FROM char_padding ORDER BY id
+----
+ch|
+ab|
+
+query T nosort
+SELECT concat_ws(ch, 'a', 'b') FROM char_padding ORDER BY id
+----
+achb
+aabb
