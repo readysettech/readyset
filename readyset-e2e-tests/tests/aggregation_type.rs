@@ -304,6 +304,11 @@ test_aggregation_type!(postgres, sum_int, "sum(x)", SqlType::Int(None));
 test_aggregation_type!(postgres, sum_bigint, "sum(x)", SqlType::BigInt(None));
 test_aggregation_type!(postgres, sum_int8, "sum(x)", SqlType::Int8);
 
+// Postgres has no varchar MIN/MAX: a varchar resolves to the text aggregate, which returns text.
+// A char keeps its own bpchar aggregate.
+test_aggregation_type!(postgres, max_varchar, "max(x)", SqlType::VarChar(Some(10)), ["'b'", "'a'"]);
+test_aggregation_type!(postgres, max_char, "max(x)", SqlType::Char(Some(3)), ["'b'", "'a'"]);
+
 test_aggregation_type!(postgres, count_bigint, "count(x)", SqlType::BigInt(None));
 test_aggregation_type!(postgres, count_text, "count(x)", SqlType::Text);
 test_aggregation_type!(postgres, count_float, "count(x)", SqlType::Float);

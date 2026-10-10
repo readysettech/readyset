@@ -998,8 +998,14 @@ fn make_grouped_node(
                 over_col_indx,
                 group_col_indx.as_slice(),
             );
-            let agg_col = make_agg_col(grouped.output_col_type().or_ref(over_col_ty).clone());
-            cols.push(agg_col);
+            let ty = match over_col_ty {
+                // Postgres has no varchar MIN/MAX: a varchar resolves to the text aggregate.
+                DfType::VarChar(_, collation) if mig.dialect.engine() == SqlEngine::PostgreSQL => {
+                    DfType::Text(*collation)
+                }
+                ty => grouped.output_col_type().or_ref(ty).clone(),
+            };
+            cols.push(make_agg_col(ty));
             set_names(&column_names(columns), &mut cols)?;
             mig.add_ingredient(name, cols, grouped)
         }
