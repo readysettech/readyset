@@ -15,10 +15,11 @@ use tokio::task::JoinHandle;
 use tokio_postgres::error::SqlState;
 use tokio_postgres::types::Type;
 use tokio_postgres::{
-    Client, Config, GenericResult, ResultStream, Row, RowStream, SimpleQueryMessage,
-    SimpleQueryStream, Statement,
+    AsyncMessage, Client, Config, DbError, GenericResult, ResultStream, Row, RowStream,
+    SimpleQueryMessage, SimpleQueryStream, Statement,
 };
 use tokio_postgres::{OwnedField, SimpleColumn};
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tracing::{debug, info_span};
 use tracing_futures::Instrument;
 
@@ -112,6 +113,12 @@ pub struct PostgreSqlUpstream {
 
     /// ReadySet-wrapped Postgresql version string, to return to clients
     version: String,
+
+    /// Buffered notices that arrived from the upstream on the async channel and have not yet
+    /// been relayed to a downstream client. Populated by the connection-driver task below and
+    /// drained by `query` / `simple_query` before returning a response so they can be emitted
+    /// to the frontend alongside the data the notice accompanied.
+    notice_rx: UnboundedReceiver<DbError>,
 }
 
 pub enum QueryResult {
@@ -129,7 +136,13 @@ pub enum QueryResult {
     Command {
         tag: String,
     },
-    SimpleQuery(Vec<SimpleQueryMessage>),
+    /// Result of a simple-query call. `pending_notices` carries any notices the upstream
+    /// emitted before the query's response was finalized and is drained before the rest of
+    /// the response is written to the frontend, in the order the upstream produced them.
+    SimpleQuery {
+        messages: Vec<SimpleQueryMessage>,
+        pending_notices: Vec<DbError>,
+    },
     /// A stream of rows from the upstream database; this is the type returned when executing a
     /// simple text query with no parameters.
     SimpleQueryStream {
@@ -212,7 +225,10 @@ impl Debug for QueryResult {
                 .field("num_rows_affected", num_rows_affected)
                 .finish(),
             Self::Command { tag } => f.debug_struct("Command").field("tag", tag).finish(),
-            Self::SimpleQuery(ms) => f.debug_tuple("SimpleQuery").field(ms).finish(),
+            Self::SimpleQuery {
+                messages,
+                pending_notices: _,
+            } => f.debug_tuple("SimpleQuery").field(messages).finish(),
             Self::SimpleQueryStream {
                 first_message,
                 stream: _,
@@ -282,7 +298,10 @@ impl Refresh for QueryResult {
                     Resultset::from_simple_query_stream(stream, first_message, Some(cache));
                 drain_resultset(resultset).await
             }
-            QueryResult::SimpleQuery(ref messages) => {
+            QueryResult::SimpleQuery {
+                ref messages,
+                pending_notices: _,
+            } => {
                 for msg in messages {
                     let copied = copy_simple_query_message(msg).map_err(std::io::Error::other)?;
                     cache.push(CacheEntry::Simple(copied));
@@ -411,7 +430,14 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         );
         span.in_scope(|| debug!("Establishing connection"));
         let (client, connection) = pg_config.connect(tls).instrument(span.clone()).await?;
-        let version = connection.parameter("server_version").ok_or_else(|| {
+        // Stand up an mpsc channel so we can capture notices the upstream emits on its
+        // async message channel. The connection driver task below pumps `poll_message`
+        // results and forwards `AsyncMessage::Notice` into this channel; every other
+        // async frame (ParameterStatus, NotificationResponse) is discarded as it was
+        // before -- they are not part of a normal query response.
+        let (notice_tx, notice_rx) = mpsc::unbounded_channel::<DbError>();
+        let connection = NoticeCapturingConnection::new(connection, notice_tx);
+        let version = connection.inner.parameter("server_version").ok_or_else(|| {
             ReadySetError::Internal("Upstream database failed to send server version".to_string())
         })?;
         let (major, minor) = version
@@ -450,6 +476,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             statement_id_counter: 0,
             user,
             version,
+            notice_rx,
         })
     }
 
@@ -663,6 +690,14 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         }
     }
 
+    /// Drain any notices the connection-driver task buffered while a simple-query
+    /// stream was being consumed. Called by callers that go through `simple_query_raw`
+    /// (which `query()` uses) so that notices emitted alongside the stream are
+    /// forwarded to the downstream client.
+    fn drain_simple_query_notices(&mut self) -> Vec<DbError> {
+        self.drain_pending_notices()
+    }
+
     async fn query_ext<'a>(
         &'a mut self,
         query: &'a str,
@@ -690,7 +725,11 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         query: &'a str,
     ) -> Result<Self::QueryResult<'a>, Error> {
         let res = self.client.simple_query(query).await?;
-        Ok(QueryResult::SimpleQuery(res))
+        let pending_notices = self.drain_pending_notices();
+        Ok(QueryResult::SimpleQuery {
+            messages: res,
+            pending_notices,
+        })
     }
 
     async fn execute<'a>(
@@ -812,23 +851,26 @@ impl UpstreamDatabase for PostgreSqlUpstream {
 
     /// Handle starting a transaction with the upstream database.
     async fn start_tx<'a>(&'a mut self, query: &'a str) -> Result<Self::QueryResult<'a>, Error> {
-        Ok(QueryResult::SimpleQuery(
-            self.client.simple_query(query).await?,
-        ))
+        Ok(QueryResult::SimpleQuery {
+            messages: self.client.simple_query(query).await?,
+            pending_notices: self.drain_pending_notices(),
+        })
     }
 
     /// Handle committing a transaction to the upstream database.
     async fn commit<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Error> {
-        Ok(QueryResult::SimpleQuery(
-            self.client.simple_query("COMMIT").await?,
-        ))
+        Ok(QueryResult::SimpleQuery {
+            messages: self.client.simple_query("COMMIT").await?,
+            pending_notices: self.drain_pending_notices(),
+        })
     }
 
     /// Handle rolling back the ongoing transaction for this connection to the upstream db.
     async fn rollback<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Error> {
-        Ok(QueryResult::SimpleQuery(
-            self.client.simple_query("ROLLBACK").await?,
-        ))
+        Ok(QueryResult::SimpleQuery {
+            messages: self.client.simple_query("ROLLBACK").await?,
+            pending_notices: self.drain_pending_notices(),
+        })
     }
 
     async fn schema_search_path(&mut self) -> Result<Vec<SqlIdentifier>, Self::Error> {
@@ -898,6 +940,72 @@ impl UpstreamDatabase for PostgreSqlUpstream {
 impl Drop for PostgreSqlUpstream {
     fn drop(&mut self) {
         gauge!(metric::CLIENT_UPSTREAM_CONNECTIONS).decrement(1.0);
+    }
+}
+
+
+/// Wraps a `tokio_postgres::Connection` so that any `AsyncMessage::Notice` it would otherwise
+/// log and discard is forwarded to a channel that `PostgreSqlUpstream` drains before responding
+/// to a downstream query. All other async frames (ParameterStatus, NotificationResponse) are
+/// still dropped, since they are not part of a normal simple_query response.
+pub struct NoticeCapturingConnection<C> {
+    pub inner: tokio_postgres::Connection<C>,
+    notices: UnboundedSender<DbError>,
+}
+
+impl<C> NoticeCapturingConnection<C>
+where
+    C: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    fn new(inner: tokio_postgres::Connection<C>, notices: UnboundedSender<DbError>) -> Self {
+        Self { inner, notices }
+    }
+}
+
+impl<C> std::future::Future for NoticeCapturingConnection<C>
+where
+    C: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    type Output = Result<(), tokio_postgres::Error>;
+
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        // Drive the upstream connection forward by polling its async-message channel.
+        // We never move `inner` out of `*self`, so reborrowing through `get_mut` is
+        // safe -- `inner` itself stays pinned through the connection's own Unpin
+        // implementation.
+        let this = self.get_mut();
+        loop {
+            match std::pin::Pin::new(&mut this.inner).poll_message(cx) {
+                std::task::Poll::Ready(Some(Ok(AsyncMessage::Notice(notice)))) => {
+                    // Buffer the notice for the next response. If the receiver was
+                    // dropped we just discard -- the connection is shutting down.
+                    let _ = this.notices.send(notice);
+                    continue;
+                }
+                std::task::Poll::Ready(Some(Ok(_))) => continue,
+                std::task::Poll::Ready(None) => return std::task::Poll::Ready(Ok(())),
+                std::task::Poll::Ready(Some(Err(e))) => return std::task::Poll::Ready(Err(e)),
+                std::task::Poll::Pending => return std::task::Poll::Pending,
+            }
+        }
+    }
+}
+
+
+impl PostgreSqlUpstream {
+    /// Pull every notice the connection-driver task has buffered since the last
+    /// drain. Notices are returned in receive order so that messages from a
+    /// multi-statement simple_query surface to the client in the order the
+    /// upstream emitted them.
+    fn drain_pending_notices(&mut self) -> Vec<DbError> {
+        let mut out = Vec::new();
+        while let Ok(notice) = self.notice_rx.try_recv() {
+            out.push(notice);
+        }
+        out
     }
 }
 

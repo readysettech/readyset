@@ -657,8 +657,21 @@ impl Protocol {
                     self.transaction_state(backend),
                 )),
             })
-        } else if let SimpleQuery(resp) = response {
+        } else if let SimpleQuery {
+            messages: resp,
+            pending_notices,
+        } = response
+        {
             let mut messages = smallvec![];
+            // Pending notices from the upstream come first, before any rows or command
+            // completions, so the downstream client receives them in the same order the
+            // upstream emitted them. Notices can be sent between statements of a multi-
+            // statement simple_query too, but since `tokio-postgres` surfaces them on the
+            // async channel rather than interleaved with the response stream we collect
+            // them all up front and emit them as a prefix.
+            for notice in pending_notices {
+                messages.push(notice);
+            }
             let mut processing_select = false;
             for msg in resp {
                 trace!(?msg, "building simplequery resp");
@@ -687,10 +700,11 @@ impl Protocol {
                         messages.push(BackendMessage::PassThroughCommandComplete(tag));
                         processing_select = false;
                     }
-                    _ => {
-                        return Err(Error::InternalError(
-                            "Unexpected SimpleQuery message variant".to_string(),
-                        ));
+                    // Any other SimpleQueryMessage variant is silently dropped, matching
+                    // the protocol's requirement that informational messages (notices)
+                    // and other diagnostic frames never abort the surrounding query.
+                    other => {
+                        trace!(?other, "Ignoring SimpleQuery message variant");
                     }
                 }
             }
@@ -718,7 +732,7 @@ impl Protocol {
                 Select { .. } => {
                     return Err(Error::InternalError("Unexpected Select".to_string()));
                 }
-                SimpleQuery(_) => {
+                SimpleQuery { .. } => {
                     return Err(Error::InternalError("Unexpected SimpleQuery".to_string()));
                 }
                 Stream { .. } => {
@@ -947,7 +961,7 @@ impl Protocol {
                         "Received Select response for Execute".to_string(),
                     ));
                 }
-                SimpleQuery(_) => {
+                SimpleQuery { .. } => {
                     return Err(Error::InternalError(
                         "Received SimpleQuery response for Execute".to_string(),
                     ));

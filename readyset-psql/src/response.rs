@@ -3,6 +3,37 @@ use std::convert::{TryFrom, TryInto};
 use std::sync::Arc;
 
 use psql_srv as ps;
+/// Convert an upstream `tokio_postgres::DbError` (which PostgreSQL sends for both errors
+/// and notices) into a `BackendMessage::NoticeResponse` ready to be relayed to the
+/// downstream client. We only forward the fields the `NoticeResponse` variant supports;
+/// any field the upstream populated but the wire format cannot represent is silently
+/// discarded, since notices are inherently advisory.
+fn db_error_to_notice_response(notice: tokio_postgres::DbError) -> ps::BackendMessage {
+    use psql_srv::ErrorPosition;
+    ps::BackendMessage::NoticeResponse {
+        severity: notice.severity().to_owned(),
+        sqlstate: *notice.code(),
+        message: notice.message().to_owned(),
+        detail: notice.detail().map(str::to_owned),
+        hint: notice.hint().map(str::to_owned),
+        position: notice.position().cloned().map(|p| match p {
+            ErrorPosition::Original(offset) => ErrorPosition::Original(offset),
+            ErrorPosition::Internal { position, query } => {
+                ErrorPosition::Internal { position, query }
+            }
+        }),
+        where_: notice.where_().map(str::to_owned),
+        schema: notice.schema().map(str::to_owned),
+        table: notice.table().map(str::to_owned),
+        column: notice.column().map(str::to_owned),
+        datatype: notice.datatype().map(str::to_owned),
+        constraint: notice.constraint().map(str::to_owned),
+        file: notice.file().map(str::to_owned),
+        line: notice.line(),
+        routine: notice.routine().map(str::to_owned),
+    }
+}
+
 use readyset_adapter::backend::{
     self as cl, SinglePrepareResult, UpstreamPrepare, noria_connector,
 };
@@ -230,7 +261,10 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                                 })
                                 .collect();
 
-                            Ok(SimpleQuery(messages?))
+                            Ok(SimpleQuery {
+                                messages: messages?,
+                                pending_notices: Vec::new(),
+                            })
                         }
                     }
                 } else {
@@ -291,8 +325,38 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
             }),
             // We still use the SimpleQuery response for some upstream responses that are not
             // Selects
-            Upstream(upstream::QueryResult::SimpleQuery(resp), _, _) => Ok(SimpleQuery(resp)),
-            UpstreamBufferedInMemory(upstream::QueryResult::SimpleQuery(resp)) => Ok(SimpleQuery(resp)),
+            Upstream(
+                upstream::QueryResult::SimpleQuery {
+                    messages,
+                    pending_notices,
+                },
+                _,
+                _,
+            ) => {
+                let pending_notices: Vec<ps::BackendMessage> = pending_notices
+                    .into_iter()
+                    .map(db_error_to_notice_response)
+                    .collect();
+                Ok(SimpleQuery {
+                    messages,
+                    pending_notices,
+                })
+            }
+            UpstreamBufferedInMemory(
+                upstream::QueryResult::SimpleQuery {
+                    messages,
+                    pending_notices,
+                },
+            ) => {
+                let pending_notices: Vec<ps::BackendMessage> = pending_notices
+                    .into_iter()
+                    .map(db_error_to_notice_response)
+                    .collect();
+                Ok(SimpleQuery {
+                    messages,
+                    pending_notices,
+                })
+            }
             UpstreamBufferedInMemory(..) => Err(ps::Error::InternalError(
                 "Mismatched QueryResult for UpstreamBufferedInMemory response type: Expected SimpleQuery".to_string(),
             )),
