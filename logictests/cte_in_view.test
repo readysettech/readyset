@@ -1,0 +1,25 @@
+# A `CREATE VIEW` carrying a `WITH` reaches the server path, which inlines it like any other
+# statement.  An entry read once becomes a derived table under its own name; one read more than
+# once is declined where it is written, rather than accepted and then failing the first time the
+# view is read.
+
+statement ok
+create table t (x int, y int);
+
+statement ok
+insert into t (x, y) values (1, 10), (2, 20), (3, 30);
+
+statement ok
+create view v1 as with c as (select x from t) select c.x as x from c;
+
+query I rowsort
+select v1.x from v1;
+----
+1
+2
+3
+
+# Inlining copies a body per read, so a second read is refused.  The refusal belongs here, at
+# the statement that writes it, and names the entry rather than reporting a missing relation.
+statement error: read more than once
+create view v2 as with c as (select x from t) select a.x as x from c a join c b on a.x = b.x;

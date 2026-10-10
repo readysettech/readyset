@@ -18,6 +18,9 @@ use readyset_sql::ast::{SelectStatement, SqlIdentifier, TableExpr, TableExprInne
 
 /// Inline every `WITH` entry into the statement that defines it, clearing the `WITH` clauses.
 ///
+/// Gives whether a `WITH` clause survives, so a caller that refuses what this pass does not
+/// model has the answer without walking the statement again.
+///
 /// An entry read once becomes a derived table at the reference that reads it, under the name it
 /// was defined by, so the columns it projects go on resolving unchanged.  An entry nothing reads
 /// is dropped.  A statement where any entry is read more than once is refused: inlining copies a
@@ -33,9 +36,15 @@ use readyset_sql::ast::{SelectStatement, SqlIdentifier, TableExpr, TableExprInne
 /// `RECURSIVE` whose body does not recurse is left where it was written: the marker names a
 /// construct this pass does not model, so the statement takes the path it takes with no pass at
 /// all, rather than becoming an error for a query that answers today.
-pub fn inline_ctes(statement: &mut SelectStatement, dialect: Dialect) -> ReadySetResult<()> {
-    if !binds_entries(statement) {
-        return Ok(());
+pub fn inline_ctes(statement: &mut SelectStatement, dialect: Dialect) -> ReadySetResult<bool> {
+    let bound = bound_entries(statement);
+    if !bound.any {
+        return Ok(false);
+    }
+    if bound.recursive {
+        // Leaving the clause rather than raising: a `RECURSIVE` list that does not recurse
+        // answers today by the shallow path, and an error here would take that away.
+        return Ok(true);
     }
     let mut inliner = Inliner {
         dialect,
@@ -44,7 +53,10 @@ pub fn inline_ctes(statement: &mut SelectStatement, dialect: Dialect) -> ReadySe
         lists: Vec::new(),
         hidden: Vec::new(),
     };
-    inliner.visit_select_statement(statement)
+    inliner.visit_select_statement(statement)?;
+    // Each list is taken as its statement is visited and never put back, so a walk that
+    // finishes leaves none, at any depth.
+    Ok(false)
 }
 
 /// The deepest chain of entries the pass will inline.
@@ -56,7 +68,28 @@ pub fn inline_ctes(statement: &mut SelectStatement, dialect: Dialect) -> ReadySe
 /// produced, and keeps this walk from running the stack out on the way there.
 const MAX_CHAIN_DEPTH: usize = 24;
 
-/// Whether the statement tree binds any `WITH` entry, refusing a `RECURSIVE` one anywhere in it.
+/// What a statement tree binds.
+#[derive(Default)]
+struct Bound {
+    any: bool,
+    recursive: bool,
+}
+
+impl<'ast> Visitor<'ast> for Bound {
+    type Error = std::convert::Infallible;
+
+    fn visit_select_statement(
+        &mut self,
+        statement: &'ast SelectStatement,
+    ) -> Result<(), Self::Error> {
+        self.any |= !statement.ctes.is_empty();
+        self.recursive |= statement.ctes.iter().any(|cte| cte.recursive);
+        visit::walk_select_statement(self, statement)
+    }
+}
+
+/// Whether the statement tree binds any `WITH` entry, and whether any list it sits in carries
+/// the `RECURSIVE` marker.
 ///
 /// A body that actually recurses is a set operation, which a `CommonTableExpr` does not hold in
 /// that position, so such a statement is refused before this pass runs.  What the marker catches
@@ -66,32 +99,11 @@ const MAX_CHAIN_DEPTH: usize = 24;
 /// would discard a construct the pass does not understand.
 ///
 /// Answering both questions in one walk is what lets a statement binding no entry at all leave
-/// the pass without being walked again.
-fn binds_entries(statement: &SelectStatement) -> bool {
-    #[derive(Default)]
-    struct Bound {
-        any: bool,
-        recursive: bool,
-    }
-
-    impl<'ast> Visitor<'ast> for Bound {
-        type Error = std::convert::Infallible;
-
-        fn visit_select_statement(
-            &mut self,
-            statement: &'ast SelectStatement,
-        ) -> Result<(), Self::Error> {
-            self.any |= !statement.ctes.is_empty();
-            self.recursive |= statement.ctes.iter().any(|cte| cte.recursive);
-            visit::walk_select_statement(self, statement)
-        }
-    }
-
+/// the pass without being walked again, and what tells the pass what it is about to leave.
+fn bound_entries(statement: &SelectStatement) -> Bound {
     let mut bound = Bound::default();
     let Ok(()) = bound.visit_select_statement(statement);
-    // Leaving the clause rather than raising: a `RECURSIVE` list that does not recurse answers
-    // today by the shallow path, and an error here would take that away.
-    bound.any && !bound.recursive
+    bound
 }
 
 /// Substitutes each entry's body at the one reference that reads it.
@@ -264,7 +276,7 @@ mod tests {
             parse_select_with_config(ParsingPreset::OnlySqlparser, Dialect::PostgreSQL, sql)
                 .unwrap_or_else(|e| panic!("failed to parse {sql:?}: {e}"));
         match inline_ctes(&mut statement, Dialect::PostgreSQL) {
-            Ok(()) => Ok(statement),
+            Ok(_) => Ok(statement),
             Err(error) => Err(error.to_string()),
         }
     }
@@ -274,7 +286,7 @@ mod tests {
         let mut statement =
             parse_select(dialect, sql).unwrap_or_else(|e| panic!("failed to parse {sql:?}: {e}"));
         match inline_ctes(&mut statement, dialect) {
-            Ok(()) => Ok(statement),
+            Ok(_) => Ok(statement),
             Err(error) => Err(error.to_string()),
         }
     }
@@ -295,7 +307,7 @@ mod tests {
     fn inlined(sql: &str) -> Result<SelectStatement, String> {
         let mut statement = parse_select_statement(sql);
         match inline_ctes(&mut statement, Dialect::PostgreSQL) {
-            Ok(()) => Ok(statement),
+            Ok(_) => Ok(statement),
             Err(error) => Err(error.to_string()),
         }
     }
@@ -342,6 +354,35 @@ mod tests {
             !inner.ctes.is_empty(),
             "the nested entry should keep its place"
         );
+    }
+
+    /// What the pass leaves, it leaves at the depth it was written, so what it reports is about
+    /// the whole tree: here nothing is bound at the top level and a `WITH` still survives.
+    #[test]
+    fn a_nested_entry_left_in_place_is_reported() {
+        let mut statement = parse_select_with_config(
+            ParsingPreset::OnlySqlparser,
+            Dialect::PostgreSQL,
+            "SELECT s.x FROM (WITH RECURSIVE c AS (SELECT t.x FROM t) SELECT c.x FROM c) AS s",
+        )
+        .expect("the statement should parse");
+        let left = inline_ctes(&mut statement, Dialect::PostgreSQL)
+            .expect("the statement should be left alone at any depth");
+        assert!(
+            statement.ctes.is_empty(),
+            "nothing should be bound at the top level"
+        );
+        assert!(left, "the nested entry should be reported");
+    }
+
+    /// And a statement the pass inlined leaves nothing behind.
+    #[test]
+    fn an_inlined_statement_leaves_nothing() {
+        let mut statement =
+            parse_select_statement("WITH c AS (SELECT t.x FROM t) SELECT c.x FROM c");
+        let left =
+            inline_ctes(&mut statement, Dialect::PostgreSQL).expect("the statement should inline");
+        assert!(!left);
     }
 
     /// Including one nothing reads.  Dropping it silently would discard a construct the pass does

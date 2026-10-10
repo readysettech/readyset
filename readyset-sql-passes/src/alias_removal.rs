@@ -6,8 +6,8 @@ use itertools::Itertools;
 use readyset_errors::ReadySetResult;
 use readyset_sql::analysis::visit_mut::{self, VisitorMut, walk_select_statement};
 use readyset_sql::ast::{
-    Column, CommonTableExpr, JoinRightSide, Relation, SelectStatement, SqlIdentifier, SqlQuery,
-    TableExpr, TableExprInner,
+    Column, JoinRightSide, Relation, SelectStatement, SqlIdentifier, SqlQuery, TableExpr,
+    TableExprInner,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -23,13 +23,6 @@ pub enum TableAliasRewrite {
         from: SqlIdentifier,
         to_view: Relation,
         for_table: Relation,
-    },
-
-    /// An alias to a common table expression was rewritten
-    Cte {
-        from: SqlIdentifier,
-        to_view: Relation,
-        for_statement: Box<SelectStatement>, // box for perf
     },
 }
 
@@ -107,15 +100,6 @@ impl<'ast> VisitorMut<'ast> for RemoveAliasesVisitor<'_> {
                     })
                     .collect(),
             })
-            .chain(select_statement.ctes.drain(..).map(
-                |CommonTableExpr {
-                     name, statement, ..
-                 }| TableAliasRewrite::Cte {
-                    to_view: format!("__{}__{}", self.query_name, name).into(),
-                    from: name,
-                    for_statement: Box::new(statement),
-                },
-            ))
             .collect();
 
         // Extract remappings for FROM and JOIN table references from the alias rewrites.
@@ -140,7 +124,6 @@ impl<'ast> VisitorMut<'ast> for RemoveAliasesVisitor<'_> {
             .chain(table_alias_rewrites.iter().map(|r| match r {
                 TableAliasRewrite::Table { from, to_table } => (from.clone(), to_table.clone()),
                 TableAliasRewrite::View { from, to_view, .. } => (from.clone(), to_view.clone()),
-                TableAliasRewrite::Cte { from, to_view, .. } => (from.clone(), to_view.clone()),
             }))
             .collect();
         let orig_col_table_remap = mem::replace(&mut self.col_table_remap, new_col_table_remap);
@@ -529,47 +512,6 @@ mod tests {
              FROM users
              WHERE EXISTS (select posts.id from posts where posts.author_id = users.id)"
         )
-    }
-
-    #[test]
-    fn cte() {
-        let mut q = parse_query(
-            Dialect::MySQL,
-            "WITH max_val AS (SELECT max(t1.value) as value FROM t1)
-             SELECT t2.name FROM t2 JOIN max_val ON max_val.value = t2.value;",
-        )
-        .unwrap();
-        let expected = parse_query(
-            Dialect::MySQL,
-            "SELECT t2.name FROM t2 JOIN __query__max_val ON __query__max_val.value = t2.value;",
-        )
-        .unwrap();
-        let mut rewritten = vec![];
-        q.rewrite_table_aliases("query", Some(&mut rewritten))
-            .unwrap();
-        assert_eq!(
-            rewritten,
-            vec![TableAliasRewrite::Cte {
-                from: "max_val".into(),
-                to_view: "__query__max_val".into(),
-                for_statement: match parse_query(
-                    Dialect::MySQL,
-                    "SELECT max(t1.value) as value FROM t1"
-                )
-                .unwrap()
-                {
-                    SqlQuery::Select(stmt) => Box::new(stmt),
-                    _ => panic!(),
-                }
-            }]
-        );
-        assert_eq!(
-            q,
-            expected,
-            "\n\n   {}\n!= {}",
-            q.display(readyset_sql::Dialect::MySQL),
-            expected.display(readyset_sql::Dialect::MySQL)
-        );
     }
 
     #[test]

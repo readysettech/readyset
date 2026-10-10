@@ -323,6 +323,16 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
     trace!(parent: &span, query = %query.display(flags.dialect), "Going to rewrite for deep caching");
 
     let client_params = client_parameter_count(query)?;
+    // Settle the placeholder spelling before any pass below reads one, counting the client's
+    // parameters first so that count is over the spelling they sent.
+    standardize_placeholders(query)?;
+    trace!(parent: &span, pass="standardize_placeholders", query = %query.display(flags.dialect));
+    // Runs before every pass that resolves a name: the entry's own name becomes the derived
+    // table's alias, so nothing below meets a `WITH` at all.  After the placeholders are
+    // numbered, so moving a body carries its bindings with it.
+    // What it leaves the server declines; a statement still holding one takes the shallow path.
+    inline_ctes(query, flags.dialect)?;
+    trace!(parent: &span, pass="inline_ctes", query = %query.display(flags.dialect));
     query.disallow_row(flags.dialect)?;
     trace!(parent: &span, pass="disallow_row", query = %query.display(flags.dialect));
     query.validate_window_functions()?;
@@ -339,15 +349,6 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
     trace!(parent: &span, pass="expand_join_on_using", query = %query.display(flags.dialect));
     query.normalize_right_join()?;
     trace!(parent: &span, pass="normalize_right_join", query = %query.display(flags.dialect));
-    // Settle the placeholder spelling in the walk that used to only look for `?`, so every
-    // pass below sees one representation and a cache reaches the form its reads produce.
-    standardize_placeholders(query)?;
-    trace!(parent: &span, pass="standardize_placeholders", query = %query.display(flags.dialect));
-    // Substituting each entry's body clears the `WITH` clause, so the statement reaches the
-    // deep rewrites as an ordinary derived table rather than taking the shallow path.  Runs
-    // after the placeholders are numbered, so moving a body carries its bindings with it.
-    inline_ctes(query, flags.dialect)?;
-    trace!(parent: &span, pass="inline_ctes", query = %query.display(flags.dialect));
     let invariants_ok = query.validate_pipeline_invariants(flags.dialect);
     trace!(parent: &span, pass="validate_pipeline_invariants", query = %query.display(flags.dialect));
     match invariants_ok {

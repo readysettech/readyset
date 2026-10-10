@@ -1441,22 +1441,6 @@ impl SqlIncorporator {
                     )?;
                     anon_queries.insert(to_view, subquery_leaf);
                 }
-                TableAliasRewrite::Cte {
-                    to_view,
-                    mut for_statement,
-                    ..
-                } => {
-                    let subquery_leaf = self.select_query_to_mir(
-                        query_name.clone(),
-                        for_statement.as_mut(),
-                        search_path,
-                        None,
-                        LeafBehavior::Anonymous,
-                        /* topk_buffer_multiplier */ None,
-                        mig,
-                    )?;
-                    anon_queries.insert(to_view, subquery_leaf);
-                }
                 TableAliasRewrite::Table { .. } => {}
             }
         }

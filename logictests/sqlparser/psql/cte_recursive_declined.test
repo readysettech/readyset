@@ -1,0 +1,17 @@
+# A `WITH RECURSIVE` list is left where it was written -- the marker names a construct the
+# inliner does not model -- and no pass below resolves an entry name.  The statement is
+# declined where it is written rather than carried into them, at whatever depth the list sits.
+
+statement ok
+create table t (x int);
+
+statement ok
+insert into t (x) values (1), (2);
+
+statement error: cannot be inlined
+create view v1 as with recursive c as (select t.x from t) select c.x from c;
+
+# Nothing is bound at the top level here, so reading only the top level would let this through.
+statement error: cannot be inlined
+create view v2 as
+  select s.x from (with recursive c as (select t.x from t) select c.x from c) as s;

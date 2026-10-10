@@ -48,7 +48,7 @@ use std::collections::{HashMap, HashSet};
 use alias_removal::TableAliasRewrite;
 use disallow_row::DisallowRow;
 use readyset_data::Dialect;
-use readyset_errors::ReadySetResult;
+use readyset_errors::{ReadySetResult, unsupported};
 use readyset_sql::DialectDisplay as _;
 use readyset_sql::ast::{
     CompoundSelectStatement, CreateCacheStatement, CreateTableBody, CreateTableStatement,
@@ -56,6 +56,8 @@ use readyset_sql::ast::{
     SqlIdentifier,
 };
 use tracing::{trace, trace_span};
+
+use crate::inline_ctes::inline_ctes;
 
 pub use crate::alias_removal::AliasRemoval;
 pub use crate::array_constructor::ArrayConstructorRewrite;
@@ -236,6 +238,16 @@ impl Rewrite for SelectStatement {
         let query_name = context.query_name().unwrap_or("unknown");
         let sql_dialect = context.dialect().into();
         trace!(query_pre = %self.display(sql_dialect), "Rewriting query");
+
+        // Substitute each `WITH` entry at the reference that reads it, before any pass below
+        // resolves a name, so nothing below meets a `WITH` at all.
+        let with_clause_left = inline_ctes(self, sql_dialect)?;
+        trace!(parent: &span, pass="inline_ctes", query = %self.display(sql_dialect));
+        // A `RECURSIVE`-marked list is left where it was written, and no pass below resolves an
+        // entry name, so a statement still holding one is declined here.
+        if with_clause_left {
+            unsupported!("common table expression that cannot be inlined is not supported");
+        }
 
         self.rewrite_between();
         trace!(parent: &span, pass="rewrite_between", query = %self.display(sql_dialect));
