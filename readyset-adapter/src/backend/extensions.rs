@@ -1283,8 +1283,17 @@ where
         let servers: UpstreamServers = url
             .parse()
             .map_err(|_| internal_err!("invalid upstream URL"))?;
-        if Dialect::from(servers.database_type()) != settings.dialect {
+        let dialect = Dialect::from(servers.database_type());
+        if dialect != settings.dialect {
             internal!("wrong database type for upstream");
+        }
+        if dialect == Dialect::PostgreSQL
+            && servers.db_name().is_none()
+            && !settings.cache_mode.is_shallow()
+        {
+            unsupported!(
+                "When not in shallow cache only mode, an upstream URL must specify a database"
+            );
         }
         let shared = state
             .upstream_config
@@ -2065,12 +2074,21 @@ where
             SqlQuery::AlterReadySet(AlterReadysetStatement::ChangeCdc(ChangeCdcStatement {
                 url,
             })) => {
+                // The parse error may hold credentials.
+                let servers = url
+                    .parse::<UpstreamServers>()
+                    .map_err(|_| internal_err!("invalid CDC URL"))?;
+                if Dialect::from(servers.database_type()) == Dialect::PostgreSQL
+                    && servers.db_name().is_none()
+                    && !settings.cache_mode.is_shallow()
+                {
+                    unsupported!(
+                        "When not in shallow cache only mode, a CDC URL must specify a database"
+                    );
+                }
                 let result = connectors.noria.change_cdc_url(url).await?;
                 // The controller stored the new list; keep this adapter's copy in step.
                 if let Some(config) = &state.upstream_config {
-                    let servers = url.parse::<UpstreamServers>().map_err(|_| {
-                        internal_err!("the controller accepted an invalid CDC list")
-                    })?;
                     config.write().await.cdc_db_url = servers.into_vec();
                 }
                 Ok(result)

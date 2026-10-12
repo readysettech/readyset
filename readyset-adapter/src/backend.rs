@@ -2060,7 +2060,7 @@ where
             .read()
             .await
             .preferred_upstream_url()
-            .map(|url| url.db_name().map(str::to_owned))
+            .map(|url| url.connection_db_name().map(str::to_owned))
         else {
             return Ok(());
         };

@@ -419,6 +419,13 @@ impl TestBuilder {
         self
     }
 
+    /// Configure the adapter to proxy to an upstream URL that doesn't have a database, without
+    /// the server replicating from it.
+    pub fn fallback_without_database(self) -> Self {
+        self.recreate_database(false)
+            .fallback_without_replication("")
+    }
+
     pub fn unsupported_set_mode(mut self, mode: UnsupportedSetMode) -> Self {
         self.backend_builder = self.backend_builder.unsupported_set_mode(mode);
         self

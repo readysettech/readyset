@@ -157,26 +157,51 @@ async fn shallow_mode_connects_to_session_database() {
 async fn session_database_defaults_to_user_name() {
     readyset_tracing::init_test_logging();
 
-    let url_db = derive_test_name();
+    // The user name differs from the database that connections without one use.
+    let user = derive_test_name();
+    PostgreSQLAdapter::recreate_database(&user).await;
+
     let backend = BackendBuilder::new().require_authentication(false);
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::new(backend)
         .cache_mode(CacheMode::Shallow)
         .replicate(false)
-        .fallback_without_replication(&url_db)
+        .fallback_without_database()
         .build::<PostgreSQLAdapter>()
         .await;
 
-    let upstream_config = psql_helpers::upstream_config();
-    let user = upstream_config.get_user().expect("upstream user");
-    let upstream = psql_helpers::connect(upstream_config.clone()).await;
-    let rows = upstream.simple_query("SELECT current_database()").await.unwrap();
-    assert_eq!(first_value(&rows), user);
-
     let mut rs_config = tokio_postgres::Config::new();
-    rs_config.host("127.0.0.1").port(rs_opts.get_ports()[0]).user(user);
+    rs_config.host("127.0.0.1").port(rs_opts.get_ports()[0]).user(&user);
     let conn = psql_helpers::connect(rs_config).await;
     let rows = conn.simple_query("SELECT current_database()").await.unwrap();
     assert_eq!(first_value(&rows), user);
+
+    shutdown_tx.shutdown().await;
+}
+
+/// In shallow cache mode, the upstream URL doesn't need a database.
+#[tokio::test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn shallow_mode_upstream_url_without_database() {
+    readyset_tracing::init_test_logging();
+
+    let db = derive_test_name();
+    PostgreSQLAdapter::recreate_database(&db).await;
+
+    let backend = BackendBuilder::new().require_authentication(false);
+    let (mut rs_opts, _handle, shutdown_tx) = TestBuilder::new(backend)
+        .cache_mode(CacheMode::Shallow)
+        .replicate(false)
+        .fallback_without_database()
+        .build::<PostgreSQLAdapter>()
+        .await;
+
+    for db in ["postgres", db.as_str()] {
+        rs_opts.dbname(db);
+        let conn = psql_helpers::connect(rs_opts.clone()).await;
+        let rows = conn.simple_query("SELECT current_database()").await.unwrap();
+        assert_eq!(first_value(&rows), db);
+    }
 
     shutdown_tx.shutdown().await;
 }

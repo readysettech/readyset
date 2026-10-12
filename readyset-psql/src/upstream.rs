@@ -23,6 +23,7 @@ use tokio_postgres::{OwnedField, SimpleColumn};
 use tracing::{debug, info_span};
 use tracing_futures::Instrument;
 
+use database_utils::DEFAULT_POSTGRES_DB_NAME;
 use database_utils::tls::{ServerCertVerification, get_tls_connector};
 use psql_srv::{Column, TransferFormat};
 use readyset_adapter::upstream_database::{
@@ -396,8 +397,21 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             .ok_or(ReadySetError::InvalidUpstreamDatabase)?;
 
         let mut pg_config = Config::from_str(server.raw_url())?;
-        if let Some(database) = database {
-            pg_config.dbname(database);
+        match database {
+            Some(database) => {
+                pg_config.dbname(database);
+            }
+            // If the client provided no database name, the protocol layer already set the
+            // database name to a default value (the username).
+            //
+            // Internal connections and sessions using the URL's database also come through
+            // here.  They do not provide a database name and so use "postgres" as the default
+            // database.  Otherwise tokio-postgres would use the username, which database might
+            // not exist.
+            None if pg_config.get_dbname().is_none() => {
+                pg_config.dbname(DEFAULT_POSTGRES_DB_NAME);
+            }
+            None => {}
         }
         if let Some(username) = username {
             pg_config.user(username);

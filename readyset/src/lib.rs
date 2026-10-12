@@ -26,7 +26,7 @@ use crossbeam_skiplist::SkipSet;
 use database_utils::tls::ServerCertVerification;
 use database_utils::{
     DatabaseType, SharedUpstreamRegistry, TlsMode, UpstreamConfig, UpstreamHealthMonitor,
-    UpstreamServers,
+    UpstreamServer, UpstreamServers,
 };
 use failpoint_macros::set_failpoint;
 use futures_util::future::FutureExt;
@@ -890,6 +890,7 @@ impl Options {
     /// Seed the Authority with this process's lists if it holds none yet, and adopt the stored
     /// ones. Runs after the preflight, so a failed start leaves the Authority untouched.
     pub async fn persist_upstream_servers(&mut self) -> anyhow::Result<()> {
+        self.verify_db_names()?;
         let authority = self
             .authority
             .to_authority(&self.authority_address(), &self.deployment)?;
@@ -932,7 +933,8 @@ impl Options {
                 .map(UpstreamServers::into_vec)
                 .unwrap_or_default();
         }
-        Ok(())
+        self.verify_db_names()
+            .map_err(|e| anyhow!("Invalid stored upstream server lists: {e}"))
     }
 
     /// Infer the database type from the upstream and/or CDC URLs, validating each server list and
@@ -1165,6 +1167,26 @@ impl Options {
             "--admin-address 'disabled' cannot be combined with addresses"
         );
         Ok(addresses)
+    }
+
+    /// Check that Postgres URLs specify a database outside shallow cache mode.
+    fn verify_db_names(&self) -> anyhow::Result<()> {
+        if self.cache_mode.is_shallow() {
+            return Ok(());
+        }
+        let config = &self.server_worker_options.replicator_config;
+        for (arg, servers) in [
+            ("--upstream-db-url", &config.upstream_db_url),
+            ("--cdc-db-url", &config.cdc_db_url),
+        ] {
+            for url in servers.iter().map(UpstreamServer::url) {
+                ensure!(
+                    !url.is_postgres() || url.db_name().is_some(),
+                    "When not in shallow cache only mode, {arg} must specify a database"
+                );
+            }
+        }
+        Ok(())
     }
 
     /// The `(user, password)` from `--admin-credentials`.
@@ -2780,6 +2802,53 @@ mod tests {
         );
     }
 
+    /// A URL that fails verification is not stored, so a corrected URL seeds the Authority.
+    #[tokio::test]
+    async fn rejected_db_names_leave_the_authority_untouched() {
+        let dir = temp_dir::TempDir::new().unwrap();
+        let deployment = "rejected_db_names_leave_the_authority_untouched";
+        let no_db = "postgresql://u:p@a:5432"; // trufflehog:ignore
+        let db = "postgresql://u:p@a:5432/db"; // trufflehog:ignore
+
+        let mut rejected = options_at(&dir, deployment, no_db);
+        rejected.cache_mode = CacheMode::Deep;
+        rejected.persist_upstream_servers().await.unwrap_err();
+
+        let mut good = options_at(&dir, deployment, db);
+        good.cache_mode = CacheMode::Deep;
+        good.persist_upstream_servers().await.unwrap();
+        let servers = good
+            .server_worker_options
+            .replicator_config
+            .upstream_servers()
+            .unwrap()
+            .unwrap();
+        assert_eq!(servers.db_name(), Some("db"));
+    }
+
+    /// A list stored by a shallow mode start is rejected when a later start isn't shallow.
+    #[tokio::test]
+    async fn stored_db_names_are_verified() {
+        let dir = temp_dir::TempDir::new().unwrap();
+        let deployment = "stored_db_names_are_verified";
+        let no_db = "postgresql://u:p@a:5432"; // trufflehog:ignore
+        let db = "postgresql://u:p@a:5432/db"; // trufflehog:ignore
+
+        let mut shallow = options_at(&dir, deployment, no_db);
+        shallow.cache_mode = CacheMode::Shallow;
+        shallow.persist_upstream_servers().await.unwrap();
+
+        let deep = || {
+            let mut options = options_at(&dir, deployment, db);
+            options.cache_mode = CacheMode::Deep;
+            options
+        };
+        let err = deep().resolve_upstream_servers().await.unwrap_err();
+        assert!(err.to_string().contains("Invalid stored"), "{err}");
+        let err = deep().persist_upstream_servers().await.unwrap_err();
+        assert!(err.to_string().contains("Invalid stored"), "{err}");
+    }
+
     #[test]
     fn effective_backlog_is_capped_by_somaxconn() {
         assert_eq!(effective_backlog(4096, Some(1024)), 1024);
@@ -2991,6 +3060,64 @@ mod tests {
         opts.resolve_auto_cache();
         assert_eq!(opts.cache_mode, CacheMode::Shallow);
         assert!(matches!(opts.query_caching, MigrationStyle::InRequestPath));
+    }
+
+    fn options_with_urls(cache_mode: &str, upstream: &str, cdc: Option<&str>) -> Options {
+        let mut args = vec![
+            "readyset",
+            "--deployment",
+            "test",
+            "--authority-address",
+            ".",
+            "--allow-unauthenticated-connections",
+            "--cache-mode",
+            cache_mode,
+            "--upstream-db-url",
+            upstream,
+        ];
+        if let Some(cdc) = cdc {
+            args.extend(["--cdc-db-url", cdc]);
+        }
+        Options::parse_from(args)
+    }
+
+    #[test]
+    fn postgres_urls_without_database_need_shallow_mode() {
+        let no_db = "postgresql://u:p@host:5432"; // trufflehog:ignore
+        let db = "postgresql://u:p@host:5432/db"; // trufflehog:ignore
+        assert!(options_with_urls("shallow", no_db, None)
+            .verify_db_names()
+            .is_ok());
+        assert!(options_with_urls("shallow", no_db, Some(no_db))
+            .verify_db_names()
+            .is_ok());
+        assert!(options_with_urls("deep", db, None)
+            .verify_db_names()
+            .is_ok());
+
+        let err = options_with_urls("deep", no_db, None)
+            .verify_db_names()
+            .unwrap_err();
+        assert!(err.to_string().contains("--upstream-db-url"), "{err}");
+        let err = options_with_urls("deep", db, Some(no_db))
+            .verify_db_names()
+            .unwrap_err();
+        assert!(err.to_string().contains("--cdc-db-url"), "{err}");
+        let err = options_with_urls("deep", no_db, Some(no_db))
+            .verify_db_names()
+            .unwrap_err();
+        assert!(err.to_string().contains("--upstream-db-url"), "{err}");
+    }
+
+    #[test]
+    fn mysql_urls_without_database_allowed_in_any_mode() {
+        let no_db = "mysql://u:p@host:3306"; // trufflehog:ignore
+        assert!(options_with_urls("deep", no_db, None)
+            .verify_db_names()
+            .is_ok());
+        assert!(options_with_urls("shallow", no_db, None)
+            .verify_db_names()
+            .is_ok());
     }
 
     #[test]

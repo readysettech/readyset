@@ -303,6 +303,18 @@ async fn psql_failover_commands_require_stopped_replication() {
         "CHANGE CDC to a list with no reachable server should fail"
     );
 
+    let err = rs_conn
+        .simple_query("ALTER READYSET CHANGE CDC TO 'postgresql://other-host'")
+        .await
+        .expect_err("CHANGE CDC to a URL without a database should fail");
+    let message = err.as_db_error().map(|e| e.message().to_string());
+    assert!(
+        message
+            .as_deref()
+            .is_some_and(|m| m.contains("must specify a database")),
+        "unexpected error: {err:?}"
+    );
+
     shutdown_tx.shutdown().await;
 }
 

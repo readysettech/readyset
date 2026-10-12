@@ -47,6 +47,17 @@ pub use upstream_servers::{UpstreamServer, UpstreamServers};
 
 const DEFAULT_TIMEZONE_NAME: &str = "Etc/UTC";
 
+/// The database that Postgres connections use when the URL doesn't have one.
+pub const DEFAULT_POSTGRES_DB_NAME: &str = "postgres";
+
+/// Return `config`, with [`DEFAULT_POSTGRES_DB_NAME`] as its database if it doesn't have one.
+fn with_default_db_name(mut config: pgsql::Config) -> pgsql::Config {
+    if config.get_dbname().is_none() {
+        config.dbname(DEFAULT_POSTGRES_DB_NAME);
+    }
+    config
+}
+
 #[allow(missing_docs)] // If we add docs they get added into --help binary text which is confusing
 #[derive(Debug, Clone, Parser, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UpstreamConfig {
@@ -695,12 +706,7 @@ impl FromStr for DatabaseURL {
             let builder = OptsBuilder::from_opts(mysql::Opts::from_url(s)?).prefer_socket(false);
             Ok(Self::MySQL(builder.into()))
         } else if s.starts_with("postgresql://") || s.starts_with("postgres://") {
-            let result = Self::PostgreSQL(pgsql::Config::from_str(s)?);
-            // Require that Postgres URLs specify a database
-            match result.db_name() {
-                Some(_) => Ok(result),
-                None => Err(DatabaseURLParseError::MissingPostgresDbName),
-            }
+            Ok(Self::PostgreSQL(pgsql::Config::from_str(s)?))
         } else {
             Err(DatabaseURLParseError::InvalidFormat)
         }
@@ -733,7 +739,8 @@ impl DatabaseURL {
             DatabaseURL::PostgreSQL(config) => {
                 let connector = get_tls_connector(verification)?;
                 let tls = postgres_native_tls::MakeTlsConnector::new(connector);
-                let (client, connection) = config.connect(tls).await?;
+                let (client, connection) =
+                    with_default_db_name(config.clone()).connect(tls).await?;
                 let connection_handle =
                     tokio::spawn(async move { connection.await.map_err(Into::into) });
                 Ok(DatabaseConnection::PostgreSQL(client, connection_handle))
@@ -789,7 +796,7 @@ impl DatabaseURL {
             }
             DatabaseURL::PostgreSQL(opts) => Ok(DatabaseConnectionPoolBuilder::PostgreSQL(
                 deadpool_postgres::Pool::builder(deadpool_postgres::Manager::from_config(
-                    opts,
+                    with_default_db_name(opts),
                     postgres_native_tls::MakeTlsConnector::new(get_tls_connector(verification)?),
                     deadpool_postgres::ManagerConfig {
                         recycling_method: deadpool_postgres::RecyclingMethod::Fast,
@@ -877,7 +884,7 @@ impl DatabaseURL {
         }
     }
 
-    /// Returns the underlying database name.
+    /// Return the database portion of the URL.
     pub fn db_name(&self) -> Option<&str> {
         match self {
             DatabaseURL::MySQL(opts) => opts.db_name(),
@@ -885,7 +892,17 @@ impl DatabaseURL {
         }
     }
 
-    /// Sets the underlying database nname.
+    /// Return the database that connections to this URL use, if the URL determines one.
+    pub fn connection_db_name(&self) -> Option<&str> {
+        match self {
+            DatabaseURL::MySQL(opts) => opts.db_name(),
+            DatabaseURL::PostgreSQL(config) => {
+                Some(config.get_dbname().unwrap_or(DEFAULT_POSTGRES_DB_NAME))
+            }
+        }
+    }
+
+    /// Set the underlying database name.
     pub fn set_db_name(&mut self, db_name: String) {
         match self {
             DatabaseURL::MySQL(opts) => {
@@ -995,4 +1012,19 @@ pub enum TlsMode {
     Disabled,
     /// Only TLS connections are allowed
     Required,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn postgres_url_without_database() {
+        let url: DatabaseURL = "postgresql://u:p@host:5432".parse().unwrap(); // trufflehog:ignore
+        assert_eq!(url.db_name(), None);
+        assert_eq!(url.connection_db_name(), Some(DEFAULT_POSTGRES_DB_NAME));
+
+        let url: DatabaseURL = "postgresql://u:p@host:5432/db".parse().unwrap(); // trufflehog:ignore
+        assert_eq!(url.connection_db_name(), Some("db"));
+    }
 }
