@@ -4,13 +4,15 @@ use std::mem;
 
 use itertools::{Either, Itertools};
 use readyset_errors::{ReadySetError, ReadySetResult, internal, invalid_query};
-use readyset_sql::analysis::visit_mut::{VisitorMut, walk_function_expr, walk_select_statement};
+use readyset_sql::analysis::visit_mut::{
+    VisitorMut, walk_field_definition_expr, walk_function_expr, walk_select_statement,
+};
 use readyset_sql::ast::{
     Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause, JoinConstraint,
-    JoinRightSide, OrderClause, Relation, SelectStatement, SqlIdentifier, SqlQuery, TableExprInner,
+    JoinOperator, JoinRightSide, OrderClause, Relation, SelectStatement, SqlIdentifier, SqlQuery,
+    TableExprInner,
 };
 use readyset_sql::{Dialect, DialectDisplay};
-use tracing::warn;
 
 use crate::rewrite_utils::get_from_item_reference_name;
 use crate::{RewriteDialectContext, get_local_from_items_iter, outermost_table_exprs, util};
@@ -57,33 +59,138 @@ struct ExpandImpliedTablesVisitor<I: ImpliedTablesContext> {
     can_reference_aliases: bool,
     /// SQL dialect to use for expression display
     dialect: Dialect,
+    /// Per scope, maps a USING column name to the relations it merges away: the right side of the
+    /// join, or the relations to its left for a RIGHT join.
+    using_merged_away: Vec<HashMap<SqlIdentifier, HashSet<Relation>>>,
+    /// Per scope, the bare unaliased column fields of the select list, with the table each
+    /// resolved to. A bare ORDER BY name refers to these before any input column. GROUP BY, and
+    /// HAVING on MySQL, fall back to them.
+    fields: Vec<HashSet<Column>>,
+    /// Per scope, the GROUP BY columns with the table each resolved to. On MySQL a HAVING name
+    /// refers to these before an alias.
+    group_by_columns: Vec<HashSet<Column>>,
+    /// The item being visited is a bare ORDER BY column.
+    order: bool,
+    /// The item being visited is a bare GROUP BY column.
+    group: bool,
+    /// The expression being visited is a HAVING condition, outside any function call.
+    having: bool,
 }
 
 impl<I: ImpliedTablesContext> ExpandImpliedTablesVisitor<I> {
+    /// The table of the select-list column named `column_name`, if the current SELECT has one.
+    /// Errors when several select-list columns with that name resolve to different tables.
+    fn find_select_list_table(&self, column_name: &str) -> ReadySetResult<Option<Relation>> {
+        find_table_among(self.fields.last(), column_name, "the select list")
+    }
+
+    /// The table of the GROUP BY column named `column_name`, if the current SELECT has one.
+    /// Errors when several GROUP BY columns with that name resolve to different tables.
+    fn find_group_by_table(&self, column_name: &str) -> ReadySetResult<Option<Relation>> {
+        find_table_among(self.group_by_columns.last(), column_name, "GROUP BY")
+    }
+
+    /// Resolve an unqualified column name against the current SELECT's own tables only.
+    fn find_local_table(&self, column_name: &str) -> ReadySetResult<Option<Relation>> {
+        match (
+            self.tables.last(),
+            self.subquery_schemas.last(),
+            self.using_merged_away.last(),
+        ) {
+            (Some(tables), Some(subquery_schemas), Some(using_merged_away)) => {
+                self.find_table_in_scope(tables, subquery_schemas, using_merged_away, column_name)
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// Resolves a bare MySQL HAVING name that is neither a GROUP BY column nor an alias. The
+    /// SELECT's own tables are visible only through its GROUP BY and select list, so the name is a
+    /// select-list column or a column of an enclosing query; anything else is an unknown column.
+    fn find_mysql_having_table(&self, column_name: &str) -> ReadySetResult<Option<Relation>> {
+        if let Some(rel) = self.find_select_list_table(column_name)? {
+            return Ok(Some(rel));
+        }
+        match self.find_table_skipping(column_name, 1)? {
+            Some(rel) => Ok(Some(rel)),
+            None => invalid_query!("Unknown column {} in HAVING", column_name),
+        }
+    }
+
+    /// Resolves a bare GROUP BY name, or a bare HAVING name on PostgreSQL.
+    ///
+    /// The name is first looked up in the input tables: for GROUP BY only those of this SELECT, for
+    /// HAVING also those of enclosing queries. If no input column matches, a GROUP BY name tries an
+    /// alias, then a select-list column, then the enclosing queries. If several input columns
+    /// match, MySQL tries an alias, then a select-list column, and PostgreSQL reports the
+    /// ambiguity.
+    fn find_table_input_first(&self, column_name: &str) -> ReadySetResult<Option<Relation>> {
+        let found = if self.group {
+            self.find_local_table(column_name)
+        } else {
+            self.find_table(column_name)
+        };
+        match found {
+            Ok(Some(rel)) => Ok(Some(rel)),
+            Ok(None) if self.group => {
+                if self.aliases.contains(column_name) {
+                    Ok(None)
+                } else if let Some(rel) = self.find_select_list_table(column_name)? {
+                    Ok(Some(rel))
+                } else {
+                    self.find_table_skipping(column_name, 1)
+                }
+            }
+            Ok(None) => Ok(None),
+            Err(e) => match self.dialect {
+                Dialect::MySQL if self.aliases.contains(column_name) => Ok(None),
+                Dialect::MySQL => match self.find_select_list_table(column_name)? {
+                    Some(rel) => Ok(Some(rel)),
+                    None => Err(e),
+                },
+                Dialect::PostgreSQL => Err(e),
+            },
+        }
+    }
+
     /// Resolve an unqualified column name to its table. Searches scopes from
     /// innermost to outermost, returning the first match. This correctly handles
     /// both local column resolution and correlated references to outer scopes
     /// (the outermost match for a non-local column is the correlated table).
-    fn find_table(&self, column_name: &str) -> Option<Relation> {
-        for (scope_tables, scope_sq) in self
+    fn find_table(&self, column_name: &str) -> Result<Option<Relation>, ReadySetError> {
+        self.find_table_skipping(column_name, 0)
+    }
+
+    /// Like [`Self::find_table`], starting `skip` scopes out from the innermost one.
+    fn find_table_skipping(
+        &self,
+        column_name: &str,
+        skip: usize,
+    ) -> Result<Option<Relation>, ReadySetError> {
+        for ((scope_tables, scope_sq), scope_using) in self
             .tables
             .iter()
             .rev()
             .zip(self.subquery_schemas.iter().rev())
+            .zip(self.using_merged_away.iter().rev())
+            .skip(skip)
         {
-            if let Some(t) = self.find_table_in_scope(scope_tables, scope_sq, column_name) {
-                return Some(t);
+            if let Some(t) =
+                self.find_table_in_scope(scope_tables, scope_sq, scope_using, column_name)?
+            {
+                return Ok(Some(t));
             }
         }
-        None
+        Ok(None)
     }
 
     fn find_table_in_scope(
         &self,
         tables: &HashMap<Relation, Relation>,
         subquery_schemas: &HashMap<SqlIdentifier, Vec<SqlIdentifier>>,
+        using_merged_away: &HashMap<SqlIdentifier, HashSet<Relation>>,
         column_name: &str,
-    ) -> Option<Relation> {
+    ) -> Result<Option<Relation>, ReadySetError> {
         let mut matches = self
             .context
             .all_schemas()
@@ -108,17 +215,26 @@ impl<I: ImpliedTablesContext> ExpandImpliedTablesVisitor<I> {
             })
             .collect::<Vec<_>>();
 
+        // A USING column is one merged column, so the relations it was merged away from are not
+        // separate candidates.
+        if let Some(merged_away) = using_merged_away.get(column_name) {
+            matches.retain(|t| !merged_away.contains(t));
+        }
+
         if matches.len() > 1 {
-            warn!(
-                "Ambiguous column {} exists in tables: {} -- picking a random one",
+            invalid_query!(
+                "Ambiguous column {} exists in tables: {}",
                 column_name,
-                matches.iter().map(|t| t.display_unquoted()).join(", ")
+                matches
+                    .iter()
+                    .sorted()
+                    .map(|t| t.display_unquoted())
+                    .join(", ")
             );
-            Some(matches.pop().unwrap())
         } else if matches.is_empty() {
-            None
+            Ok(None)
         } else {
-            Some(matches.pop().unwrap())
+            Ok(matches.pop())
         }
     }
 }
@@ -193,43 +309,118 @@ impl<'ast, S: ImpliedTablesContext> VisitorMut<'ast> for ExpandImpliedTablesVisi
                 .collect(),
         );
 
+        let orig_flags = (
+            mem::take(&mut self.can_reference_aliases),
+            mem::take(&mut self.order),
+            mem::take(&mut self.group),
+            mem::take(&mut self.having),
+        );
+
         // Temporarily remove CTEs so walk_select_statement won't visit them again
         // (we already visited them above with the correct parent scope).
         let ctes = mem::take(&mut select_statement.ctes);
+        let mut using_joins: HashMap<SqlIdentifier, HashSet<Relation>> = HashMap::new();
+        let mut left_tables = select_statement.tables.iter().collect::<Vec<_>>();
+
+        for join_clause in &select_statement.join {
+            let right_tables = match &join_clause.right {
+                JoinRightSide::Table(t) => std::slice::from_ref(t),
+                JoinRightSide::Tables(tbls) => tbls.as_slice(),
+            }
+            .iter()
+            .collect::<Vec<_>>();
+
+            let dropped_tbls = if matches!(
+                join_clause.operator,
+                JoinOperator::RightJoin | JoinOperator::RightOuterJoin
+            ) {
+                &left_tables
+            } else {
+                &right_tables
+            };
+
+            if let JoinConstraint::Using(cols) = &join_clause.constraint {
+                for col in cols {
+                    for (rel, alias) in dropped_tbls
+                        .iter()
+                        .map(|t| (t.inner.as_table(), t.alias.clone()))
+                    {
+                        let tbl = alias.map(Relation::from).or_else(|| rel.cloned());
+                        if let Some(tbl) = tbl {
+                            using_joins.entry(col.name.clone()).or_default().insert(tbl);
+                        }
+                    }
+                }
+            };
+            left_tables.extend(right_tables);
+        }
+
+        self.using_merged_away.push(using_joins);
+        self.fields.push(HashSet::new());
+        // HAVING is visited after the rest of the statement, once the select list and GROUP BY
+        // are resolved.
+        let having = select_statement.having.take();
         walk_select_statement(self, select_statement)?;
         select_statement.ctes = ctes;
+        select_statement.having = having;
+        if let Some(having) = &mut select_statement.having {
+            let group_by_columns = select_statement
+                .group_by
+                .iter()
+                .flat_map(|group_by| &group_by.fields)
+                .filter_map(|field| match field {
+                    FieldReference::Expr(Expr::Column(col)) => Some(col.clone()),
+                    _ => None,
+                })
+                .collect();
+            self.group_by_columns.push(group_by_columns);
+            self.visit_having_clause(having)?;
+            self.group_by_columns.pop();
+        }
 
         // Pop the scope level we pushed.
         self.tables.pop();
         self.subquery_schemas.pop();
+        self.using_merged_away.pop();
+        self.fields.pop();
         self.aliases = orig_aliases;
+        (
+            self.can_reference_aliases,
+            self.order,
+            self.group,
+            self.having,
+        ) = orig_flags;
 
         Ok(())
     }
 
     fn visit_having_clause(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
-        // If the parser accepted a bare alias reference in HAVING, respect it.
-        // MySQL allows this natively; PostgreSQL is stricter, but the parser
-        // enforces that — by the time we see the AST, any bare alias that
-        // survived parsing is intentional.
+        // MySQL resolves a HAVING name to a GROUP BY column, an alias, a select-list column or a
+        // column of an enclosing query, in that order. PostgreSQL has no aliases there and resolves
+        // a name against the input tables of this SELECT, then of enclosing queries.
         self.can_reference_aliases = true;
+        self.having = true;
         self.visit_expr(expr)?;
         self.can_reference_aliases = false;
+        self.having = false;
         Ok(())
     }
 
     fn visit_order_clause(&mut self, order: &'ast mut OrderClause) -> Result<(), Self::Error> {
         // Only top-level bare columns may be SELECT-alias references.
         // Columns nested inside expressions (e.g., SUM(col)) must be qualified
-        // as table columns, even when the column name matches a SELECT alias.
+        // as table columns, even when the column name matches a SELECT alias. A bare name that is
+        // a select-list column resolves to that column ahead of the input tables.
         for ord_by in order.order_by.iter_mut() {
             self.can_reference_aliases = matches!(
                 &ord_by.field,
                 FieldReference::Expr(Expr::Column(Column { table: None, .. }))
             );
+            self.order = self.can_reference_aliases;
             self.visit_field_reference(&mut ord_by.field)?;
         }
         self.can_reference_aliases = false;
+        self.order = false;
         Ok(())
     }
 
@@ -237,15 +428,18 @@ impl<'ast, S: ImpliedTablesContext> VisitorMut<'ast> for ExpandImpliedTablesVisi
         &mut self,
         group_by: &'ast mut GroupByClause,
     ) -> Result<(), Self::Error> {
-        // Same logic as ORDER BY: only top-level bare columns may reference aliases.
+        // As in ORDER BY, only top-level bare columns may reference aliases, but a GROUP BY name
+        // resolves to an input column before an alias or a select-list column.
         for field in group_by.fields.iter_mut() {
             self.can_reference_aliases = matches!(
                 field,
                 FieldReference::Expr(Expr::Column(Column { table: None, .. }))
             );
+            self.group = self.can_reference_aliases;
             self.visit_field_reference(field)?;
         }
         self.can_reference_aliases = false;
+        self.group = false;
         Ok(())
     }
 
@@ -256,10 +450,11 @@ impl<'ast, S: ImpliedTablesContext> VisitorMut<'ast> for ExpandImpliedTablesVisi
         // Inside a function call (e.g., SUM(col)), column references are always
         // table columns, never SELECT aliases.  Temporarily disable alias
         // recognition so that columns inside aggregates get properly qualified.
-        let saved = self.can_reference_aliases;
+        let saved = (self.can_reference_aliases, self.having);
         self.can_reference_aliases = false;
+        self.having = false;
         walk_function_expr(self, function_expr)?;
-        self.can_reference_aliases = saved;
+        (self.can_reference_aliases, self.having) = saved;
         Ok(())
     }
 
@@ -273,16 +468,43 @@ impl<'ast, S: ImpliedTablesContext> VisitorMut<'ast> for ExpandImpliedTablesVisi
             // USING columns are bare column *names* (not references) that identify
             // a column present on both sides of the join.  They must NOT be qualified
             // here — `expand_join_on_using` (which runs next) reads only `.name` and
-            // builds fresh, correctly-qualified ON predicates.  Qualifying them would
-            // trigger a spurious "Ambiguous column" warning in `find_table` (the name
-            // exists on both sides by design) and attach an arbitrary table.
+            // builds fresh, correctly-qualified ON predicates.
             JoinConstraint::Using(_) => Ok(()),
             JoinConstraint::Empty => Ok(()),
         }
     }
 
+    fn visit_field_definition_expr(
+        &mut self,
+        fde: &'ast mut FieldDefinitionExpr,
+    ) -> Result<(), Self::Error> {
+        walk_field_definition_expr(self, fde)?;
+        if let FieldDefinitionExpr::Expr {
+            expr: Expr::Column(col),
+            alias: None,
+        } = fde
+            && let Some(last) = self.fields.last_mut()
+        {
+            last.insert(col.clone());
+        }
+        Ok(())
+    }
+
     fn visit_column(&mut self, column: &'ast mut Column) -> Result<(), Self::Error> {
-        if self.can_reference_aliases && self.aliases.contains(&column.name) {
+        // GROUP BY, and HAVING on PostgreSQL, try an input column before an alias.
+        let input_first =
+            self.group || (self.having && matches!(self.dialect, Dialect::PostgreSQL));
+        // On MySQL a HAVING name that is a GROUP BY column refers to that column, ahead of an
+        // alias.
+        if self.having
+            && matches!(self.dialect, Dialect::MySQL)
+            && column.table.is_none()
+            && let Some(table) = self.find_group_by_table(&column.name)?
+        {
+            column.table = Some(table);
+            return Ok(());
+        }
+        if self.can_reference_aliases && !input_first && self.aliases.contains(&column.name) {
             return Ok(());
         }
 
@@ -311,12 +533,42 @@ impl<'ast, S: ImpliedTablesContext> VisitorMut<'ast> for ExpandImpliedTablesVisi
                 }
                 // Not found at this scope level, continue to outer scope.
             }
+        } else if self.order {
+            column.table = match self.find_select_list_table(&column.name)? {
+                Some(table) => Some(table),
+                None => self.find_table(&column.name)?,
+            };
+        } else if self.having && matches!(self.dialect, Dialect::MySQL) {
+            column.table = self.find_mysql_having_table(&column.name)?;
+        } else if self.group || self.having {
+            column.table = self.find_table_input_first(&column.name)?;
         } else {
-            column.table = self.find_table(&column.name);
+            column.table = self.find_table(&column.name)?;
         }
 
         Ok(())
     }
+}
+
+/// The table of the column named `column_name` among `columns`. Errors when columns with that
+/// name resolve to different tables; `place` names where they came from in that error.
+fn find_table_among(
+    columns: Option<&HashSet<Column>>,
+    column_name: &str,
+    place: &str,
+) -> ReadySetResult<Option<Relation>> {
+    let mut tables = columns
+        .into_iter()
+        .flatten()
+        .filter(|c| c.name == column_name)
+        .filter_map(|c| c.table.as_ref());
+    let Some(first) = tables.next() else {
+        return Ok(None);
+    };
+    if tables.any(|t| t != first) {
+        invalid_query!("Ambiguous column {} in {}", column_name, place);
+    }
+    Ok(Some(first.clone()))
 }
 
 fn rewrite_select<S: ImpliedTablesContext>(
@@ -330,6 +582,12 @@ fn rewrite_select<S: ImpliedTablesContext>(
         tables: Vec::new(),
         aliases: Default::default(),
         can_reference_aliases: false,
+        using_merged_away: Vec::new(),
+        fields: Vec::new(),
+        group_by_columns: Vec::new(),
+        order: false,
+        group: false,
+        having: false,
         dialect,
     };
 
@@ -1250,5 +1508,343 @@ mod tests {
             q.display(Dialect::MySQL),
             expected.display(Dialect::MySQL)
         );
+    }
+
+    const BOTH: [Dialect; 2] = [Dialect::MySQL, Dialect::PostgreSQL];
+
+    /// Expands `sql` against s(id, x), ss(id, x, y), t(id, z) and d(rownum).
+    fn expand(dialect: Dialect, sql: &str) -> ReadySetResult<SqlQuery> {
+        let mut q = parse_query(dialect, sql).unwrap();
+        let schema = [
+            ("s", vec!["id", "x"]),
+            ("ss", vec!["id", "x", "y"]),
+            ("t", vec!["id", "z"]),
+            ("d", vec!["rownum"]),
+        ]
+        .into_iter()
+        .map(|(t, cols)| {
+            (
+                t.into(),
+                cols.into_iter().map(SqlIdentifier::from).collect(),
+            )
+        })
+        .collect();
+        q.expand_implied_tables(TestImpliedTablesContext { schema, dialect })?;
+        Ok(q)
+    }
+
+    fn assert_expands(dialect: Dialect, sql: &str, expected: &str) {
+        let q = expand(dialect, sql).unwrap_or_else(|e| panic!("{dialect:?}: `{sql}`: {e}"));
+        let expected = parse_query(dialect, expected).unwrap();
+        assert_eq!(
+            q,
+            expected,
+            "{dialect:?}\n left: {}\nright: {}",
+            q.display(dialect),
+            expected.display(dialect)
+        );
+    }
+
+    fn assert_error(dialect: Dialect, sql: &str, message: &str) {
+        let err = expand(dialect, sql).expect_err(sql);
+        assert!(err.to_string().contains(message), "{dialect:?}: {err}");
+    }
+
+    fn assert_ambiguous(dialect: Dialect, sql: &str) {
+        assert_error(dialect, sql, "Ambiguous");
+    }
+
+    #[test]
+    fn unique_column_is_qualified() {
+        for d in BOTH {
+            assert_expands(
+                d,
+                "SELECT y FROM s JOIN ss ON s.id = ss.id",
+                "SELECT ss.y FROM s JOIN ss ON s.id = ss.id",
+            );
+        }
+    }
+
+    #[test]
+    fn ambiguous_column_is_rejected() {
+        for d in BOTH {
+            assert_ambiguous(d, "SELECT id FROM s JOIN ss ON s.id = ss.id");
+            assert_ambiguous(d, "SELECT s.x FROM s JOIN ss ON s.id = ss.id WHERE id = 1");
+        }
+    }
+
+    #[test]
+    fn innermost_scope_wins_then_enclosing_query() {
+        for d in BOTH {
+            assert_expands(
+                d,
+                "SELECT s.id FROM s WHERE EXISTS (SELECT 1 FROM ss WHERE y = x)",
+                "SELECT s.id FROM s WHERE EXISTS (SELECT 1 FROM ss WHERE ss.y = ss.x)",
+            );
+            assert_expands(
+                d,
+                "SELECT s.id FROM s WHERE EXISTS (SELECT 1 FROM t WHERE t.z = x)",
+                "SELECT s.id FROM s WHERE EXISTS (SELECT 1 FROM t WHERE t.z = s.x)",
+            );
+        }
+    }
+
+    #[test]
+    fn using_column_resolves_to_the_left_side() {
+        for d in BOTH {
+            assert_expands(
+                d,
+                "SELECT id FROM s JOIN ss USING (id)",
+                "SELECT s.id FROM s JOIN ss USING (id)",
+            );
+        }
+    }
+
+    #[test]
+    fn using_column_of_a_right_join_resolves_to_the_right_side() {
+        for d in BOTH {
+            assert_expands(
+                d,
+                "SELECT id FROM s RIGHT JOIN ss AS q USING (id)",
+                "SELECT q.id FROM s RIGHT JOIN ss AS q USING (id)",
+            );
+            assert_expands(
+                d,
+                "SELECT id FROM s JOIN ss USING (id) RIGHT JOIN t USING (id)",
+                "SELECT t.id FROM s JOIN ss USING (id) RIGHT JOIN t USING (id)",
+            );
+        }
+    }
+
+    #[test]
+    fn on_join_after_using_makes_the_column_ambiguous() {
+        for d in BOTH {
+            assert_ambiguous(d, "SELECT id FROM s JOIN ss USING (id) JOIN t ON s.x = t.z");
+        }
+    }
+
+    #[test]
+    fn subquery_sees_the_merged_using_column() {
+        for d in BOTH {
+            assert_expands(
+                d,
+                "SELECT s.x FROM s JOIN ss USING (id) \
+                 WHERE EXISTS (SELECT 1 FROM d WHERE d.rownum = id)",
+                "SELECT s.x FROM s JOIN ss USING (id) \
+                 WHERE EXISTS (SELECT 1 FROM d WHERE d.rownum = s.id)",
+            );
+        }
+    }
+
+    #[test]
+    fn order_by_prefers_an_alias() {
+        let sql = "SELECT s.id, s.x AS z FROM s JOIN t ON s.id = t.id ORDER BY z";
+        for d in BOTH {
+            assert_expands(d, sql, sql);
+        }
+    }
+
+    #[test]
+    fn order_by_prefers_a_select_list_column() {
+        for d in BOTH {
+            assert_expands(
+                d,
+                "SELECT s.id FROM s JOIN ss ON s.id = ss.id ORDER BY id",
+                "SELECT s.id FROM s JOIN ss ON s.id = ss.id ORDER BY s.id",
+            );
+            assert_ambiguous(
+                d,
+                "SELECT s.id, ss.id FROM s JOIN ss ON s.id = ss.id ORDER BY id",
+            );
+        }
+    }
+
+    #[test]
+    fn order_by_falls_back_to_the_input_tables() {
+        for d in BOTH {
+            assert_expands(
+                d,
+                "SELECT s.id FROM s JOIN t ON s.id = t.id ORDER BY z",
+                "SELECT s.id FROM s JOIN t ON s.id = t.id ORDER BY t.z",
+            );
+            assert_ambiguous(
+                d,
+                "SELECT s.id FROM s JOIN ss ON s.id = ss.id ORDER BY id + 1",
+            );
+        }
+    }
+
+    #[test]
+    fn order_by_uses_its_own_select_list() {
+        for d in BOTH {
+            assert_expands(
+                d,
+                "SELECT s.id FROM s WHERE s.x IN \
+                 (SELECT ss.id FROM ss JOIN t ON ss.id = t.id ORDER BY id) ORDER BY id",
+                "SELECT s.id FROM s WHERE s.x IN \
+                 (SELECT ss.id FROM ss JOIN t ON ss.id = t.id ORDER BY ss.id) ORDER BY s.id",
+            );
+        }
+    }
+
+    #[test]
+    fn group_by_prefers_an_input_column_over_an_alias() {
+        for d in BOTH {
+            assert_expands(
+                d,
+                "SELECT s.x AS z, count(*) FROM s JOIN t ON s.id = t.id GROUP BY z",
+                "SELECT s.x AS z, count(*) FROM s JOIN t ON s.id = t.id GROUP BY t.z",
+            );
+            let sql = "SELECT s.x AS k, count(*) FROM s GROUP BY k";
+            assert_expands(d, sql, sql);
+        }
+    }
+
+    #[test]
+    fn group_by_falls_back_to_the_select_list_on_mysql() {
+        let sql = "SELECT s.id FROM s JOIN ss ON s.id = ss.id GROUP BY id";
+        assert_expands(
+            Dialect::MySQL,
+            sql,
+            "SELECT s.id FROM s JOIN ss ON s.id = ss.id GROUP BY s.id",
+        );
+        assert_ambiguous(Dialect::PostgreSQL, sql);
+
+        let sql = "SELECT s.x AS id, count(*) FROM s JOIN ss ON s.id = ss.id GROUP BY id";
+        assert_expands(Dialect::MySQL, sql, sql);
+        assert_ambiguous(Dialect::PostgreSQL, sql);
+    }
+
+    #[test]
+    fn group_by_ambiguity_without_a_select_list_match_is_rejected() {
+        for d in BOTH {
+            assert_ambiguous(d, "SELECT s.x FROM s JOIN ss ON s.x = ss.x GROUP BY id");
+        }
+    }
+
+    #[test]
+    fn group_by_looks_at_its_own_select_first() {
+        let sql = "SELECT s.id FROM s JOIN \
+                   (SELECT max(ss.y) AS y, ss.x AS k FROM ss GROUP BY k) AS d ON s.id = d.y";
+        for d in BOTH {
+            assert_expands(d, sql, sql);
+            assert_expands(
+                d,
+                "SELECT s.id FROM s WHERE EXISTS (SELECT count(*) FROM t GROUP BY x)",
+                "SELECT s.id FROM s WHERE EXISTS (SELECT count(*) FROM t GROUP BY s.x)",
+            );
+        }
+    }
+
+    #[test]
+    fn having_prefers_an_alias_on_mysql_only() {
+        let sql = "SELECT s.id, count(*) AS z FROM s JOIN t ON s.id = t.id GROUP BY s.id \
+                   HAVING z > 0";
+        assert_expands(Dialect::MySQL, sql, sql);
+        assert_expands(
+            Dialect::PostgreSQL,
+            sql,
+            "SELECT s.id, count(*) AS z FROM s JOIN t ON s.id = t.id GROUP BY s.id \
+             HAVING t.z > 0",
+        );
+    }
+
+    #[test]
+    fn having_falls_back_to_the_select_list_on_mysql() {
+        let sql = "SELECT s.id FROM s JOIN ss ON s.id = ss.id GROUP BY s.id HAVING id > 0";
+        assert_expands(
+            Dialect::MySQL,
+            sql,
+            "SELECT s.id FROM s JOIN ss ON s.id = ss.id GROUP BY s.id HAVING s.id > 0",
+        );
+        assert_ambiguous(Dialect::PostgreSQL, sql);
+    }
+
+    #[test]
+    fn having_ambiguity_is_rejected() {
+        let sql = "SELECT s.x FROM s JOIN ss ON s.x = ss.x GROUP BY s.x HAVING id > 0";
+        assert_error(Dialect::MySQL, sql, "Unknown column id");
+        assert_ambiguous(Dialect::PostgreSQL, sql);
+        for d in BOTH {
+            // A function argument is resolved against the input tables only.
+            assert_ambiguous(
+                d,
+                "SELECT s.id FROM s JOIN ss ON s.id = ss.id GROUP BY s.id HAVING sum(id) > 0",
+            );
+            assert_ambiguous(
+                d,
+                "SELECT s.id, ss.id FROM s JOIN ss ON s.id = ss.id GROUP BY s.id, ss.id \
+                 HAVING id > 0",
+            );
+        }
+    }
+
+    #[test]
+    fn group_by_prefers_an_alias_over_the_select_list_on_mysql() {
+        let sql = "SELECT s.id, max(ss.x) AS id FROM s JOIN ss ON s.id = ss.id GROUP BY id";
+        assert_expands(Dialect::MySQL, sql, sql);
+        assert_ambiguous(Dialect::PostgreSQL, sql);
+    }
+
+    #[test]
+    fn having_prefers_a_group_by_column_over_an_alias_on_mysql() {
+        let sql = "SELECT s.id, min(s.x) AS id FROM s JOIN ss ON s.id = ss.id GROUP BY s.id \
+                   HAVING id > 1";
+        assert_expands(
+            Dialect::MySQL,
+            sql,
+            "SELECT s.id, min(s.x) AS id FROM s JOIN ss ON s.id = ss.id GROUP BY s.id \
+             HAVING s.id > 1",
+        );
+        assert_ambiguous(Dialect::PostgreSQL, sql);
+
+        for d in BOTH {
+            assert_expands(
+                d,
+                "SELECT s.id, min(s.id) AS x FROM s GROUP BY s.id, s.x HAVING x > 1",
+                "SELECT s.id, min(s.id) AS x FROM s GROUP BY s.id, s.x HAVING s.x > 1",
+            );
+        }
+    }
+
+    #[test]
+    fn having_on_mysql_skips_ungrouped_columns_of_its_own_select() {
+        let sql =
+            "SELECT s.id FROM s WHERE EXISTS (SELECT count(*) FROM ss GROUP BY ss.id HAVING x > 1)";
+        assert_expands(
+            Dialect::MySQL,
+            sql,
+            "SELECT s.id FROM s WHERE EXISTS (SELECT count(*) FROM ss GROUP BY ss.id HAVING s.x > 1)",
+        );
+        assert_expands(
+            Dialect::PostgreSQL,
+            sql,
+            "SELECT s.id FROM s WHERE EXISTS (SELECT count(*) FROM ss GROUP BY ss.id HAVING ss.x > 1)",
+        );
+
+        let sql = "SELECT s.id FROM s JOIN t ON s.id = t.id GROUP BY s.id HAVING z > 0";
+        assert_error(Dialect::MySQL, sql, "Unknown column z");
+        assert_expands(
+            Dialect::PostgreSQL,
+            sql,
+            "SELECT s.id FROM s JOIN t ON s.id = t.id GROUP BY s.id HAVING t.z > 0",
+        );
+    }
+
+    #[test]
+    fn subquery_in_having_resolves_its_own_columns() {
+        for d in BOTH {
+            assert_expands(
+                d,
+                "SELECT s.x FROM s GROUP BY s.x HAVING EXISTS (SELECT 1 FROM ss WHERE x = 1)",
+                "SELECT s.x FROM s GROUP BY s.x HAVING EXISTS (SELECT 1 FROM ss WHERE ss.x = 1)",
+            );
+            assert_expands(
+                d,
+                "SELECT s.x FROM s GROUP BY s.x HAVING EXISTS (SELECT ss.x AS y FROM ss WHERE y = 1)",
+                "SELECT s.x FROM s GROUP BY s.x HAVING EXISTS \
+                 (SELECT ss.x AS y FROM ss WHERE ss.y = 1)",
+            );
+        }
     }
 }

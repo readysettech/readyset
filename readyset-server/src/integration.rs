@@ -9677,7 +9677,7 @@ async fn cascade_drop_view() {
         "CREATE VIEW v1 AS SELECT a, b FROM t1;",
         "CREATE VIEW v2 AS SELECT a, c FROM v1 JOIN t2 ON v1.b = t2.d;",
         "CREATE VIEW v3 AS SELECT a, e FROM v2 JOIN t3 ON v2.c = t3.f;",
-        "CREATE CACHE q FROM SELECT a, c, e FROM v1 JOIN v2 ON v1.a = v2.a JOIN v3 ON v2.a = v3.a",
+        "CREATE CACHE q FROM SELECT v1.a, c, e FROM v1 JOIN v2 ON v1.a = v2.a JOIN v3 ON v2.a = v3.a",
     ];
     eventually! {
         g.extend_recipe(ChangeList::from_strings(sql.clone(), Dialect::DEFAULT_MYSQL).unwrap())
