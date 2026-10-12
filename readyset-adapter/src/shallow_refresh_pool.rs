@@ -317,6 +317,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                             &connect_config,
                             None,
                             None,
+                            None,
                             false,
                         )
                         .await

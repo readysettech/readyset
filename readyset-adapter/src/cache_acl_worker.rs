@@ -159,6 +159,7 @@ impl<DB: UpstreamDatabase> PassConns<DB> {
     ) -> Result<DB, DB::Error> {
         let mut conn = DB::connect(
             config,
+            None,
             user.map(ToString::to_string),
             password.map(ToString::to_string),
             false,

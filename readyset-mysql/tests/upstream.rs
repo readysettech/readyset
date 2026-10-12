@@ -23,7 +23,7 @@ fn upstream_url_config() -> UpstreamConfig {
 
 async fn connect() -> MySqlUpstream {
     readyset_tracing::init_test_logging();
-    MySqlUpstream::connect(upstream_url_config(), None, None, false)
+    MySqlUpstream::connect(upstream_url_config(), None, None, None, false)
         .await
         .unwrap()
 }

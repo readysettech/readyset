@@ -78,6 +78,7 @@ where
 pub async fn connect_picked<DB: UpstreamDatabase>(
     registry: &Arc<UpstreamServerRegistry>,
     config: &UpstreamConfig,
+    database: Option<&str>,
     username: Option<String>,
     password: Option<String>,
     interactive: bool,
@@ -85,6 +86,7 @@ pub async fn connect_picked<DB: UpstreamDatabase>(
     connect_picked_with(registry, IsFatalError::upstream_failure, |server| {
         DB::connect(
             config.for_server(server),
+            database,
             username.clone(),
             password.clone(),
             interactive,

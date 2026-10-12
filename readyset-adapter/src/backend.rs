@@ -2157,6 +2157,7 @@ where
         match upstream_servers::connect_picked::<DB>(
             &registry,
             &config,
+            None,
             username,
             password,
             interactive,

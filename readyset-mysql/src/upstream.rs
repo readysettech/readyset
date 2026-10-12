@@ -449,6 +449,7 @@ macro_rules! handle_query_result {
 impl MySqlUpstream {
     async fn connect_inner(
         upstream_config: UpstreamConfig,
+        database: Option<&str>,
         username: Option<String>,
         password: Option<String>,
         interactive: bool,
@@ -470,6 +471,9 @@ impl MySqlUpstream {
             builder = builder.ssl_opts(ssl_opts);
         }
 
+        if let Some(database) = database {
+            builder = builder.db_name(Some(database));
+        }
         if let Some(username) = username {
             builder = builder.user(Some(username));
         }
@@ -612,12 +616,13 @@ impl UpstreamDatabase for MySqlUpstream {
 
     async fn connect(
         upstream_config: UpstreamConfig,
+        database: Option<&str>,
         username: Option<String>,
         password: Option<String>,
         interactive: bool,
     ) -> Result<Self, Error> {
         let (conn, prepared_statements) =
-            Self::connect_inner(upstream_config, username, password, interactive).await?;
+            Self::connect_inner(upstream_config, database, username, password, interactive).await?;
         Ok(Self {
             conn,
             prepared_statements,

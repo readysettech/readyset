@@ -203,6 +203,7 @@ pub trait Adapter: Send {
             UpstreamConfig::from_url(addr).expect("valid upstream URL"),
             None,
             None,
+            None,
             false,
         )
         .await

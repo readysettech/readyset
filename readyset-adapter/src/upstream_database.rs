@@ -160,9 +160,11 @@ pub trait UpstreamDatabase: Sized + Send {
 
     /// Create a new connection to this upstream database
     ///
+    /// Connect to `database` when it is set, and otherwise to the database in the upstream URL.
     /// Connect will return an error if the upstream database is running an unsupported version.
     async fn connect(
         upstream_config: UpstreamConfig,
+        database: Option<&str>,
         username: Option<String>,
         password: Option<String>,
         interactive: bool,

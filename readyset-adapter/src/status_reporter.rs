@@ -222,7 +222,9 @@ where
 
         // Pick again, so one dead server does not mark the whole upstream unreachable.
         let registry = upstream_servers::registry_for(self.upstream_registry.as_deref(), &config)?;
-        match upstream_servers::connect_picked::<U>(&registry, &config, None, None, false).await {
+        match upstream_servers::connect_picked::<U>(&registry, &config, None, None, None, false)
+            .await
+        {
             Ok((mut upstream, picked)) => {
                 let reachable = upstream.is_connected().await.unwrap_or(false);
                 self.upstream = Some((upstream, picked));

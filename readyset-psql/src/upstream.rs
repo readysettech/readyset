@@ -386,6 +386,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
 
     async fn connect(
         upstream_config: UpstreamConfig,
+        database: Option<&str>,
         username: Option<String>,
         password: Option<String>,
         _interactive: bool,
@@ -395,6 +396,9 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             .ok_or(ReadySetError::InvalidUpstreamDatabase)?;
 
         let mut pg_config = Config::from_str(server.raw_url())?;
+        if let Some(database) = database {
+            pg_config.dbname(database);
+        }
         if let Some(username) = username {
             pg_config.user(username);
         }
