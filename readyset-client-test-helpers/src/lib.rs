@@ -1144,7 +1144,10 @@ impl TestBuilder {
 
         (
             A::connection_opts_with_port(
-                cdc_url_and_db_name.as_ref().map(|(_, db)| db.as_str()),
+                cdc_url_and_db_name
+                    .as_ref()
+                    .map(|(_, db)| db.as_str())
+                    .or(upstream_only_db.as_deref()),
                 addr.port(),
             ),
             handle,

@@ -1632,7 +1632,7 @@ async fn pg_change_upstream() {
 
     // Reconnect to ReadySet; the new connection picks up the new upstream.
     let mut cfg_rs = rs_opts.clone();
-    cfg_rs.dbname(&db_a);
+    cfg_rs.dbname(&db_b);
     let rs = psql_helpers::connect(cfg_rs).await;
 
     // Wait for TTL to expire so the shallow cache is stale.

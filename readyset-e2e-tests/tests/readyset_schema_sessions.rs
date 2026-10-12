@@ -316,7 +316,7 @@ async fn readyset_schema_session_with_unreachable_upstream_psql() {
         .build::<PostgreSQLAdapter>()
         .await;
 
-    let normal = connect_with_db(&rs_opts, &test_name).await;
+    let normal = connect_with_db(&rs_opts, "noria").await;
     assert!(normal.simple_query("SELECT 42").await.is_err());
 
     let conn = connect_with_db(&rs_opts, "readyset").await;
