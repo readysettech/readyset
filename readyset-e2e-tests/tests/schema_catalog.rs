@@ -3,8 +3,11 @@
 use fail::FailScenario;
 use mysql_async::Row;
 use mysql_async::prelude::Queryable;
+use readyset_adapter::backend::MigrationMode;
+use readyset_adapter::query_status_cache::MigrationStyle;
+use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::TestBuilder;
-use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
+use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter, last_query_info};
 use readyset_client_test_helpers::wait_for_schema_generation_change;
 use readyset_server::Handle;
 use readyset_util::failpoints;
@@ -464,8 +467,12 @@ async fn schema_catalog_recovers_after_sse_stream_disconnect() {
 async fn create_cache_by_query_id_text_protocol() {
     readyset_tracing::init_test_logging();
 
-    let (rs_opts, _handle, shutdown_tx) =
-        TestBuilder::default().build::<MySQLAdapter>().await;
+    let (rs_opts, handle, shutdown_tx) = TestBuilder::default()
+        .fallback(true)
+        .migration_mode(MigrationMode::OutOfBand)
+        .migration_style(MigrationStyle::Explicit)
+        .build::<MySQLAdapter>()
+        .await;
 
     let db_name = rs_opts.db_name().unwrap().to_string();
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(db_name));
@@ -482,22 +489,17 @@ async fn create_cache_by_query_id_text_protocol() {
         .await
         .unwrap();
 
-    // Wait for table to be queryable through ReadySet. With InRequestPath (default),
-    // this SELECT will be auto-cached once the schema catalog is ready.
     eventually!(
         attempts: 100,
         sleep: Duration::from_millis(200),
-        message: "adapter did not accept queries against cache_by_id_text".to_string(),
         {
             rs_conn
-                .query_drop("SELECT * FROM cache_by_id_text WHERE id = 1")
+                .query_drop("CREATE CACHE FROM SELECT * FROM cache_by_id_text WHERE id = 1")
                 .await
                 .is_ok()
         }
     );
 
-    // The SELECT was auto-cached by InRequestPath. Extract the query ID from SHOW CACHES,
-    // then drop the cache so we can re-create it by ID.
     let query_id: String = {
         let rows: Vec<Row> = rs_conn.query("SHOW CACHES").await.unwrap();
         let row = rows
@@ -510,7 +512,6 @@ async fn create_cache_by_query_id_text_protocol() {
         row.get(0).unwrap()
     };
 
-    // Drop the auto-created cache so we can exercise CREATE CACHE FROM <query_id>.
     rs_conn.query_drop("DROP ALL CACHES").await.unwrap();
 
     // Issue the SELECT again via text protocol so it re-enters the query status cache.
@@ -525,6 +526,22 @@ async fn create_cache_by_query_id_text_protocol() {
         .query_drop(format!("CREATE CACHE FROM {query_id}"))
         .await
         .expect("CREATE CACHE FROM query_id should succeed (text protocol)");
+
+    drop(rs_conn);
+    let (rs_opts, _handle, shutdown_tx) = shutdown_tx.restart(handle).await;
+
+    let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+
+    eventually! {
+        rs_conn
+            .query_drop("SELECT * FROM cache_by_id_text WHERE id = 1")
+            .await
+            .unwrap();
+        matches!(
+            last_query_info(&mut rs_conn).await.destination,
+            QueryDestination::Readyset(..)
+        )
+    }
 
     shutdown_tx.shutdown().await;
 }

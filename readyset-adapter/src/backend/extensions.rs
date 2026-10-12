@@ -1591,15 +1591,26 @@ where
         ))
     }
 
-    /// Construct a [`CacheDDLRequest`] from this [`CreateCacheStatement`], rewriting shallow cache
-    /// creations by query id to instead use the original query text.
+    /// Construct a [`CacheDDLRequest`] from this [`CreateCacheStatement`].
     fn cache_ddl_request(
         connectors: &BackendConnectors<DB>,
         create: &CreateCacheStatement,
+        deep: &ReadySetResult<ViewCreateRequest>,
         shallow: &ReadySetResult<ShallowViewRequest>,
     ) -> Option<CacheDDLRequest> {
-        let (unparsed_stmt, schema_search_path) = match (&create.inner, shallow) {
-            (CacheInner::Id(..), Ok(shallow)) => (
+        let (unparsed_stmt, schema_search_path) = match (&create.inner, deep, shallow) {
+            (CacheInner::Id(..), Ok(deep), _) => (
+                create_cache_statement(
+                    DB::SQL_DIALECT,
+                    &CreateCacheOptions {
+                        cache_type: Some(CacheType::Deep),
+                        ..create.options()
+                    },
+                    &deep.statement.display(DB::SQL_DIALECT).to_string(),
+                ),
+                deep.schema_search_path.clone(),
+            ),
+            (CacheInner::Id(..), _, Ok(shallow)) => (
                 create_cache_statement(
                     DB::SQL_DIALECT,
                     &CreateCacheOptions {
@@ -1712,7 +1723,8 @@ where
                     trace!("No telemetry sender. not sending metric for CREATE CACHE");
                 }
 
-                let ddl_req = Self::cache_ddl_request(connectors, create_cache_stmt, &shallow);
+                let ddl_req =
+                    Self::cache_ddl_request(connectors, create_cache_stmt, &deep, &shallow);
                 let registration_ddl = ddl_req.clone();
 
                 // Set by whichever branch builds a deep cache, so the registration below runs
