@@ -2758,6 +2758,7 @@ mod tests {
                 Some(CacheDDLRequest {
                     unparsed_stmt: format!("CREATE CACHE {name} FROM {query}"),
                     schema_search_path: vec![],
+                    database: None,
                     dialect: readyset_data::Dialect::DEFAULT_MYSQL,
                     cache_name: Some(Relation::from(name)),
                 }),

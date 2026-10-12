@@ -53,6 +53,7 @@ impl QueryId {
     pub fn from_shallow_query(
         query: &ShallowCacheQuery,
         schema_search_path: &[SqlIdentifier],
+        database: Option<&SqlIdentifier>,
     ) -> Self {
         struct HashWriter<'a>(&'a mut DefaultHasher);
 
@@ -63,12 +64,16 @@ impl QueryId {
             }
         }
 
-        // Same id as `hash(&(query, schema_search_path))`, which hashes the rendered query as a
-        // `str`: its bytes, then 0xff.
+        // Same id as `hash(&(query, schema_search_path))`, or `hash(&(query, schema_search_path,
+        // database))` with a database, which hashes the rendered query as a `str`: its bytes, then
+        // 0xff.
         let mut hasher = DefaultHasher::new();
         write!(HashWriter(&mut hasher), "{query}").expect("rendering a query never fails");
         hasher.write_u8(0xff);
         schema_search_path.hash(&mut hasher);
+        if let Some(database) = database {
+            database.hash(&mut hasher);
+        }
         QueryId(hasher.finish())
     }
 
@@ -688,6 +693,7 @@ mod tests {
             ["'caf\u{e9}'"; 1000].join(", ")
         );
         let path: [SqlIdentifier; 2] = ["public".into(), "sch\u{e9}ma".into()];
+        let db: SqlIdentifier = "db".into();
         for sql in [
             "SELECT 1",
             "SELECT \"\u{e9}\" FROM t WHERE x = '\u{1f600}'",
@@ -697,11 +703,38 @@ mod tests {
                 readyset_sql_parsing::parse_shallow_query(readyset_sql::Dialect::PostgreSQL, sql)
                     .unwrap();
             for path in [&path[..], &[]] {
-                let expected = QueryId(hash(&(&query, path)));
-                assert_eq!(QueryId::from_shallow_query(&query, path), expected, "{sql}");
-                let request = ShallowViewRequest::new(query.clone(), path.to_vec(), query.clone());
-                assert_eq!(QueryId::from(&Query::from(request)), expected, "{sql}");
+                for database in [None, Some(&db)] {
+                    let expected = match database {
+                        Some(database) => QueryId(hash(&(&query, path, database))),
+                        None => QueryId(hash(&(&query, path))),
+                    };
+                    assert_eq!(
+                        QueryId::from_shallow_query(&query, path, database),
+                        expected,
+                        "{sql}"
+                    );
+                    let request =
+                        ShallowViewRequest::new(query.clone(), path.to_vec(), query.clone())
+                            .with_database(database.cloned());
+                    assert_eq!(QueryId::from(&Query::from(request)), expected, "{sql}");
+                }
             }
         }
+    }
+
+    /// A shallow request's `QueryId` agrees with the hash of the `Query` wrapping it, which keys the
+    /// query status cache, with and without a database.
+    #[test]
+    fn shallow_query_id_matches_query_hash() {
+        let query = ShallowCacheQuery::default();
+        let request = ShallowViewRequest::new(query.clone(), vec!["public".into()], query);
+        let with_database = request.clone().with_database(Some("db".into()));
+        for request in [&request, &with_database] {
+            assert_eq!(
+                QueryId::from(&Query::from(request.clone())),
+                request.query_id()
+            );
+        }
+        assert_ne!(request.query_id(), with_database.query_id());
     }
 }

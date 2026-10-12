@@ -551,6 +551,7 @@ mod tests {
                 let ddl_req = CacheDDLRequest {
                     unparsed_stmt: stmt.to_string(),
                     schema_search_path: vec![],
+                    database: None,
                     dialect: Dialect::DEFAULT_POSTGRESQL,
                     cache_name: None,
                 };

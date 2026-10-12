@@ -35,6 +35,8 @@ where
     M: Send + Sync + 'static,
 {
     pub(crate) query_id: QueryId,
+    /// The upstream database the query uses, if different from that of the upstream URL.
+    pub(crate) database: Option<SqlIdentifier>,
     pub(crate) path: Vec<SqlIdentifier>,
     pub(crate) query: String,
     pub(crate) cache: CacheInsertGuard<crate::shallow_key::ShallowKey, V>,
@@ -275,6 +277,8 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
         idx: usize,
     ) {
         let mut upstream: Option<(DB, PickedServer)> = None;
+        // The upstream database of the connection, if different from that of the upstream URL.
+        let mut database = None;
         let mut reconnect = false;
         let mut config = pool.upstream_config.read().await.clone();
         let mut last_config_check = Instant::now();
@@ -304,10 +308,11 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                 }
             }
 
-            if upstream.is_none() || reconnect {
+            if upstream.is_none() || reconnect || request.database != database {
                 reconnect = false;
                 let mut connect_config = config.clone();
                 connect_config.program_name = Some(READYSET_SHALLOW_REFRESHER.to_string());
+                let request_database = request.database.as_ref().map(SqlIdentifier::as_str);
                 let registry =
                     upstream_servers::registry_for(Some(&pool.upstream_registry), &connect_config);
                 let connected = match registry {
@@ -315,7 +320,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                         upstream_servers::connect_picked::<DB>(
                             &registry,
                             &connect_config,
-                            None,
+                            request_database,
                             None,
                             None,
                             false,
@@ -328,6 +333,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                     Ok(mut conn) => match conn.0.initial_session_variables().await {
                         Ok(vars) => {
                             upstream = Some(conn);
+                            database = request.database.clone();
                             session_vars = BTreeMap::new();
                             initial_vars = vars;
                         }
@@ -363,6 +369,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
 
             let ShallowRefreshRequest {
                 query_id,
+                database: _,
                 path,
                 query,
                 cache,

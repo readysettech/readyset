@@ -287,6 +287,9 @@ pub struct NoriaConnector {
     /// in MySQL can be thought of as a schema search path that only has one element.
     schema_search_path: Vec<SqlIdentifier>,
 
+    /// The upstream database for this session, if different from that of the upstream URL.
+    upstream_database: Option<SqlIdentifier>,
+
     /// The collation id to report in result set metadata for text columns. The MySQL handshake
     /// sets it, and Postgres never uses it.
     results_collation: Option<u16>,
@@ -420,6 +423,7 @@ impl NoriaConnector {
             dialect,
             parse_dialect,
             schema_search_path,
+            upstream_database: None,
             results_collation: None,
             session_vars: Arc::default(),
             results_encoding: Encoding::Utf8,
@@ -927,6 +931,16 @@ impl NoriaConnector {
     /// Returns a reference to the currently configured schema search path
     pub fn schema_search_path(&self) -> &[SqlIdentifier] {
         self.schema_search_path.as_ref()
+    }
+
+    /// Set the upstream database for this session.
+    pub fn set_upstream_database(&mut self, database: SqlIdentifier) {
+        self.upstream_database = Some(database);
+    }
+
+    /// Return the upstream database for this session, if different from that of the upstream URL.
+    pub fn upstream_database(&self) -> Option<&SqlIdentifier> {
+        self.upstream_database.as_ref()
     }
 
     /// Set the collation id to report in result set metadata for text columns.

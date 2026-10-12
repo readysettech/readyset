@@ -113,6 +113,8 @@ pub struct ShallowViewRequest {
     /// This is actually passed as [`recipe::changelist::ChangeList::schema_search_path`] when
     /// views are created.
     pub schema_search_path: Vec<SqlIdentifier>,
+    /// The upstream database the query uses, if different from that of the upstream URL.
+    pub database: Option<SqlIdentifier>,
     /// An example of the query, before we apply our rewrites.
     ///
     /// An original copy is useful for determining support via preparing it upstream.  Our
@@ -128,7 +130,9 @@ pub struct ShallowViewRequest {
 
 impl PartialEq for ShallowViewRequest {
     fn eq(&self, other: &Self) -> bool {
-        self.query == other.query && self.schema_search_path == other.schema_search_path
+        self.query == other.query
+            && self.schema_search_path == other.schema_search_path
+            && self.database == other.database
     }
 }
 
@@ -138,6 +142,9 @@ impl Hash for ShallowViewRequest {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.query.hash(state);
         self.schema_search_path.hash(state);
+        if let Some(database) = &self.database {
+            database.hash(state);
+        }
     }
 }
 
@@ -153,17 +160,28 @@ impl ShallowViewRequest {
         Self {
             query: Box::new(query),
             schema_search_path,
+            database: None,
             query_orig: Box::new(query_orig),
             query_id: OnceLock::new(),
         }
     }
 
+    /// Set the upstream database the query uses.
+    pub fn with_database(mut self, database: Option<SqlIdentifier>) -> Self {
+        self.database = database;
+        self
+    }
+
     /// The [`QueryId`] identifying this request, computed on first use.
-    /// `query` and `schema_search_path` must not be mutated after calling this.
+    /// `query`, `schema_search_path`, and `database` must not be mutated after calling this.
     pub fn query_id(&self) -> QueryId {
-        *self
-            .query_id
-            .get_or_init(|| QueryId::from_shallow_query(&self.query, &self.schema_search_path))
+        *self.query_id.get_or_init(|| {
+            QueryId::from_shallow_query(
+                &self.query,
+                &self.schema_search_path,
+                self.database.as_ref(),
+            )
+        })
     }
 }
 

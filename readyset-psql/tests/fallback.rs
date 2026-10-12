@@ -2320,6 +2320,7 @@ mod failure_injection_tests {
         let expected = CacheDDLRequest {
             unparsed_stmt: "CREATE CACHE test_query FROM SELECT * FROM users;".to_string(),
             schema_search_path: vec!["postgres".into(), "public".into()],
+            database: None,
             dialect: Dialect::DEFAULT_POSTGRESQL,
             cache_name: Some("test_query".into()),
         };

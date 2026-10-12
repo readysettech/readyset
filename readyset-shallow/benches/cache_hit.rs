@@ -35,6 +35,7 @@ fn bench_cache_hit(c: &mut Criterion) {
             CacheDDLRequest {
                 unparsed_stmt: "CREATE SHALLOW CACHE bench AS SELECT 1".to_string(),
                 schema_search_path: vec![],
+                database: None,
                 dialect: Dialect::PostgreSQL.into(),
                 cache_name: None,
             },
@@ -107,6 +108,7 @@ fn bench_cache_insert(c: &mut Criterion) {
             CacheDDLRequest {
                 unparsed_stmt: "CREATE SHALLOW CACHE bench_insert AS SELECT 1".to_string(),
                 schema_search_path: vec![],
+                database: None,
                 dialect: Dialect::PostgreSQL.into(),
                 cache_name: None,
             },

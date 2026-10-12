@@ -956,7 +956,8 @@ where
             query,
             self.noria.schema_search_path().to_owned(),
             query_orig,
-        );
+        )
+        .with_database(self.noria.upstream_database().cloned());
         Some((shallow, params))
     }
 
@@ -2049,6 +2050,30 @@ where
         Ok(())
     }
 
+    /// Connect this session to `db` on the upstream, for upstreams that bind each connection to
+    /// one database. Only shallow cache mode serves databases other than the upstream URL's.
+    pub async fn set_upstream_database(&mut self, db: &str) -> Result<(), DB::Error> {
+        let Some(config) = &self.state.upstream_config else {
+            return Ok(());
+        };
+        let Some(url_db) = config
+            .read()
+            .await
+            .preferred_upstream_url()
+            .map(|url| url.db_name().map(str::to_owned))
+        else {
+            return Ok(());
+        };
+        if url_db.as_deref() == Some(db) {
+            return Ok(());
+        }
+        if !self.settings.cache_mode.is_shallow() {
+            unsupported!("Database {db} unavailable outside shallow cache mode");
+        }
+        self.connectors.noria.set_upstream_database(db.into());
+        Ok(())
+    }
+
     /// Updates connection tracking when the authenticated user changes.
     ///
     /// This removes the old connection entry (if any) and inserts a new entry
@@ -2154,10 +2179,15 @@ where
         else {
             return Ok(());
         };
+        let database = self
+            .connectors
+            .noria
+            .upstream_database()
+            .map(|db| db.as_str());
         match upstream_servers::connect_picked::<DB>(
             &registry,
             &config,
-            None,
+            database,
             username,
             password,
             interactive,
@@ -3058,7 +3088,8 @@ where
 
     let query_orig = query.clone();
     rewrite_shallow(&mut query, rewrite_params)?;
-    let request = ShallowViewRequest::new(query, schema_search_path, query_orig);
+    let request = ShallowViewRequest::new(query, schema_search_path, query_orig)
+        .with_database(ddl_req.database.clone());
 
     let query_id = request.query_id();
     let name = stmt.name.unwrap_or_else(|| query_id.into());
@@ -3067,26 +3098,24 @@ where
     // Run the RLS analyzer at recovery time too. Without this a cache persisted under a previous
     // run that targeted a now-RLS-protected table would come back as `Plain` and serve
     // cross-tenant rows on startup.
-    let registration =
-        match analyze_recovered_cache(policy_registry, &request.query, &request.schema_search_path)
-        {
-            RecoveryDeps::Plain => None,
-            RecoveryDeps::PlainTracked { relations } => Some((relations, None)),
-            RecoveryDeps::Scoped {
-                relations,
-                session_rls_inputs,
-            } => Some((relations, Some(session_rls_inputs))),
-            RecoveryDeps::WaitForPoll { unknown } => {
-                return Ok(RecoveryOutcome::Deferred {
-                    unknown: unknown.iter().map(|u| u.qualified()).collect(),
-                });
-            }
-            RecoveryDeps::Skip { reason } => {
-                return Ok(RecoveryOutcome::Skipped {
-                    reason: format!("{display_name}: {reason}"),
-                });
-            }
-        };
+    let registration = match analyze_recovered_cache(policy_registry, &request) {
+        RecoveryDeps::Plain => None,
+        RecoveryDeps::PlainTracked { relations } => Some((relations, None)),
+        RecoveryDeps::Scoped {
+            relations,
+            session_rls_inputs,
+        } => Some((relations, Some(session_rls_inputs))),
+        RecoveryDeps::WaitForPoll { unknown } => {
+            return Ok(RecoveryOutcome::Deferred {
+                unknown: unknown.iter().map(|u| u.qualified()).collect(),
+            });
+        }
+        RecoveryDeps::Skip { reason } => {
+            return Ok(RecoveryOutcome::Skipped {
+                reason: format!("{display_name}: {reason}"),
+            });
+        }
+    };
 
     shallow.create_cache(
         Some(name),
@@ -3143,16 +3172,21 @@ enum RecoveryDeps {
 
 fn analyze_recovered_cache(
     registry: Option<&Arc<readyset_rls::PolicyRegistry>>,
-    select_stmt: &readyset_sql::ast::ShallowCacheQuery,
-    schema_search_path: &[SqlIdentifier],
+    request: &ShallowViewRequest,
 ) -> RecoveryDeps {
     let Some(registry) = registry else {
         return RecoveryDeps::Plain;
     };
+    // The registry describes only the upstream URL's database.
+    if let Some(database) = &request.database {
+        return RecoveryDeps::Skip {
+            reason: format!("rls_uncacheable[code=other_database, database={database}]"),
+        };
+    }
     let referenced_relations = match crate::rls_relations::extract_referenced_relation_oids(
-        select_stmt,
+        &request.query,
         registry,
-        schema_search_path,
+        &request.schema_search_path,
     ) {
         Ok(oids) => oids,
         Err(unknown) => {

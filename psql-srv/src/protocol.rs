@@ -406,8 +406,10 @@ impl Protocol {
             ));
         }
 
-        let database =
-            database.ok_or_else(|| Error::Unsupported("database is required".to_string()))?;
+        // As in PostgreSQL, the database defaults to the user name.
+        let database = database
+            .or_else(|| user.clone())
+            .ok_or(Error::NoUserSpecified)?;
         let response = match backend.on_init(database.borrow()).await? {
             crate::CredentialsNeeded::None => {
                 // Establish the session even with authentication disabled, so
@@ -1645,8 +1647,23 @@ mod tests {
         };
         let mut backend = Backend::new();
         let mut channel = Channel::<NullBytestream>::new(NullBytestream);
-        // A StartupMessage with no database specified triggers an error.
-        block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap_err();
+        block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap();
+        assert_eq!(backend.database.as_deref(), Some("user_name"));
+    }
+
+    #[test]
+    fn startup_message_without_database_or_user() {
+        let mut protocol = Protocol::new(TlsMode::Disabled);
+        let request = FrontendMessage::StartupMessage {
+            protocol_version: 12345,
+            user: None,
+            database: None,
+            application_name: None,
+        };
+        let mut backend = Backend::new();
+        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
+        let err = block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap_err();
+        assert!(matches!(err, Error::NoUserSpecified), "err = {err:?}");
     }
 
     #[test]

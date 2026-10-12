@@ -1598,6 +1598,7 @@ async fn caches_go_in_authority_list() {
         schema_search_path,
         dialect,
         cache_name,
+        ..
     } = res.first().unwrap();
     assert_eq!(unparsed_stmt, "CREATE CACHE q FROM SELECT x FROM t");
     assert_eq!(*dialect, Dialect::DEFAULT_POSTGRESQL);

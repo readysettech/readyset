@@ -321,6 +321,12 @@ where
         let mut rls_registration: Option<(Vec<readyset_rls::Oid>, readyset_rls::CacheSessionDeps)> =
             None;
         if let Some(registry) = &state.policy_registry {
+            // The registry describes only the upstream URL's database.
+            if let Some(database) = &shallow.database {
+                return Err(ReadySetError::Internal(format!(
+                    "rls_uncacheable[code=other_database, database={database}]"
+                )));
+            }
             let referenced_relations = match crate::rls_relations::extract_referenced_relation_oids(
                 &shallow.query,
                 registry,
@@ -534,7 +540,8 @@ where
                             query,
                             connectors.noria.schema_search_path().to_owned(),
                             query_orig,
-                        ))
+                        )
+                        .with_database(connectors.noria.upstream_database().cloned()))
                     }
                     Err(e) => Err(ReadySetError::UnparseableQuery(e)),
                 };
@@ -1610,7 +1617,7 @@ where
         deep: &ReadySetResult<ViewCreateRequest>,
         shallow: &ReadySetResult<ShallowViewRequest>,
     ) -> Option<CacheDDLRequest> {
-        let (unparsed_stmt, schema_search_path) = match (&create.inner, deep, shallow) {
+        let (unparsed_stmt, schema_search_path, database) = match (&create.inner, deep, shallow) {
             (CacheInner::Id(..), Ok(deep), _) => (
                 create_cache_statement(
                     DB::SQL_DIALECT,
@@ -1621,6 +1628,7 @@ where
                     &deep.statement.display(DB::SQL_DIALECT).to_string(),
                 ),
                 deep.schema_search_path.clone(),
+                connectors.noria.upstream_database().cloned(),
             ),
             (CacheInner::Id(..), _, Ok(shallow)) => (
                 create_cache_statement(
@@ -1632,15 +1640,18 @@ where
                     &shallow.query_orig.to_string(),
                 ),
                 shallow.schema_search_path.clone(),
+                shallow.database.clone(),
             ),
             _ => (
                 create.unparsed_create_cache_statement.clone()?,
                 connectors.noria.schema_search_path().to_owned(),
+                connectors.noria.upstream_database().cloned(),
             ),
         };
         Some(CacheDDLRequest {
             unparsed_stmt,
             schema_search_path,
+            database,
             dialect: DB::SQL_DIALECT.into(),
             cache_name: None,
         })
@@ -1884,6 +1895,7 @@ where
                             let marker = CacheDDLRequest {
                                 unparsed_stmt: drop_cache.display_unquoted().to_string(),
                                 schema_search_path: vec![],
+                                database: None,
                                 dialect: settings.dialect.into(),
                                 cache_name: None,
                             };

@@ -257,6 +257,7 @@ where
         let ddl_req = CacheDDLRequest {
             unparsed_stmt: create,
             schema_search_path: connectors.noria.schema_search_path().to_owned(),
+            database: shallow.database.clone(),
             dialect: settings.dialect.into(),
             cache_name: None,
         };
@@ -345,6 +346,7 @@ where
                 {
                     let request = ShallowRefreshRequest {
                         query_id,
+                        database: connectors.noria.upstream_database().cloned(),
                         path: connectors.noria.schema_search_path().to_vec(),
                         query: query.to_string(),
                         cache,
@@ -364,11 +366,13 @@ where
                     && cache.is_scheduled()
                 {
                     let refresh = refresh.clone();
+                    let database = connectors.noria.upstream_database().cloned();
                     let path = connectors.noria.schema_search_path().to_vec();
                     let q = query.to_string();
                     let callback = Arc::new(move |cache| {
                         let req = ShallowRefreshRequest::<DB::CacheEntry, DB::ShallowExecMeta> {
                             query_id,
+                            database: database.clone(),
                             path: path.clone(),
                             query: q.clone(),
                             cache,
@@ -470,6 +474,7 @@ where
                     let shallow_exec_meta = upstream.shallow_exec_meta(exec_meta).await.ok();
                     let request = ShallowRefreshRequest {
                         query_id: *query_id,
+                        database: view_request.database.clone(),
                         path: view_request.schema_search_path.clone(),
                         query,
                         cache,
@@ -491,6 +496,7 @@ where
                 {
                     let callback = {
                         let query_id = *query_id;
+                        let database = view_request.database.clone();
                         let path = view_request.schema_search_path.clone();
                         let shallow_exec_meta = shallow_exec_meta.clone();
                         let refresh = refresh.clone();
@@ -498,6 +504,7 @@ where
                         Arc::new(move |cache| {
                             let request = ShallowRefreshRequest {
                                 query_id,
+                                database: database.clone(),
                                 path: path.clone(),
                                 query: query.clone(),
                                 cache,

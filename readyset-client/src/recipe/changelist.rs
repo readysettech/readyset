@@ -743,6 +743,7 @@ mod tests {
             let ddl_req = CacheDDLRequest {
                 unparsed_stmt: unparsed_stmt.into(),
                 schema_search_path: vec!["public".into()],
+                database: None,
                 dialect: Dialect::DEFAULT_POSTGRESQL,
                 cache_name: cache_name.map(Relation::from),
             };

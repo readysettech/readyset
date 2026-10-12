@@ -57,16 +57,21 @@ struct ProbeTarget {
 }
 
 impl ProbeTarget {
-    fn from_cache_info(info: &CacheInfo) -> Self {
+    /// Return `None` for a cache on a database other than the upstream URL's. The worker does not
+    /// probe those, so their cells stay Unknown and reads of them go upstream.
+    fn from_cache_info(info: &CacheInfo) -> Option<Self> {
+        if info.request.database.is_some() {
+            return None;
+        }
         let query = &info.request.query_orig;
         let n_params = max_placeholder_index(query);
         let sql = query.to_string();
-        Self {
+        Some(Self {
             cache: info.query_id,
             sql,
             n_params,
             path: info.request.schema_search_path.clone(),
-        }
+        })
     }
 }
 
@@ -378,7 +383,7 @@ impl<DB: UpstreamDatabase + 'static> AclWorker<DB> {
         self.shallow
             .list_caches(None, None)
             .iter()
-            .map(ProbeTarget::from_cache_info)
+            .filter_map(ProbeTarget::from_cache_info)
             .collect()
     }
 
@@ -617,7 +622,7 @@ impl<DB: UpstreamDatabase + 'static> AclWorker<DB> {
             .shallow
             .list_caches(Some(cache), None)
             .first()
-            .map(ProbeTarget::from_cache_info)
+            .and_then(ProbeTarget::from_cache_info)
         else {
             return;
         };

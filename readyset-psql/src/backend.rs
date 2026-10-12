@@ -150,11 +150,12 @@ impl ps::PsqlBackend for Backend {
     }
 
     async fn on_init(&mut self, database: &str) -> Result<ps::CredentialsNeeded, ps::Error> {
-        // The readyset schema is selectable as the session's database; any other name keeps
-        // binding the session to the upstream URL's database, except on admin sessions, where
-        // `set_database` rejects it.
+        // The readyset schema is selectable as the session's database, and admin sessions reject
+        // any other. Other sessions connect to the named database on the upstream.
         if self.inner.readyset_schema_name() == Some(database) || self.inner.is_admin() {
             self.inner.set_database(database).await?;
+        } else {
+            self.inner.set_upstream_database(database).await?;
         }
         if self.does_require_authentication() {
             match self.authentication_method {

@@ -765,6 +765,7 @@ mod tests {
         CacheDDLRequest {
             unparsed_stmt: "CREATE SHALLOW CACHE test AS SELECT 1".to_string(),
             schema_search_path: vec![],
+            database: None,
             dialect: readyset_sql::Dialect::PostgreSQL.into(),
             cache_name: None,
         }

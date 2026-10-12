@@ -61,6 +61,8 @@ const NON_REPLICATED_RELATIONS_PATH: &str = "non_replicated_relations";
 pub struct CacheDDLRequest {
     pub unparsed_stmt: String,
     pub schema_search_path: Vec<SqlIdentifier>,
+    /// The upstream database the cache uses, if different from that of the upstream URL.
+    pub database: Option<SqlIdentifier>,
     pub dialect: Dialect,
     #[serde(default)]
     pub cache_name: Option<Relation>,
@@ -726,6 +728,7 @@ mod cache_ddl_tests {
         CacheDDLRequest {
             unparsed_stmt: stmt.to_string(),
             schema_search_path: vec![],
+            database: None,
             dialect: Dialect::DEFAULT_POSTGRESQL,
             cache_name: name.map(Relation::from),
         }
