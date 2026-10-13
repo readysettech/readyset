@@ -345,28 +345,45 @@ async fn rls_refuses_caches_on_other_database() {
     shutdown_tx.shutdown().await;
 }
 
-/// Readyset probes cache ACLs on the upstream URL's database only, so while authentication is
-/// required a session on another database is never served from a cache.
+/// Readyset probes cache ACLs on each cache's database. A user who can't connect to a database
+/// is never served its caches.
 #[tokio::test]
 #[tags(serial)]
 #[upstream(postgres)]
-async fn acl_never_serves_caches_on_other_database() {
+async fn acl_probes_each_database() {
     readyset_tracing::init_test_logging();
 
     let url_db = derive_test_name();
     let other_db = format!("{url_db}_other");
+    let limited = format!("{url_db}_limited");
     PostgreSQLAdapter::recreate_database(&url_db).await;
     PostgreSQLAdapter::recreate_database(&other_db).await;
-    create_table(&url_db, 100).await;
-    create_table(&other_db, 200).await;
+    let url_upstream = create_table(&url_db, 100).await;
+    let other_upstream = create_table(&other_db, 200).await;
+    url_upstream
+        .simple_query(&format!(
+            "DROP ROLE IF EXISTS {limited};
+             CREATE ROLE {limited} LOGIN PASSWORD 'pass';
+             GRANT SELECT ON t TO {limited};
+             REVOKE CONNECT ON DATABASE {other_db} FROM PUBLIC"
+        ))
+        .await
+        .unwrap();
+    other_upstream
+        .simple_query(&format!("GRANT SELECT ON t TO {limited}"))
+        .await
+        .unwrap();
 
     let upstream = psql_helpers::upstream_config();
     let user = upstream.get_user().expect("upstream user");
     let password = upstream.get_password().expect("upstream password");
     let password_str = std::str::from_utf8(password).expect("UTF-8 password");
-    let users: AllowedUsersMap = [(user.to_owned(), password_str.into())]
-        .into_iter()
-        .collect();
+    let users: AllowedUsersMap = [
+        (user.to_owned(), password_str.into()),
+        (limited.clone(), "pass".into()),
+    ]
+    .into_iter()
+    .collect();
     let backend = BackendBuilder::new()
         .require_authentication(true)
         .users(Arc::new(AllowedUsers::new(users, None)));
@@ -381,25 +398,30 @@ async fn acl_never_serves_caches_on_other_database() {
     rs_opts.user(user).password(password);
     let url_conn = psql_helpers::connect(rs_opts.clone()).await;
     rs_opts.dbname(&other_db);
-    let other_conn = psql_helpers::connect(rs_opts).await;
+    let other_conn = psql_helpers::connect(rs_opts.clone()).await;
+    rs_opts.user(&limited).password("pass");
+    let limited_other_conn = psql_helpers::connect(rs_opts.clone()).await;
+    rs_opts.dbname(&url_db);
+    let limited_url_conn = psql_helpers::connect(rs_opts).await;
 
     let create = format!("CREATE SHALLOW CACHE FROM {QUERY}");
     url_conn.simple_query(&create).await.unwrap();
     other_conn.simple_query(&create).await.unwrap();
 
-    // Serving the URL's database from its cache shows the ACL worker has probed.
-    eventually!(run_test: {
-        let result = query_b(&url_conn).await;
-        AssertUnwindSafe(move || result)
-    }, then_assert: |result| {
-        let (value, info) = result();
-        assert_eq!(value, "100");
-        assert_matches!(info.destination, QueryDestination::ReadysetShallow(_), "{info:?}");
-    });
+    for (conn, b) in [(&url_conn, "100"), (&other_conn, "200"), (&limited_url_conn, "100")] {
+        eventually!(run_test: {
+            let result = query_b(conn).await;
+            AssertUnwindSafe(move || result)
+        }, then_assert: |result| {
+            let (value, info) = result();
+            assert_eq!(value, b);
+            assert_matches!(info.destination, QueryDestination::ReadysetShallow(_), "{info:?}");
+        });
+    }
+    // The ACL denies the limited user the cache on the other database. Its session there has no
+    // upstream connection, because the user can't connect to that database, so the read fails.
     for _ in 0..3 {
-        let (value, info) = query_b(&other_conn).await;
-        assert_eq!(value, "200");
-        assert_eq!(info.destination, QueryDestination::Upstream, "{info:?}");
+        limited_other_conn.simple_query(QUERY).await.unwrap_err();
     }
 
     shutdown_tx.shutdown().await;
