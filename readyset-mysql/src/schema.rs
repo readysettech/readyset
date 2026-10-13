@@ -301,12 +301,14 @@ pub(crate) fn convert_column(
         DfType::Unknown => (MYSQL_TYPE_UNKNOWN, results_collation, 0, 1024),
     };
 
+    if !col.nullable {
+        colflags |= mysql_srv::ColumnFlags::NOT_NULL_FLAG;
+    }
     // Process constraints
     if let Some(base) = &col.base {
         for constraint in &base.constraints {
             colflags |= match constraint {
                 ColumnConstraint::AutoIncrement => mysql_srv::ColumnFlags::AUTO_INCREMENT_FLAG,
-                ColumnConstraint::NotNull => mysql_srv::ColumnFlags::NOT_NULL_FLAG,
                 ColumnConstraint::PrimaryKey => mysql_srv::ColumnFlags::PRI_KEY_FLAG,
                 ColumnConstraint::Unique => mysql_srv::ColumnFlags::UNIQUE_KEY_FLAG,
                 _ => mysql_srv::ColumnFlags::empty(),

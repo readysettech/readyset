@@ -463,6 +463,7 @@ mod tests {
             schema: Cow::Owned(vec![ColumnSchema {
                 column: "tab1.col1".into(),
                 column_type: DfType::BigInt,
+                nullable: true,
                 base: None,
             }]),
             columns: Cow::Owned(vec!["col1".into()]),
@@ -482,6 +483,7 @@ mod tests {
             schema: Cow::Owned(vec![ColumnSchema {
                 column: "tab1.col1".into(),
                 column_type: DfType::BigInt,
+                nullable: true,
                 base: None,
             }]),
             columns: Cow::Owned(vec!["col1".into()]),
@@ -504,6 +506,7 @@ mod tests {
             schema: Cow::Owned(vec![ColumnSchema {
                 column: "tab1.col1".into(),
                 column_type: DfType::BigInt,
+                nullable: true,
                 base: None,
             }]),
             columns: Cow::Owned(vec!["col1".into()]),

@@ -106,6 +106,7 @@ mod tests {
                 table: None,
             },
             column_type: ty,
+            nullable: true,
             base: None,
         }
     }

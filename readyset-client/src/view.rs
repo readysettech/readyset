@@ -2230,6 +2230,7 @@ mod tests {
                             table: Some("t".into()),
                         },
                         column_type: DfType::Int,
+                        nullable: true,
                         base: Some(ColumnBase {
                             table: "t".into(),
                             column: "x".into(),
@@ -2245,6 +2246,7 @@ mod tests {
                             table: Some("t".into()),
                         },
                         column_type: DfType::DEFAULT_TEXT,
+                        nullable: true,
                         base: Some(ColumnBase {
                             table: "t".into(),
                             column: "y".into(),
@@ -2262,6 +2264,7 @@ mod tests {
                             table: Some("t".into()),
                         },
                         column_type: DfType::Int,
+                        nullable: true,
                         base: Some(ColumnBase {
                             table: "t".into(),
                             column: "x".into(),
@@ -2277,6 +2280,7 @@ mod tests {
                             table: Some("t".into()),
                         },
                         column_type: DfType::DEFAULT_TEXT,
+                        nullable: true,
                         base: Some(ColumnBase {
                             table: "t".into(),
                             column: "y".into(),

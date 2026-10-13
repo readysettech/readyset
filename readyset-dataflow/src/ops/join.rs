@@ -187,6 +187,10 @@ impl Join {
         self.on.iter().map(|(_, r)| *r).collect()
     }
 
+    pub fn is_left_join_right_column(&self, col: usize) -> bool {
+        self.kind == JoinType::Left && matches!(self.emit.get(col), Some((Side::Right, _)))
+    }
+
     fn generate_row(&self, left: &[DfValue], right: &[DfValue]) -> Vec<DfValue> {
         let len = self.emit.len();
         let mut result = Vec::with_capacity(len);

@@ -1,5 +1,6 @@
 use dataflow::prelude::*;
 use readyset_client::schema::{ColumnBase, ColumnSchema};
+use readyset_data::dialect::SqlEngine;
 use readyset_data::DfType;
 use readyset_sql::ast::Column;
 use tracing::trace;
@@ -46,11 +47,21 @@ fn trace_column_type_on_path<'g>(path: Path, graph: &'g Graph) -> ReadySetResult
     }
 }
 
+/// The table column at the end of `path`, and whether NULL can appear in the column of the result.
 fn get_base_for_column(
     path: Path,
     graph: &Graph,
     recipe: &Recipe,
-) -> ReadySetResult<Option<ColumnBase>> {
+) -> ReadySetResult<(Option<ColumnBase>, bool)> {
+    let left_join_right_column = path
+        .iter()
+        .any(|(ni, cols)| match graph[*ni].as_internal() {
+            Some(NodeOperator::Join(join)) => cols
+                .iter()
+                .flatten()
+                .any(|&col| join.is_left_join_right_column(col)),
+            _ => false,
+        });
     // column originates at last element of the path whose second element is not None
     if let Some(pos) = path.iter().rposition(|e| e.1.iter().any(Option::is_some)) {
         let (ni, cols) = &path[pos];
@@ -64,7 +75,7 @@ fn get_base_for_column(
                 let column_name = statement.fields[col_index].column.name.clone();
                 let sql_type = statement.fields[col_index].sql_type.clone();
                 #[allow(clippy::unwrap_used)] // occurs after implied table rewrite
-                return Ok(Some(ColumnBase {
+                let base = ColumnBase {
                     attnum: pg_meta
                         .as_ref()
                         .and_then(|m| m.column_oids.get(&column_name))
@@ -79,12 +90,59 @@ fn get_base_for_column(
                     constraints: statement.fields[col_index].constraints.clone(),
                     table_oid: pg_meta.as_ref().map(|m| m.oid),
                     sql_type,
-                }));
+                };
+                let nullable = left_join_right_column || !base.is_not_null();
+                return Ok((Some(base), nullable));
             }
         }
     }
 
-    Ok(None)
+    Ok((None, true))
+}
+
+/// The table column of a result column with these paths, and whether NULL can appear in the
+/// column of the result on any path.
+fn get_base_for_paths(
+    paths: &[Vec<(NodeIndex, Vec<Option<usize>>)>],
+    graph: &Graph,
+    recipe: &Recipe,
+) -> ReadySetResult<(Option<ColumnBase>, bool)> {
+    let mut bases = vec![];
+    let mut nullable = paths.is_empty();
+    for path in paths {
+        if trace_column_type_on_path(path, graph)?.is_unknown() {
+            nullable = true;
+        } else {
+            let (base, path_nullable) = get_base_for_column(path, graph, recipe)?;
+            bases.push(base);
+            nullable |= path_nullable;
+        }
+    }
+    let union_all = paths.iter().flatten().any(|(ni, _)| {
+        matches!(graph[*ni].as_internal(), Some(NodeOperator::Union(union)) if union.is_union_all())
+    });
+    let base = if union_all {
+        // In MySQL and PostgreSQL, a column of a UNION ALL result is not reported as a table
+        // column, but in PostgreSQL the type modifier is kept when every branch has the same type
+        let same_type = bases.windows(2).all(|pair| match pair {
+            [Some(a), Some(b)] => a.sql_type == b.sql_type,
+            _ => false,
+        });
+        match bases.into_iter().next().flatten() {
+            Some(base) if same_type && recipe.dialect().engine() == SqlEngine::PostgreSQL => {
+                Some(ColumnBase {
+                    constraints: vec![],
+                    table_oid: None,
+                    attnum: None,
+                    ..base
+                })
+            }
+            _ => None,
+        }
+    } else {
+        bases.pop().flatten()
+    };
+    Ok((base, nullable))
 }
 
 pub(super) fn column_schema(
@@ -102,19 +160,19 @@ pub(super) fn column_schema(
     let vn = &graph[view];
 
     let mut col_type = &DfType::Unknown;
-    let mut col_base = None;
-    for ref p in paths {
+    for p in &paths {
         trace!("considering path {:?}", p);
 
         let ty = trace_column_type_on_path(p, graph)?;
         if !ty.is_unknown() {
             col_type = ty;
-            col_base = get_base_for_column(p, graph, recipe)?;
         }
     }
 
+    let (base, nullable) = get_base_for_paths(&paths, graph, recipe)?;
     Ok(Some(ColumnSchema {
-        base: col_base,
+        base,
+        nullable,
         column: Column {
             name: vn.columns()[column_index].name().into(),
             table: Some(vn.name().clone()),

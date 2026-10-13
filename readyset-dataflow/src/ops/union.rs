@@ -365,6 +365,11 @@ impl Union {
             me: None,
         })
     }
+
+    /// Whether this is a `UNION ALL`, as opposed to a bag union
+    pub fn is_union_all(&self) -> bool {
+        self.bag_union_state.is_none()
+    }
 }
 
 impl Ingredient for Union {

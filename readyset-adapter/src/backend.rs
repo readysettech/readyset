@@ -1161,6 +1161,7 @@ where
                 table: None,
             },
             column_type,
+            nullable: true,
             base: None,
         };
         let schema = SelectSchema {
@@ -1371,6 +1372,7 @@ where
                         table: None,
                     },
                     column_type: DfType::DEFAULT_TEXT,
+                    nullable: true,
                     base: None,
                 },
                 ColumnSchema {
@@ -1379,6 +1381,7 @@ where
                         table: None,
                     },
                     column_type: DfType::DEFAULT_TEXT,
+                    nullable: true,
                     base: None,
                 },
                 ColumnSchema {
@@ -1387,6 +1390,7 @@ where
                         table: None,
                     },
                     column_type: DfType::DEFAULT_TEXT,
+                    nullable: true,
                     base: None,
                 },
             ]),
@@ -1463,6 +1467,7 @@ where
                     table: None,
                 },
                 column_type: DfType::UnsignedBigInt,
+                nullable: true,
                 base: None,
             });
             select_schema.columns.to_mut().push(name.into());

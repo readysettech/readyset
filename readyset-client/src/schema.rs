@@ -58,6 +58,8 @@ pub struct ColumnSchema {
     pub column: Column,
     /// The column's type
     pub column_type: DfType,
+    /// Whether NULL can appear in this column of the result
+    pub nullable: bool,
     /// If the column is an alias, this field represents its base column
     pub base: Option<ColumnBase>,
 }
@@ -74,6 +76,7 @@ impl ColumnSchema {
             .get_collation()
             .map(|name| Collation::get_or_default(dialect, name));
         Ok(Self {
+            nullable: !spec.constraints.contains(&ColumnConstraint::NotNull),
             base: Some(ColumnBase {
                 column: spec.column.name.clone(),
                 table,

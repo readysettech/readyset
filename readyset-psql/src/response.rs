@@ -113,6 +113,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                                     table: None,
                                 },
                                 column_type: DfType::DEFAULT_TEXT,
+                                nullable: true,
                                 base: None,
                             })
                             .collect(),
@@ -141,6 +142,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                                 table: None,
                             },
                             column_type: DfType::DEFAULT_TEXT,
+                            nullable: true,
                             base: None,
                         },
                         ColumnSchema {
@@ -149,6 +151,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                                 table: None,
                             },
                             column_type: DfType::DEFAULT_TEXT,
+                            nullable: true,
                             base: None,
                         },
                     ]),
@@ -179,6 +182,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                                 table: None,
                             },
                             column_type: DfType::DEFAULT_TEXT,
+                            nullable: true,
                             base: None,
                         },
                         ColumnSchema {
@@ -187,6 +191,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                                 table: None,
                             },
                             column_type: DfType::DEFAULT_TEXT,
+                            nullable: true,
                             base: None,
                         },
                     ]),

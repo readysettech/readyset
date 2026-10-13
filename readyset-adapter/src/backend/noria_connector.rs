@@ -456,6 +456,7 @@ impl NoriaConnector {
                         table: None,
                     },
                     column_type: DfType::DEFAULT_TEXT,
+                    nullable: true,
                     base: None,
                 },
                 ColumnSchema {
@@ -464,6 +465,7 @@ impl NoriaConnector {
                         table: None,
                     },
                     column_type: DfType::DEFAULT_TEXT,
+                    nullable: true,
                     base: None,
                 },
             ]),
@@ -518,6 +520,7 @@ impl NoriaConnector {
                         table: None,
                     },
                     column_type: column_type.clone(),
+                    nullable: true,
                     base: None,
                 })
                 .collect(),
@@ -884,6 +887,7 @@ impl NoriaConnector {
                             table: None,
                         },
                         column_type: DfType::DEFAULT_TEXT,
+                        nullable: true,
                         base: None,
                     })
                     .collect(),
@@ -1784,6 +1788,7 @@ fn param_types(
             table: None,
         },
         column_type: DfType::UnsignedBigInt,
+        nullable: true,
         base: None,
     };
     params
