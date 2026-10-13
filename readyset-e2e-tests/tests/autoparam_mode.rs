@@ -599,12 +599,12 @@ async fn show_caches_names_a_cache_that_keeps_its_literals() {
         .unwrap();
     sleep().await;
 
-    let rows: Vec<(String, String, String, String, String)> =
+    let rows: Vec<(String, String, String, String, String, String)> =
         rs_conn.query("SHOW CACHES").await.unwrap();
     let properties = |name: &str| {
         rows.iter()
             .find(|(_, n, ..)| n == name)
-            .map(|(_, _, _, p, _)| p.clone())
+            .map(|(_, _, _, p, ..)| p.clone())
             .unwrap_or_else(|| panic!("{name} is not listed"))
     };
     assert!(

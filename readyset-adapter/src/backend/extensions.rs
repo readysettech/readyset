@@ -41,7 +41,7 @@ use readyset_sql::ast::{
     ExplainStatement, FlushCacheStatement, McpTokenExpiresChange,
     McpTokenScope as ParserMcpTokenScope, ModifyUserAction, ModifyUserStatement,
     ProxiedQueriesOptions, Relation, ShallowCacheAllowlistChange, ShallowCacheAllowlistKind,
-    ShowStatement, SqlQuery, TrxCachePolicy,
+    ShowStatement, SqlIdentifier, SqlQuery, TrxCachePolicy,
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_passes::DetectBucketFunctions;
@@ -1084,17 +1084,26 @@ where
         });
 
         let select_schema = if exec_counts.is_some() {
-            create_dummy_schema!("query_id", "name", "query", "properties", "count")
+            create_dummy_schema!(
+                "query_id",
+                "name",
+                "query",
+                "properties",
+                "count",
+                "database"
+            )
         } else {
-            create_dummy_schema!("query_id", "name", "query", "properties")
+            create_dummy_schema!("query_id", "name", "query", "properties", "database")
         };
 
+        let url_database = Self::url_database(state).await;
         let mut rows = vec![];
-        let mut push_row = |query_id, name, query, properties, count| {
+        let mut push_row = |query_id, name, query, properties, count, database: Option<&str>| {
+            let database = database.unwrap_or_default().into();
             let row = if let Some(count) = count {
-                vec![query_id, name, query, properties, count]
+                vec![query_id, name, query, properties, count, database]
             } else {
-                vec![query_id, name, query, properties]
+                vec![query_id, name, query, properties, database]
             };
             rows.push(row);
         };
@@ -1122,7 +1131,14 @@ where
                     .map(|c| c.get(&query_id).to_string().into());
                 let query_id = query_id.into();
 
-                push_row(query_id, name, query, properties, count);
+                push_row(
+                    query_id,
+                    name,
+                    query,
+                    properties,
+                    count,
+                    url_database.as_deref(),
+                );
             }
         }
         if matches!(cache_type, Some(CacheType::Shallow) | None) {
@@ -1164,8 +1180,9 @@ where
                     .as_ref()
                     .map(|c| c.get(&query_id).to_string().into());
                 let query_id = query_id.into();
+                let database = request.database.as_deref().or(url_database.as_deref());
 
-                push_row(query_id, name, query, properties, count);
+                push_row(query_id, name, query, properties, count, database);
             }
         }
 
@@ -1301,6 +1318,11 @@ where
             .ok_or_else(|| internal_err!("upstream config is not configured"))?;
         let config = shared.read().await.clone();
         let current = config.upstream_servers()?;
+        if let Some(current) = &current
+            && current.db_name().is_some() != servers.db_name().is_some()
+        {
+            unsupported!("Cannot add or remove database in upstream URL");
+        }
         let verification = ServerCertVerification::from(&config).await?;
         let outcome = validate_servers(
             current.as_ref(),
@@ -1365,6 +1387,15 @@ where
             }
         }
         false
+    }
+
+    /// Return the database that connections to the upstream URL use.
+    async fn url_database(state: &BackendState<DB>) -> Option<String> {
+        let config = state.upstream_config.as_ref()?.read().await;
+        config
+            .preferred_upstream_url()?
+            .connection_db_name()
+            .map(str::to_owned)
     }
 
     /// Persist a mutated allowed-users map to the Authority and swap it into the in-memory handle.
@@ -1690,8 +1721,8 @@ where
             SqlQuery::Explain(ExplainStatement::Domains) => {
                 connectors.noria.explain_domains().await
             }
-            SqlQuery::Explain(ExplainStatement::Caches) => {
-                Self::explain_caches(connectors, state).await
+            SqlQuery::Explain(ExplainStatement::Caches { all }) => {
+                Self::explain_caches(connectors, state, *all).await
             }
             SqlQuery::Explain(ExplainStatement::Materializations { for_cache }) => {
                 connectors
@@ -2145,21 +2176,27 @@ where
         res
     }
 
-    /// Gets a list of all `CREATE CACHE ...` statements
+    /// Gets a list of all `CREATE CACHE ...` statements, with each cache's database if `all`
     async fn explain_caches(
         connectors: &mut BackendConnectors<DB>,
         state: &BackendState<DB>,
+        all: bool,
     ) -> ReadySetResult<noria_connector::QueryResult<'static>> {
-        let mut results: Vec<Vec<DfValue>> = connectors
-            .noria
-            .verbose_views(None, None)
-            .await?
+        // Without ALL, list only the session's database's caches.
+        let database = connectors.noria.upstream_database().cloned();
+        let views = if all || database.is_none() {
+            connectors.noria.verbose_views(None, None).await?
+        } else {
+            vec![]
+        };
+        let mut results: Vec<(Option<SqlIdentifier>, String)> = views
             .into_iter()
             .map(|view| {
                 let off = state.query_status_cache.keeps_literals_inline(&view.name);
                 let mut create = CreateCacheStatement::from(view);
                 create.autoparam.off = off;
-                vec![DfValue::from(create.display(DB::SQL_DIALECT).to_string())]
+                // Deep caches use the upstream URL's database.
+                (None, create.display(DB::SQL_DIALECT).to_string())
             })
             .collect();
         results.extend(
@@ -2167,7 +2204,9 @@ where
                 .shallow
                 .list_caches(None, None)
                 .into_iter()
+                .filter(|info| all || info.request.database == database)
                 .map(|info| {
+                    let database = info.request.database.clone();
                     let quote = |id| DB::SQL_DIALECT.quote_identifier(id).to_string();
                     let prefix = match (DB::SQL_DIALECT, &info.request.schema_search_path[..]) {
                         (_, []) => String::new(),
@@ -2180,17 +2219,33 @@ where
                     let create = CreateCacheStatement::from(info)
                         .display(DB::SQL_DIALECT)
                         .to_string();
-                    (prefix, create)
+                    (database, prefix, create)
                 })
                 .sorted()
-                .map(|(prefix, create)| vec![DfValue::from(format!("{prefix}{create}"))]),
+                .map(|(database, prefix, create)| (database, format!("{prefix}{create}"))),
         );
 
-        let select_schema = create_dummy_schema!("query");
+        let url_database = Self::url_database(state).await;
+        let rows = results
+            .into_iter()
+            .map(|(database, query)| {
+                let mut row = vec![DfValue::from(query)];
+                if all {
+                    let database = database.as_deref().or(url_database.as_deref());
+                    row.push(database.unwrap_or_default().into());
+                }
+                row
+            })
+            .collect();
+        let select_schema = if all {
+            create_dummy_schema!("query", "database")
+        } else {
+            create_dummy_schema!("query")
+        };
 
         Ok(noria_connector::QueryResult::from_owned(
             select_schema,
-            vec![Results::new(results)],
+            vec![Results::new(rows)],
         ))
     }
 }

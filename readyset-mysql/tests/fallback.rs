@@ -756,7 +756,7 @@ async fn show_caches_index_hints() {
     let mut attempts = 0;
     loop {
         let cached = conn
-            .query::<(String, String, String, String, String), _>("SHOW CACHES;")
+            .query::<(String, String, String, String, String, String), _>("SHOW CACHES;")
             .await
             .unwrap();
         if cached.len() == 1 {
@@ -797,7 +797,7 @@ async fn show_caches_index_hints() {
     let mut attempts = 0;
     loop {
         let cached = conn
-            .query::<(String, String, String, String, String), _>("SHOW CACHES;")
+            .query::<(String, String, String, String, String, String), _>("SHOW CACHES;")
             .await
             .unwrap();
         if cached.len() == 1 {
@@ -1056,9 +1056,9 @@ async fn show_proxied_queries_show_caches_query_text_matches() {
     conn.query_drop("SELECT id FROM t").await.unwrap();
     sleep().await;
 
-    let cached_queries: Vec<(String, String, String, String, String)> =
+    let cached_queries: Vec<(String, String, String, String, String, String)> =
         conn.query("SHOW CACHES").await.unwrap();
-    let (_, cache_name, cached_query_text, _, _) = cached_queries.first().unwrap();
+    let (_, cache_name, cached_query_text, ..) = cached_queries.first().unwrap();
 
     conn.query_drop(format!("DROP CACHE {cache_name}"))
         .await

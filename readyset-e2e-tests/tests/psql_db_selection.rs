@@ -10,9 +10,10 @@ use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter};
 use readyset_client_test_helpers::{Adapter, TestBuilder, derive_test_name};
 use readyset_server::CacheMode;
+use readyset_sql_parsing::ParsingPreset;
 use readyset_util::eventually;
 use test_utils::{tags, upstream};
-use tokio_postgres::{Client, SimpleQueryMessage};
+use tokio_postgres::{Client, SimpleQueryMessage, SimpleQueryRow};
 
 const QUERY: &str = "SELECT b FROM t WHERE a = 1";
 
@@ -24,6 +25,13 @@ fn first_value(messages: &[SimpleQueryMessage]) -> &str {
             _ => None,
         })
         .expect("query returned no rows")
+}
+
+fn rows(messages: &[SimpleQueryMessage]) -> impl Iterator<Item = &SimpleQueryRow> {
+    messages.iter().filter_map(|m| match m {
+        SimpleQueryMessage::Row(row) => Some(row),
+        _ => None,
+    })
 }
 
 /// Run [`QUERY`] through Readyset, returning its value and how Readyset served it.
@@ -64,6 +72,7 @@ async fn shallow_caches_are_per_database() {
     let backend = BackendBuilder::new().require_authentication(false);
     let (mut rs_opts, _handle, shutdown_tx) = TestBuilder::new(backend)
         .cache_mode(CacheMode::Shallow)
+        .parsing_preset(ParsingPreset::OnlySqlparser)
         .recreate_database(false)
         .replicate(false)
         .fallback_without_replication(&url_db)
@@ -73,15 +82,39 @@ async fn shallow_caches_are_per_database() {
     rs_opts.dbname(&other_db);
     let other_conn = psql_helpers::connect(rs_opts).await;
 
-    let create = format!("CREATE SHALLOW CACHE POLICY TTL 60 SECONDS REFRESH 1 SECONDS FROM {QUERY}");
-    url_conn.simple_query(&create).await.unwrap();
-    other_conn.simple_query(&create).await.unwrap();
-    let caches = url_conn.simple_query("SHOW CACHES").await.unwrap();
-    let count = caches
-        .iter()
-        .filter(|m| matches!(m, SimpleQueryMessage::Row(_)))
-        .count();
-    assert_eq!(count, 2, "each database has its own cache");
+    let caches = [(&url_conn, "url_cache"), (&other_conn, "other_cache")];
+    for (conn, name) in caches {
+        let create = format!(
+            "CREATE SHALLOW CACHE POLICY TTL 60 SECONDS REFRESH 1 SECONDS {name} FROM {QUERY}"
+        );
+        conn.simple_query(&create).await.unwrap();
+    }
+
+    let shown = url_conn.simple_query("SHOW CACHES").await.unwrap();
+    let mut shown: Vec<_> = rows(&shown)
+        .map(|row| (row.get("name").unwrap(), row.get("database").unwrap()))
+        .collect();
+    shown.sort();
+    assert_eq!(shown, [("other_cache", other_db.as_str()), ("url_cache", url_db.as_str())]);
+
+    for (conn, name) in caches {
+        let explained = conn.simple_query("EXPLAIN CACHES").await.unwrap();
+        let explained: Vec<_> = rows(&explained).map(|row| row.get(0).unwrap()).collect();
+        assert_eq!(explained.len(), 1, "{explained:?}");
+        assert!(explained[0].contains(name), "{explained:?}");
+
+        let explained = conn.simple_query("EXPLAIN ALL CACHES").await.unwrap();
+        let explained: Vec<_> = rows(&explained)
+            .map(|row| (row.get("database").unwrap(), row.get("query").unwrap()))
+            .collect();
+        assert_eq!(explained.len(), 2, "{explained:?}");
+        for (database, name) in [(url_db.as_str(), "url_cache"), (other_db.as_str(), "other_cache")] {
+            assert!(
+                explained.iter().any(|(d, q)| *d == database && q.contains(name)),
+                "{explained:?}"
+            );
+        }
+    }
 
     for (conn, b) in [(&url_conn, "100"), (&other_conn, "200")] {
         let (value, info) = query_b(conn).await;
@@ -204,6 +237,42 @@ async fn shallow_mode_upstream_url_without_database() {
     }
 
     shutdown_tx.shutdown().await;
+}
+
+/// CHANGE UPSTREAM rejects a URL that adds or removes the database of the current URL.
+#[tokio::test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn change_upstream_rejects_adding_or_removing_database() {
+    readyset_tracing::init_test_logging();
+
+    let db = derive_test_name();
+    PostgreSQLAdapter::recreate_database(&db).await;
+
+    for (from, to) in [("", db.as_str()), (db.as_str(), "")] {
+        let backend = BackendBuilder::new().require_authentication(false);
+        let (rs_opts, _handle, shutdown_tx) = TestBuilder::new(backend)
+            .cache_mode(CacheMode::Shallow)
+            .recreate_database(false)
+            .replicate(false)
+            .fallback_without_replication(from)
+            .build::<PostgreSQLAdapter>()
+            .await;
+        let conn = psql_helpers::connect(rs_opts).await;
+
+        let url = PostgreSQLAdapter::upstream_url(to);
+        let err = conn
+            .simple_query(&format!("ALTER READYSET CHANGE UPSTREAM TO '{url}'"))
+            .await
+            .expect_err("changing whether upstream URL has database should fail");
+        let message = err.as_db_error().map(|e| e.message());
+        assert!(
+            message.is_some_and(|m| m.contains("Cannot add or remove database in upstream URL")),
+            "unexpected error: {err:?}"
+        );
+
+        shutdown_tx.shutdown().await;
+    }
 }
 
 /// Outside shallow cache mode, a session may connect only to the upstream URL's database.

@@ -82,7 +82,10 @@ pub(crate) fn explain_statement(
                 tuple((tag_no_case("last"), whitespace1, tag_no_case("statement"))),
             ),
             value(ExplainStatement::Domains, tag_no_case("domains")),
-            value(ExplainStatement::Caches, tag_no_case("caches")),
+            value(
+                ExplainStatement::Caches { all: false },
+                tag_no_case("caches"),
+            ),
             explain_materializations(dialect),
             explain_create_cache(dialect),
         ))(i)?;
@@ -147,7 +150,7 @@ mod tests {
     fn explain_caches() {
         assert_eq!(
             test_parse!(explain_statement(Dialect::MySQL), b"explain caches;"),
-            ExplainStatement::Caches
+            ExplainStatement::Caches { all: false }
         )
     }
 

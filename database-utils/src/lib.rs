@@ -892,10 +892,11 @@ impl DatabaseURL {
         }
     }
 
-    /// Return the database that connections to this URL use, if the URL determines one.
+    /// Return the database that connections to this URL use, or `None` if the dialect doesn't
+    /// support connecting to a database different from the one in the URL.
     pub fn connection_db_name(&self) -> Option<&str> {
         match self {
-            DatabaseURL::MySQL(opts) => opts.db_name(),
+            DatabaseURL::MySQL(_) => None,
             DatabaseURL::PostgreSQL(config) => {
                 Some(config.get_dbname().unwrap_or(DEFAULT_POSTGRES_DB_NAME))
             }
@@ -1026,5 +1027,12 @@ mod tests {
 
         let url: DatabaseURL = "postgresql://u:p@host:5432/db".parse().unwrap(); // trufflehog:ignore
         assert_eq!(url.connection_db_name(), Some("db"));
+    }
+
+    #[test]
+    fn mysql_url_connection_db_name() {
+        let url: DatabaseURL = "mysql://u:p@host:3306/db".parse().unwrap(); // trufflehog:ignore
+        assert_eq!(url.db_name(), Some("db"));
+        assert_eq!(url.connection_db_name(), None);
     }
 }

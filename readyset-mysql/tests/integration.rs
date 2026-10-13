@@ -1900,18 +1900,18 @@ async fn create_query_cache_where_in() {
         .unwrap();
     sleep().await;
 
-    let queries: Vec<(String, String, String, String, String)> =
+    let queries: Vec<(String, String, String, String, String, String)> =
         conn.query("SHOW CACHES;").await.unwrap();
     assert!(queries
         .iter()
-        .any(|(_, query_name, _, properties, _)| query_name == "test"
+        .any(|(_, query_name, _, properties, ..)| query_name == "test"
             && !properties.contains("always")));
 
     conn.query_drop("CREATE CACHE test FROM SELECT id FROM t WHERE id IN (?, ?);")
         .await
         .unwrap();
     sleep().await;
-    let new_queries: Vec<(String, String, String, String, String)> =
+    let new_queries: Vec<(String, String, String, String, String, String)> =
         conn.query("SHOW CACHES;").await.unwrap();
     assert_eq!(new_queries.len(), queries.len());
 
@@ -1929,10 +1929,10 @@ async fn show_caches_with_always() {
         .await
         .unwrap();
     sleep().await;
-    let queries: Vec<(String, String, String, String, String)> =
+    let queries: Vec<(String, String, String, String, String, String)> =
         conn.query("SHOW CACHES;").await.unwrap();
     assert!(queries.iter().any(
-        |(_, query_name, _, properties, _)| query_name == "test_always"
+        |(_, query_name, _, properties, ..)| query_name == "test_always"
             && properties.contains("always")
     ));
 
@@ -3378,7 +3378,7 @@ async fn create_duplicate_unnamed_caches() {
         .await
         .unwrap();
 
-    let caches: Vec<(String, String, String, String, String)> =
+    let caches: Vec<(String, String, String, String, String, String)> =
         conn.query("SHOW CACHES").await.unwrap();
     assert_eq!(caches.len(), 1, "unexpected caches: {caches:?}");
 
@@ -3405,7 +3405,7 @@ async fn create_duplicate_named_caches() {
         .await
         .unwrap();
 
-    let caches: Vec<(String, String, String, String, String)> =
+    let caches: Vec<(String, String, String, String, String, String)> =
         conn.query("SHOW CACHES").await.unwrap();
     assert_eq!(caches.len(), 1, "unexpected caches: {caches:?}");
 
@@ -3435,7 +3435,7 @@ async fn create_duplicate_query_id_and_name_caches() {
         .await
         .unwrap();
 
-    let caches: Vec<(String, String, String, String, String)> =
+    let caches: Vec<(String, String, String, String, String, String)> =
         conn.query("SHOW CACHES").await.unwrap();
     assert_eq!(caches.len(), 1, "unexpected caches: {caches:?}");
 

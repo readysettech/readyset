@@ -188,6 +188,12 @@ fn limit_placeholders_create_cache() {
 }
 
 #[test]
+fn explain_all_caches() {
+    check_rt_mysql_sqlparser!("EXPLAIN ALL CACHES");
+    check_rt_postgres_sqlparser!("EXPLAIN ALL CACHES");
+}
+
+#[test]
 fn create_table_like() {
     check_rt_mysql!("CREATE TABLE a LIKE b");
     check_rt_mysql!("CREATE TABLE IF NOT EXISTS a LIKE b");

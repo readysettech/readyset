@@ -24,7 +24,10 @@ pub enum ExplainStatement {
     Domains,
     /// List all CREATE CACHE statements that have been executed, for the
     /// purpose of exporting them
-    Caches,
+    Caches {
+        /// List caches from every database, not only the session's database
+        all: bool,
+    },
     /// List and give information about all materializations in the graph.
     /// If `for_cache` is specified, only include nodes that are part of that cache's subgraph.
     Materializations {
@@ -65,7 +68,12 @@ impl DialectDisplay for ExplainStatement {
                 }
                 ExplainStatement::LastStatement => write!(f, "LAST STATEMENT;"),
                 ExplainStatement::Domains => write!(f, "DOMAINS;"),
-                ExplainStatement::Caches => write!(f, "CACHES;"),
+                ExplainStatement::Caches { all } => {
+                    if *all {
+                        write!(f, "ALL ")?;
+                    }
+                    write!(f, "CACHES;")
+                }
                 ExplainStatement::Materializations { for_cache } => {
                     write!(f, "MATERIALIZATIONS")?;
                     if let Some(cache) = for_cache {

@@ -1428,9 +1428,14 @@ fn parse_explain(
             readyset_sql::ast::ExplainStatement::Domains,
         ));
     }
+    let all = parser.parse_keyword(Keyword::ALL);
     if parse_readyset_keyword(parser, ReadysetKeyword::CACHES) {
         return Ok(SqlQuery::Explain(
-            readyset_sql::ast::ExplainStatement::Caches,
+            readyset_sql::ast::ExplainStatement::Caches { all },
+        ));
+    } else if all {
+        return Err(ReadysetParsingError::ReadysetParsingError(
+            "expected CACHES after ALL".into(),
         ));
     }
     Ok(parser

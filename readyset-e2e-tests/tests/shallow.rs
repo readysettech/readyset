@@ -327,11 +327,11 @@ async fn show_shallow_caches() {
     );
 
     // Check SHOW CACHES.
-    let rows: Vec<(String, String, String, String, String)> =
+    let rows: Vec<(String, String, String, String, String, String)> =
         readyset.query("SHOW SHALLOW CACHES").await.unwrap();
     assert_eq!(rows.len(), 1, "expected exactly one shallow cache");
 
-    let (query_id, name, query, properties, count) = &rows[0];
+    let (query_id, name, query, properties, count, _) = &rows[0];
     assert_eq!(query_id, "q_9de6aaf2d6625055");
     assert_eq!(name, "some_cache");
     assert_eq!(query, "SELECT * FROM foo WHERE a = ?");
@@ -3155,7 +3155,7 @@ async fn adaptive_refresh_period_adapts() {
         .unwrap();
 
     // The flag shows up in SHOW SHALLOW CACHES properties and the shallow_caches vrel.
-    let rows: Vec<(String, String, String, String, String)> =
+    let rows: Vec<(String, String, String, String, String, String)> =
         readyset.query("SHOW SHALLOW CACHES").await.unwrap();
     assert_eq!(rows.len(), 1);
     assert!(
