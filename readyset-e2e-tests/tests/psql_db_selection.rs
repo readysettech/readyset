@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use readyset_adapter::BackendBuilder;
-use readyset_adapter::backend::{AllowedUsers, QueryInfo};
+use readyset_adapter::backend::{AllowedUsers, QueryInfo, UnsupportedSetMode};
 use readyset_client::consensus::AllowedUsersMap;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter};
@@ -301,19 +301,28 @@ async fn deep_mode_rejects_other_database() {
     shutdown_tx.shutdown().await;
 }
 
-/// Readyset reads the RLS catalog of the upstream URL's database only, so with RLS enabled it
-/// refuses to cache a query on another database.
+/// Readyset reads the RLS catalog of each cache's database. A policy that Readyset can't cache
+/// refuses caches only on the database that has it.
 #[tokio::test]
 #[tags(serial)]
 #[upstream(postgres)]
-async fn rls_refuses_caches_on_other_database() {
+async fn rls_reads_session_database_catalog() {
     readyset_tracing::init_test_logging();
 
     let url_db = derive_test_name();
     let other_db = format!("{url_db}_other");
     PostgreSQLAdapter::recreate_database(&url_db).await;
     PostgreSQLAdapter::recreate_database(&other_db).await;
-    create_table(&other_db, 200).await;
+    create_table(&url_db, 100).await;
+    create_table(&other_db, 200)
+        .await
+        .simple_query(
+            "CREATE TABLE u (a INT);
+             ALTER TABLE t ENABLE ROW LEVEL SECURITY;
+             CREATE POLICY p ON t FOR SELECT USING (a IN (SELECT a FROM u))",
+        )
+        .await
+        .unwrap();
 
     let backend = BackendBuilder::new().require_authentication(false);
     let (mut rs_opts, _handle, shutdown_tx) = TestBuilder::new(backend)
@@ -324,23 +333,172 @@ async fn rls_refuses_caches_on_other_database() {
         .rls(true)
         .build::<PostgreSQLAdapter>()
         .await;
+    let url_conn = psql_helpers::connect(rs_opts.clone()).await;
     rs_opts.dbname(&other_db);
-    let conn = psql_helpers::connect(rs_opts).await;
+    let other_conn = psql_helpers::connect(rs_opts).await;
 
-    let Err(err) = conn
-        .simple_query(&format!("CREATE SHALLOW CACHE FROM {QUERY}"))
-        .await
-    else {
-        panic!("creating a cache on another database should fail");
-    };
+    let create = format!("CREATE SHALLOW CACHE FROM {QUERY}");
+    url_conn.simple_query(&create).await.unwrap();
+    let err = other_conn.simple_query(&create).await.unwrap_err();
     let message = err.as_db_error().map(|e| e.message());
     assert!(
-        message.is_some_and(|m| m.contains("rls_uncacheable[code=other_database")),
+        message.is_some_and(|m| m.contains("rls_uncacheable[code=policy_too_dynamic")),
         "unexpected error: {err:?}"
     );
-    let (value, info) = query_b(&conn).await;
-    assert_eq!(value, "200");
-    assert_eq!(info.destination, QueryDestination::Upstream, "{info:?}");
+
+    shutdown_tx.shutdown().await;
+}
+
+/// Readyset loads the RLS catalog of a database when the first cache on it is created. Sessions
+/// that connected to that database earlier read the cache partitioned by their own tenant.
+#[tokio::test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn rls_scopes_caches_for_earlier_sessions() {
+    readyset_tracing::init_test_logging();
+
+    const TENANT_QUERY: &str = "SELECT tenant FROM r WHERE a = 1";
+
+    let url_db = derive_test_name();
+    let other_db = format!("{url_db}_other");
+    PostgreSQLAdapter::recreate_database(&url_db).await;
+    PostgreSQLAdapter::recreate_database(&other_db).await;
+    create_table(&url_db, 100).await;
+    create_table(&other_db, 200)
+        .await
+        .simple_query(
+            "DO $$ BEGIN
+               IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN
+                 CREATE ROLE authenticated NOLOGIN;
+               END IF;
+             END $$;
+             CREATE TABLE r (a INT, tenant TEXT);
+             INSERT INTO r VALUES (1, 'acme'), (1, 'globex');
+             GRANT SELECT ON r TO PUBLIC;
+             ALTER TABLE r ENABLE ROW LEVEL SECURITY;
+             CREATE POLICY p ON r FOR SELECT TO public
+               USING (tenant = current_setting('request.jwt.claim.sub', true))",
+        )
+        .await
+        .unwrap();
+
+    let backend = BackendBuilder::new().require_authentication(false);
+    let (mut rs_opts, _handle, shutdown_tx) = TestBuilder::new(backend)
+        .cache_mode(CacheMode::Shallow)
+        .unsupported_set_mode(UnsupportedSetMode::Proxy)
+        .parsing_preset(ParsingPreset::for_prod())
+        .recreate_database(false)
+        .replicate_db(&url_db)
+        .fallback(true)
+        .rls(true)
+        .build::<PostgreSQLAdapter>()
+        .await;
+    rs_opts.dbname(&other_db);
+
+    let acme = psql_helpers::connect(rs_opts.clone()).await;
+    let creator = psql_helpers::connect(rs_opts.clone()).await;
+    creator
+        .simple_query(&format!("CREATE SHALLOW CACHE FROM {TENANT_QUERY}"))
+        .await
+        .unwrap();
+    let globex = psql_helpers::connect(rs_opts).await;
+
+    for (conn, tenant) in [(&acme, "acme"), (&globex, "globex")] {
+        conn.simple_query("SET ROLE authenticated").await.unwrap();
+        conn.simple_query(&format!("SET request.jwt.claim.sub = '{tenant}'"))
+            .await
+            .unwrap();
+        let result = conn.simple_query(TENANT_QUERY).await.unwrap();
+        assert_eq!(rows(&result).count(), 1);
+        assert_eq!(first_value(&result), tenant);
+        let info = psql_helpers::last_query_info(conn).await;
+        assert_matches!(info.destination, QueryDestination::ReadysetThenUpstream(_), "{info:?}");
+        let result = conn.simple_query(TENANT_QUERY).await.unwrap();
+        assert_eq!(rows(&result).count(), 1);
+        assert_eq!(first_value(&result), tenant);
+        let info = psql_helpers::last_query_info(conn).await;
+        assert_matches!(info.destination, QueryDestination::ReadysetShallow(_), "{info:?}");
+    }
+
+    shutdown_tx.shutdown().await;
+}
+
+/// A session that connected before its database's RLS catalog loaded has no snapshot of its role
+/// default GUCs. When a keyed GUC is unset, its scoped cache lookups go upstream. A session that
+/// connected after the load keys on the role default.
+#[tokio::test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn rls_role_defaults_key_only_later_sessions() {
+    readyset_tracing::init_test_logging();
+
+    const TENANT_QUERY: &str = "SELECT tenant FROM r WHERE a = 1";
+
+    let url_db = derive_test_name();
+    let other_db = format!("{url_db}_other");
+    PostgreSQLAdapter::recreate_database(&url_db).await;
+    PostgreSQLAdapter::recreate_database(&other_db).await;
+    create_table(&url_db, 100).await;
+    create_table(&other_db, 200)
+        .await
+        .simple_query(&format!(
+            "DO $$ BEGIN
+               IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN
+                 CREATE ROLE authenticated NOLOGIN;
+               END IF;
+             END $$;
+             CREATE TABLE r (a INT, tenant TEXT);
+             INSERT INTO r VALUES (1, 'acme'), (1, 'globex');
+             GRANT SELECT ON r TO PUBLIC;
+             ALTER TABLE r ENABLE ROW LEVEL SECURITY;
+             CREATE POLICY p ON r FOR SELECT TO public
+               USING (tenant = current_setting('request.jwt.claim.sub', true));
+             ALTER ROLE CURRENT_USER IN DATABASE {other_db} SET request.jwt.claim.sub = 'acme'"
+        ))
+        .await
+        .unwrap();
+
+    let backend = BackendBuilder::new().require_authentication(false);
+    let (mut rs_opts, _handle, shutdown_tx) = TestBuilder::new(backend)
+        .cache_mode(CacheMode::Shallow)
+        .unsupported_set_mode(UnsupportedSetMode::Proxy)
+        .parsing_preset(ParsingPreset::for_prod())
+        .recreate_database(false)
+        .replicate_db(&url_db)
+        .fallback(true)
+        .rls(true)
+        .build::<PostgreSQLAdapter>()
+        .await;
+    rs_opts.dbname(&other_db);
+
+    let early = psql_helpers::connect(rs_opts.clone()).await;
+    let creator = psql_helpers::connect(rs_opts.clone()).await;
+    creator
+        .simple_query(&format!("CREATE SHALLOW CACHE FROM {TENANT_QUERY}"))
+        .await
+        .unwrap();
+    let late = psql_helpers::connect(rs_opts).await;
+
+    early.simple_query("SET ROLE authenticated").await.unwrap();
+    for _ in 0..2 {
+        let result = early.simple_query(TENANT_QUERY).await.unwrap();
+        assert_eq!(rows(&result).count(), 1);
+        assert_eq!(first_value(&result), "acme");
+        let info = psql_helpers::last_query_info(&early).await;
+        assert_matches!(info.destination, QueryDestination::Upstream, "{info:?}");
+    }
+
+    late.simple_query("SET ROLE authenticated").await.unwrap();
+    let result = late.simple_query(TENANT_QUERY).await.unwrap();
+    assert_eq!(rows(&result).count(), 1);
+    assert_eq!(first_value(&result), "acme");
+    let info = psql_helpers::last_query_info(&late).await;
+    assert_matches!(info.destination, QueryDestination::ReadysetThenUpstream(_), "{info:?}");
+    let result = late.simple_query(TENANT_QUERY).await.unwrap();
+    assert_eq!(rows(&result).count(), 1);
+    assert_eq!(first_value(&result), "acme");
+    let info = psql_helpers::last_query_info(&late).await;
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow(_), "{info:?}");
 
     shutdown_tx.shutdown().await;
 }

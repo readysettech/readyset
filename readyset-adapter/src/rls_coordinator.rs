@@ -19,14 +19,18 @@ use std::sync::Arc;
 
 use papaya::HashMap;
 use parking_lot::Mutex;
+use tokio::sync::{OnceCell, RwLock};
 
+use database_utils::UpstreamConfig;
 use database_utils::tls::ServerCertVerification;
 use readyset_client::query::QueryId;
+use readyset_errors::{ReadySetError, ReadySetResult, internal_err};
 use readyset_rls::{
     BootstrapError, BootstrapHandle, Cacheability, DeferredSink, InvalidationSink, Oid,
     PolicyRegistry, RlsConfig, SessionInputType, bootstrap_from_url,
 };
 use readyset_shallow::CacheManager;
+use readyset_sql::ast::SqlIdentifier;
 
 use crate::query_status_cache::QueryStatusCache;
 use crate::session_context::SessionContext;
@@ -330,10 +334,12 @@ impl<V> RlsCatalog<V>
 where
     V: Send + Sync + readyset_util::SizeOf + 'static,
 {
-    /// Bootstrap the RLS catalog poller for the upstream at `url` and build the coordinator that
-    /// bridges it to the shallow cache. Return `None` for a non-Postgres upstream.
+    /// Bootstrap the RLS catalog poller for the upstream at `url`, or for `database` on its server
+    /// when that is set, and build the coordinator that bridges it to the shallow cache. Return
+    /// `None` for a non-Postgres upstream.
     pub async fn load(
         url: &str,
+        database: Option<&str>,
         verification: ServerCertVerification,
         config: RlsConfig,
         shallow: Arc<CacheManager<ShallowKey, V>>,
@@ -346,6 +352,7 @@ where
         let sink = Arc::new(DeferredSink::new());
         let Some(handle) = bootstrap_from_url(
             url,
+            database,
             verification,
             config,
             Some(Arc::clone(&sink) as Arc<dyn InvalidationSink>),
@@ -378,5 +385,107 @@ where
     /// returns cleanly.
     pub fn shutdown(&self) {
         let _ = self.handle.shutdown_tx.send(true);
+    }
+}
+
+/// The RLS catalogs of the upstream URL's database and of the other databases that have caches.
+#[derive(Debug)]
+pub struct RlsCatalogs<V>
+where
+    V: Send + Sync + 'static,
+{
+    url_catalog: Arc<RlsCatalog<V>>,
+    /// Catalogs of other databases, loaded the first time a cache uses each one. Each database has
+    /// its own cell, so a slow load waits only for that database.
+    others: HashMap<SqlIdentifier, Arc<OnceCell<Arc<RlsCatalog<V>>>>>,
+    /// The adapter's upstream config, which `ALTER READYSET CHANGE UPSTREAM` updates.
+    upstream_config: Arc<RwLock<UpstreamConfig>>,
+    config: RlsConfig,
+}
+
+impl<V> RlsCatalogs<V>
+where
+    V: Send + Sync + readyset_util::SizeOf + 'static,
+{
+    pub fn new(
+        url_catalog: RlsCatalog<V>,
+        upstream_config: Arc<RwLock<UpstreamConfig>>,
+        config: RlsConfig,
+    ) -> Self {
+        Self {
+            url_catalog: Arc::new(url_catalog),
+            others: HashMap::new(),
+            upstream_config,
+            config,
+        }
+    }
+
+    pub fn url_catalog(&self) -> &RlsCatalog<V> {
+        &self.url_catalog
+    }
+
+    /// Signal the catalog pollers of all databases to stop.
+    pub fn shutdown(&self) {
+        self.url_catalog.shutdown();
+        for catalog in self.others.pin().values().filter_map(|c| c.get()) {
+            catalog.shutdown();
+        }
+    }
+
+    /// Forget the registered caches of all databases.
+    pub fn clear(&self) {
+        self.url_catalog.coordinator.clear();
+        for catalog in self.others.pin().values().filter_map(|c| c.get()) {
+            catalog.coordinator.clear();
+        }
+    }
+
+    /// Return the catalog of `database`, or of the upstream URL's database if that is `None`, if it
+    /// is loaded.
+    pub fn loaded(&self, database: Option<&str>) -> Option<Arc<RlsCatalog<V>>> {
+        match database {
+            None => Some(Arc::clone(&self.url_catalog)),
+            Some(database) => self.others.pin().get(database)?.get().cloned(),
+        }
+    }
+
+    /// Return the catalog of `database`, or of the upstream URL's database if that is `None`,
+    /// loading it if it is not loaded yet.
+    pub async fn get(&self, database: Option<&str>) -> ReadySetResult<Arc<RlsCatalog<V>>> {
+        let Some(database) = database else {
+            return Ok(Arc::clone(&self.url_catalog));
+        };
+        let cell = self
+            .others
+            .pin()
+            .get_or_insert_with(database.into(), Default::default)
+            .clone();
+        // Boxing keeps the bootstrap future out of the session's future, whose layout otherwise
+        // exceeds the compiler's query depth limit.
+        cell.get_or_try_init(|| Box::pin(self.load(database)))
+            .await
+            .map(Arc::clone)
+    }
+
+    async fn load(&self, database: &str) -> ReadySetResult<Arc<RlsCatalog<V>>> {
+        let upstream_config = self.upstream_config.read().await.clone();
+        let url = upstream_config
+            .preferred_upstream_server()
+            .map(|server| server.raw_url())
+            .ok_or(ReadySetError::InvalidUpstreamDatabase)?;
+        let verification = ServerCertVerification::from(&upstream_config).await?;
+        let url_coordinator = &self.url_catalog.coordinator;
+        let catalog = RlsCatalog::load(
+            url,
+            Some(database),
+            verification,
+            self.config,
+            Arc::clone(&url_coordinator.shallow),
+            url_coordinator.query_status_cache,
+        )
+        .await
+        .map_err(|e| internal_err!("RLS bootstrap failed for database {database}: {e}"))?
+        .ok_or_else(|| internal_err!("RLS bootstrap requires a PostgreSQL upstream"))?;
+        Ok(Arc::new(catalog))
     }
 }

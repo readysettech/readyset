@@ -302,7 +302,7 @@ where
         let start = Instant::now();
 
         let mut session_values = SessionInputValues::default();
-        if let Some(coordinator) = state.rls_coordinator.as_ref()
+        if let Some(coordinator) = state.rls_coordinator(connectors.noria.upstream_database())
             && coordinator
                 .fill_rls_session_inputs(
                     &query_id,

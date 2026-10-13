@@ -1410,6 +1410,8 @@ where
         // the template is only applied afterwards. `None` for everything but the recognised
         // session-mutating shapes.
         let session_mutation = self.state.prepared.session_mutation(id).cloned();
+        self.state
+            .rls_coordinator(self.connectors.noria.upstream_database());
         let recording = self.event_recording();
         let cached_statement = self
             .state
@@ -1763,7 +1765,7 @@ where
                 Self::execute_shallow(
                     Self::upstream_mut(upstream)?,
                     &self.state.shallow,
-                    self.state.rls_coordinator.as_ref(),
+                    self.state.rls_coordinator.get(),
                     self.connectors.session.as_ref(),
                     prep,
                     params,

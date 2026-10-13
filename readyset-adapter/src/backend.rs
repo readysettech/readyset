@@ -80,7 +80,7 @@ use std::sync::{
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::cache_acl::{AclHandle, AclMessage, CacheCreator, Verdict};
-use crate::rls_coordinator::RlsCoordinator;
+use crate::rls_coordinator::{RlsCatalogs, RlsCoordinator};
 use crate::sampler::SampleSender;
 use crate::session_context::SessionContext;
 use crate::shallow_key::ShallowKey;
@@ -467,17 +467,6 @@ pub struct BackendBuilder {
     readyset_schema: Option<Arc<ReadysetSchema>>,
     shallow_cache_eligibility: ShallowCacheEligibility,
     shallow_cache_allowlists: ShallowCacheAllowlists,
-    /// Process-shared RLS policy registry. The adapter binary
-    /// constructs one at startup, hands it to the catalog poller, and
-    /// passes it through here so every per-connection Backend
-    /// consults the same view of pg_policy / pg_class / pg_roles.
-    /// `None` disables RLS: the analyzer gate is skipped and every
-    /// shallow cache is created Plain. MySQL deployments and
-    /// Postgres setups without a catalog poller (no upstream URL,
-    /// test harnesses) run in this mode; `readyset::NoriaAdapter::run`
-    /// refuses to start a Postgres adapter whose RLS bootstrap
-    /// failed, so production Postgres always carries `Some`.
-    policy_registry: Option<Arc<readyset_rls::PolicyRegistry>>,
 }
 
 impl Default for BackendBuilder {
@@ -514,7 +503,6 @@ impl Default for BackendBuilder {
             readyset_schema: None,
             shallow_cache_eligibility: ShallowCacheEligibility::default(),
             shallow_cache_allowlists: ShallowCacheAllowlists::default(),
-            policy_registry: None,
         }
     }
 }
@@ -534,7 +522,7 @@ impl BackendBuilder {
         status_reporter: ReadySetStatusReporter<DB>,
         adapter_start_time: SystemTime,
         shallow: Arc<CacheManager<ShallowKey, DB::CacheEntry>>,
-        rls_coordinator: Option<Arc<RlsCoordinator<DB::CacheEntry>>>,
+        rls_catalogs: Option<Arc<RlsCatalogs<DB::CacheEntry>>>,
         shallow_refresh_pool: Option<Arc<ShallowRefreshPool<DB>>>,
     ) -> Backend<DB, Handler> {
         gauge!(metric::CONNECTED_CLIENTS).increment(1.0);
@@ -601,8 +589,9 @@ impl BackendBuilder {
                 sampler_tx: self.sampler_tx,
                 is_internal_connection: false,
                 shallow,
-                policy_registry: self.policy_registry.clone(),
-                rls_coordinator,
+                policy_registry: rls_catalogs.as_ref().map(|c| c.url_catalog().registry()),
+                rls_coordinator: OnceLock::new(),
+                rls_catalogs,
                 shallow_refresh_pool,
                 db_version: self.db_version,
                 upstream_config: self.upstream_config,
@@ -837,16 +826,6 @@ impl BackendBuilder {
 
     pub fn readyset_schema(mut self, readyset_schema: Arc<ReadysetSchema>) -> Self {
         self.readyset_schema = Some(readyset_schema);
-        self
-    }
-
-    /// Plumb a process-shared RLS policy registry into every Backend
-    /// the builder produces. Called by the adapter binary at startup
-    /// after it has spawned the catalog poller against the same
-    /// `Arc<PolicyRegistry>`; downstream connections then see policy
-    /// updates without per-connection state.
-    pub fn policy_registry(mut self, registry: Arc<readyset_rls::PolicyRegistry>) -> Self {
-        self.policy_registry = Some(registry);
         self
     }
 }
@@ -1091,18 +1070,14 @@ where
     is_internal_connection: bool,
     /// The adapter's shallow cache manager.
     shallow: Arc<CacheManager<ShallowKey, DB::CacheEntry>>,
-    /// Process-shared RLS policy registry. Populated by the catalog
-    /// poller; consulted by the analyzer at `CREATE CACHE` to decide
-    /// `Scoped` vs `Plain` backing and the set of GUCs to fold into
-    /// the lookup key. `None` disables RLS: the analyzer gate is
-    /// skipped and every shallow cache is created Plain.
+    /// RLS policy registry of the upstream URL's database, for the role attributes that all
+    /// databases on a server share. `None` disables RLS.
     policy_registry: Option<Arc<readyset_rls::PolicyRegistry>>,
-    /// RLS coordinator bridging the generic shallow cache to the policy
-    /// registry: owns the per-cache scoped descriptors and the
-    /// relation/role reverse indices, builds lookup keys, and serves as
-    /// the catalog poller's invalidation sink. `None` disables RLS
-    /// scoping (MySQL, or Postgres without a catalog poller).
-    rls_coordinator: Option<Arc<RlsCoordinator<DB::CacheEntry>>>,
+    /// RLS coordinator of the session's database, which builds the lookup keys of its caches. Set
+    /// by [`Self::rls_coordinator`] once that database's catalog is loaded.
+    rls_coordinator: OnceLock<Arc<RlsCoordinator<DB::CacheEntry>>>,
+    /// The RLS catalogs of the upstream databases. `None` disables RLS.
+    rls_catalogs: Option<Arc<RlsCatalogs<DB::CacheEntry>>>,
     /// Pool for shallow refresh workers
     shallow_refresh_pool: Option<Arc<ShallowRefreshPool<DB>>>,
     /// Memoized upstream database version.
@@ -1151,6 +1126,22 @@ impl<DB> BackendState<DB>
 where
     DB: UpstreamDatabase,
 {
+    /// Return the RLS coordinator of the session's database, `database`, if that database's catalog
+    /// is loaded. A database's catalog is loaded before the first cache on that database is created.
+    fn rls_coordinator(
+        &self,
+        database: Option<&SqlIdentifier>,
+    ) -> Option<&Arc<RlsCoordinator<DB::CacheEntry>>> {
+        if let Some(coordinator) = self.rls_coordinator.get() {
+            return Some(coordinator);
+        }
+        let catalog = self
+            .rls_catalogs
+            .as_ref()?
+            .loaded(database.map(SqlIdentifier::as_str))?;
+        Some(self.rls_coordinator.get_or_init(|| catalog.coordinator()))
+    }
+
     /// The result set of `SHOW WARNINGS` for a statement Readyset served.
     fn show_warnings(&self, limit: Option<ShowLimit>) -> noria_connector::QueryResult<'static> {
         let column = |name: &str, column_type| ColumnSchema {
@@ -1280,8 +1271,11 @@ where
         let info = self.shallow.drop_cache(name, query_id.as_ref())?;
         let query_id = info.query_id;
 
-        if let Some(coordinator) = &self.rls_coordinator {
-            coordinator.unregister(&query_id);
+        // The cache may be on a database other than the session's.
+        if let Some(rls_catalogs) = &self.rls_catalogs
+            && let Some(catalog) = rls_catalogs.loaded(info.request.database.as_deref())
+        {
+            catalog.coordinator().unregister(&query_id);
         }
         self.acl
             .send_lifecycle(AclMessage::CacheDropped { cache: query_id });
@@ -2366,9 +2360,13 @@ where
         // Snapshot the login role's default GUCs once, here at connection time:
         // Postgres applies `ALTER ROLE ... SET` defaults at login and does not
         // reprocess them on later SET ROLE / SET SESSION AUTHORIZATION, so the
-        // snapshot is frozen for the session's life.
-        let (role_default_gucs, role_defaults_available) = match self.state.policy_registry.as_ref()
-        {
+        // snapshot is frozen for the session's life. The defaults depend on the session's database,
+        // so a session on a database whose catalog is not loaded yet has no snapshot.
+        let registry = self.state.rls_catalogs.as_ref().and_then(|catalogs| {
+            let database = self.connectors.noria.upstream_database();
+            catalogs.loaded(database.map(SqlIdentifier::as_str))
+        });
+        let (role_default_gucs, role_defaults_available) = match registry.map(|c| c.registry()) {
             Some(registry) => (
                 registry
                     .role_default_gucs_for(startup_user)
@@ -2868,19 +2866,28 @@ pub async fn recreate_shallow_caches<V>(
     default_ttl_ms: u64,
     default_coalesce_ms: u64,
     cache_mode: CacheMode,
-    policy_registry: Option<Arc<readyset_rls::PolicyRegistry>>,
-    coordinator: Option<Arc<RlsCoordinator<V>>>,
+    rls_catalogs: Option<Arc<RlsCatalogs<V>>>,
 ) -> ReadySetResult<()>
 where
     V: ContentHash + Debug + Send + Sync + SizeOf + 'static,
 {
     let mut deferred: Vec<CacheDDLRequest> = Vec::new();
+    let mut rls_failures = HashMap::new();
     for req in ddl_requests {
         let schema = req
             .schema_search_path
             .first()
             .map(|s| s.as_str().to_owned())
             .unwrap_or_default();
+        let (policy_registry, coordinator) =
+            match rls_for_request(rls_catalogs.as_ref(), &req, &mut rls_failures).await {
+                Ok(rls) => rls,
+                Err(e) => {
+                    warn!(schema = %schema, error = %e, "deferring recovery of shallow cache");
+                    deferred.push(req);
+                    continue;
+                }
+            };
         match handle_shallow_cache_statement(
             &shallow,
             coordinator.as_ref(),
@@ -2917,7 +2924,7 @@ where
         }
     }
 
-    if let Some(registry) = policy_registry.clone()
+    if let Some(rls_catalogs) = rls_catalogs
         && !deferred.is_empty()
     {
         let shallow = Arc::clone(&shallow);
@@ -2930,11 +2937,43 @@ where
             default_ttl_ms,
             default_coalesce_ms,
             cache_mode,
-            registry,
-            coordinator.clone(),
+            rls_catalogs,
         ));
     }
     Ok(())
+}
+
+/// Return the RLS registry and coordinator of the database `req` uses, or `None`s with RLS
+/// disabled. Record a database whose catalog fails to load in `failures`, and return its error
+/// for later requests on that database without loading it again.
+async fn rls_for_request<V>(
+    rls_catalogs: Option<&Arc<RlsCatalogs<V>>>,
+    req: &CacheDDLRequest,
+    failures: &mut HashMap<SqlIdentifier, ReadySetError>,
+) -> ReadySetResult<(
+    Option<Arc<readyset_rls::PolicyRegistry>>,
+    Option<Arc<RlsCoordinator<V>>>,
+)>
+where
+    V: Send + Sync + SizeOf + 'static,
+{
+    let Some(rls_catalogs) = rls_catalogs else {
+        return Ok((None, None));
+    };
+    if let Some(database) = &req.database
+        && let Some(e) = failures.get(database)
+    {
+        return Err(e.clone());
+    }
+    let catalog = rls_catalogs
+        .get(req.database.as_deref())
+        .await
+        .inspect_err(|e| {
+            if let Some(database) = &req.database {
+                failures.insert(database.clone(), e.clone());
+            }
+        })?;
+    Ok((Some(catalog.registry()), Some(catalog.coordinator())))
 }
 
 /// Interval between retry attempts for deferred recoveries.
@@ -2953,8 +2992,7 @@ async fn retry_deferred_recoveries<V>(
     default_ttl_ms: u64,
     default_coalesce_ms: u64,
     cache_mode: CacheMode,
-    policy_registry: Arc<readyset_rls::PolicyRegistry>,
-    coordinator: Option<Arc<RlsCoordinator<V>>>,
+    rls_catalogs: Arc<RlsCatalogs<V>>,
 ) where
     V: ContentHash + Debug + Send + Sync + SizeOf + 'static,
 {
@@ -2964,7 +3002,17 @@ async fn retry_deferred_recoveries<V>(
             return;
         }
         let mut still_pending = Vec::new();
+        let mut rls_failures = HashMap::new();
         for req in pending.drain(..) {
+            let (policy_registry, coordinator) =
+                match rls_for_request(Some(&rls_catalogs), &req, &mut rls_failures).await {
+                    Ok(rls) => rls,
+                    Err(e) => {
+                        warn!(attempt, error = %e, "deferred shallow cache recovery failed");
+                        still_pending.push(req);
+                        continue;
+                    }
+                };
             match handle_shallow_cache_statement(
                 &shallow,
                 coordinator.as_ref(),
@@ -2975,7 +3023,7 @@ async fn retry_deferred_recoveries<V>(
                 default_ttl_ms,
                 default_coalesce_ms,
                 cache_mode,
-                Some(&policy_registry),
+                policy_registry.as_ref(),
             )
             .await
             {
@@ -3006,8 +3054,8 @@ async fn retry_deferred_recoveries<V>(
         warn!(
             pending = pending.len(),
             attempts = RECOVERY_RETRY_MAX_ATTEMPTS,
-            "abandoning deferred shallow cache recoveries; referenced relations \
-             never reached the registry within the retry budget"
+            "abandoning deferred shallow cache recoveries; RLS catalogs or referenced \
+             relations were unavailable for the whole retry budget"
         );
     }
 }
@@ -3098,24 +3146,26 @@ where
     // Run the RLS analyzer at recovery time too. Without this a cache persisted under a previous
     // run that targeted a now-RLS-protected table would come back as `Plain` and serve
     // cross-tenant rows on startup.
-    let registration = match analyze_recovered_cache(policy_registry, &request) {
-        RecoveryDeps::Plain => None,
-        RecoveryDeps::PlainTracked { relations } => Some((relations, None)),
-        RecoveryDeps::Scoped {
-            relations,
-            session_rls_inputs,
-        } => Some((relations, Some(session_rls_inputs))),
-        RecoveryDeps::WaitForPoll { unknown } => {
-            return Ok(RecoveryOutcome::Deferred {
-                unknown: unknown.iter().map(|u| u.qualified()).collect(),
-            });
-        }
-        RecoveryDeps::Skip { reason } => {
-            return Ok(RecoveryOutcome::Skipped {
-                reason: format!("{display_name}: {reason}"),
-            });
-        }
-    };
+    let registration =
+        match analyze_recovered_cache(policy_registry, &request.query, &request.schema_search_path)
+        {
+            RecoveryDeps::Plain => None,
+            RecoveryDeps::PlainTracked { relations } => Some((relations, None)),
+            RecoveryDeps::Scoped {
+                relations,
+                session_rls_inputs,
+            } => Some((relations, Some(session_rls_inputs))),
+            RecoveryDeps::WaitForPoll { unknown } => {
+                return Ok(RecoveryOutcome::Deferred {
+                    unknown: unknown.iter().map(|u| u.qualified()).collect(),
+                });
+            }
+            RecoveryDeps::Skip { reason } => {
+                return Ok(RecoveryOutcome::Skipped {
+                    reason: format!("{display_name}: {reason}"),
+                });
+            }
+        };
 
     shallow.create_cache(
         Some(name),
@@ -3172,21 +3222,16 @@ enum RecoveryDeps {
 
 fn analyze_recovered_cache(
     registry: Option<&Arc<readyset_rls::PolicyRegistry>>,
-    request: &ShallowViewRequest,
+    select_stmt: &readyset_sql::ast::ShallowCacheQuery,
+    schema_search_path: &[SqlIdentifier],
 ) -> RecoveryDeps {
     let Some(registry) = registry else {
         return RecoveryDeps::Plain;
     };
-    // The registry describes only the upstream URL's database.
-    if let Some(database) = &request.database {
-        return RecoveryDeps::Skip {
-            reason: format!("rls_uncacheable[code=other_database, database={database}]"),
-        };
-    }
     let referenced_relations = match crate::rls_relations::extract_referenced_relation_oids(
-        &request.query,
+        select_stmt,
         registry,
-        &request.schema_search_path,
+        schema_search_path,
     ) {
         Ok(oids) => oids,
         Err(unknown) => {

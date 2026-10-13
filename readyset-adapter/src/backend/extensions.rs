@@ -320,13 +320,12 @@ where
         // registry); the cache is plain and not coordinator-tracked.
         let mut rls_registration: Option<(Vec<readyset_rls::Oid>, readyset_rls::CacheSessionDeps)> =
             None;
-        if let Some(registry) = &state.policy_registry {
-            // The registry describes only the upstream URL's database.
-            if let Some(database) = &shallow.database {
-                return Err(ReadySetError::Internal(format!(
-                    "rls_uncacheable[code=other_database, database={database}]"
-                )));
-            }
+        let rls_catalog = match &state.rls_catalogs {
+            Some(rls_catalogs) => Some(rls_catalogs.get(shallow.database.as_deref()).await?),
+            None => None,
+        };
+        if let Some(rls_catalog) = &rls_catalog {
+            let registry = &rls_catalog.registry();
             let referenced_relations = match crate::rls_relations::extract_referenced_relation_oids(
                 &shallow.query,
                 registry,
@@ -393,9 +392,10 @@ where
                 // registers relation-only so `on_rls_flag_enabled` can find
                 // it when its relation later turns RLS-active.
                 if matches!(res, Ok(()))
-                    && let Some(coordinator) = &state.rls_coordinator
+                    && let Some(rls_catalog) = &rls_catalog
                     && let Some((relations, analysis)) = &rls_registration
                 {
+                    let coordinator = rls_catalog.coordinator();
                     if analysis.rls_active_for_tables.is_empty() {
                         coordinator.register_relations(query_id, relations.clone());
                     } else {
@@ -417,9 +417,8 @@ where
                     // drops a plain cache that would otherwise serve one tenant's
                     // rows to all. Iterating only `rls_active_for_tables` would
                     // miss the plain-cache case, whose set is empty.
-                    if let Some(registry) = &state.policy_registry
-                        && registry.generation() != analysis.snapshot_generation
-                    {
+                    let registry = rls_catalog.registry();
+                    if registry.generation() != analysis.snapshot_generation {
                         for &relid in relations.iter() {
                             coordinator.on_relation_changed(relid);
                             let now_rls_active = registry
@@ -868,8 +867,8 @@ where
                 .remove_all_shallow_cache_ddl_requests()
                 .await?;
             state.shallow.drop_all_caches();
-            if let Some(coordinator) = &state.rls_coordinator {
-                coordinator.clear();
+            if let Some(rls_catalogs) = &state.rls_catalogs {
+                rls_catalogs.clear();
             }
             state.acl.matrix().clear();
         }

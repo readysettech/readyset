@@ -53,7 +53,7 @@ use readyset_adapter::proxied_queries_reporter::ProxiedQueriesReporter;
 use readyset_adapter::query_status_cache::{
     InlineLiteralRecovery, MigrationStyle, QscSchemaChangeAdapter, QueryStatusCache,
 };
-use readyset_adapter::rls_coordinator::RlsCatalog;
+use readyset_adapter::rls_coordinator::{RlsCatalog, RlsCatalogs};
 use readyset_adapter::shallow_refresh_pool::ShallowRefreshPool;
 use readyset_adapter::views_synchronizer::ViewsSynchronizer;
 use readyset_adapter::{
@@ -2164,10 +2164,13 @@ where
         rt.handle()
             .spawn(Arc::clone(&shallow).report_metrics(shutdown_rx.clone()));
 
+        let upstream_config = Arc::new(RwLock::new(upstream_config));
+
         // Load the RLS catalog of a Postgres upstream. Non-Postgres upstreams yield `None` and
         // run RLS-disabled (every shallow cache stays plain).
-        let rls_catalog = {
-            let upstream_url = upstream_config
+        let rls_catalogs = {
+            let config = rt.block_on(upstream_config.read());
+            let upstream_url = config
                 .preferred_upstream_server()
                 .map(|server| server.raw_url().0.clone());
             let rls_config = readyset_rls::RlsConfig::default()
@@ -2184,26 +2187,32 @@ where
                 None
             } else {
                 upstream_url.as_deref().and_then(|url| {
-                    let verification =
-                        match rt.block_on(ServerCertVerification::from(&upstream_config)) {
-                            Ok(verification) => verification,
-                            Err(e) => {
-                                error!(
-                                    error = %e,
-                                    "Failed to load the upstream TLS settings for the RLS \
-                                     bootstrap; refusing to start. Check --ssl-root-cert."
-                                );
-                                process::exit(1);
-                            }
-                        };
+                    let verification = match rt.block_on(ServerCertVerification::from(&config)) {
+                        Ok(verification) => verification,
+                        Err(e) => {
+                            error!(
+                                error = %e,
+                                "Failed to load the upstream TLS settings for the RLS \
+                                 bootstrap; refusing to start. Check --ssl-root-cert."
+                            );
+                            process::exit(1);
+                        }
+                    };
                     match rt.block_on(RlsCatalog::load(
                         url,
+                        None,
                         verification,
                         rls_config,
                         shallow.clone(),
                         query_status_cache,
                     )) {
-                        Ok(catalog) => catalog,
+                        Ok(catalog) => catalog.map(|catalog| {
+                            Arc::new(RlsCatalogs::new(
+                                catalog,
+                                Arc::clone(&upstream_config),
+                                rls_config,
+                            ))
+                        }),
                         Err(e) => {
                             // A bootstrap error means a Postgres upstream whose RLS
                             // catalog could not be loaded -- unreachable upstream, TLS
@@ -2229,8 +2238,6 @@ where
                 })
             }
         };
-        let rls_registry = rls_catalog.as_ref().map(RlsCatalog::registry);
-        let rls_coordinator = rls_catalog.as_ref().map(RlsCatalog::coordinator);
 
         if let Ok(shallow_ddl_requests) =
             rt.block_on(adapter_authority.shallow_cache_ddl_requests())
@@ -2245,8 +2252,7 @@ where
                 options.default_ttl_ms,
                 options.default_coalesce_ms,
                 options.cache_mode,
-                rls_registry.clone(),
-                rls_coordinator.clone(),
+                rls_catalogs.clone(),
             )) {
                 error!("Failed to recreate shallow caches: {}", e);
             }
@@ -2285,7 +2291,6 @@ where
             variables: seed_allowlist(ShallowCacheAllowlistKind::Variable),
             schemas: seed_allowlist(ShallowCacheAllowlistKind::Schema),
         };
-        let upstream_config = Arc::new(RwLock::new(upstream_config));
         let shallow_refresh_pool = ShallowRefreshPool::<H::UpstreamDatabase>::new(
             rt.handle(),
             Arc::clone(&upstream_config),
@@ -2489,7 +2494,7 @@ where
             let mut connection_handler = self.connection_handler.clone();
             let shallow = shallow.clone();
             let shallow_cache_allowlists = shallow_cache_allowlists.clone();
-            let rls_coordinator = rls_coordinator.clone();
+            let rls_catalogs = rls_catalogs.clone();
             let shallow_refresh_pool = shallow_refresh_pool.clone();
             let cache_acl = cache_acl.clone();
             let local_addr = s.local_addr()?;
@@ -2544,10 +2549,6 @@ where
                 .readyset_schema(Arc::clone(&readyset_schema))
                 .shallow_cache_eligibility(shallow_cache_eligibility)
                 .shallow_cache_allowlists(shallow_cache_allowlists);
-            let backend_builder = match &rls_registry {
-                Some(registry) => backend_builder.policy_registry(registry.clone()),
-                None => backend_builder,
-            };
 
             // Initialize the reader layer for the adapter.
             let r = options.deployment_mode.has_reader_nodes().then(|| {
@@ -2608,7 +2609,7 @@ where
                         status_reporter_clone,
                         adapter_start_time,
                         shallow,
-                        rls_coordinator,
+                        rls_catalogs,
                         Some(shallow_refresh_pool),
                     )
                     .await;
@@ -2627,8 +2628,8 @@ where
         // Signal the RLS catalog poller to stop before we tear down the runtime.
         // Sending `true` lets its current tick drain any in-flight upstream query
         // and return cleanly, rather than being aborted mid-request.
-        if let Some(rls_catalog) = &rls_catalog {
-            rls_catalog.shutdown();
+        if let Some(rls_catalogs) = &rls_catalogs {
+            rls_catalogs.shutdown();
         }
 
         // We need to drop the last remaining `ShutdownReceiver` before sending the shutdown

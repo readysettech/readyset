@@ -29,7 +29,7 @@ use readyset_adapter::cache_grants_vrel::AclCacheGrants;
 use readyset_adapter::query_status_cache::{
     InlineLiteralRecovery, MigrationStyle, QscSchemaChangeAdapter, QueryStatusCache,
 };
-use readyset_adapter::rls_coordinator::RlsCatalog;
+use readyset_adapter::rls_coordinator::{RlsCatalog, RlsCatalogs};
 use readyset_adapter::shallow_refresh_pool::ShallowRefreshPool;
 use readyset_adapter::{
     recreate_inline_literal_caches, recreate_shallow_caches, Backend, ConnectionInfo, QueryHandler,
@@ -789,8 +789,7 @@ impl TestBuilder {
             self.backend_builder.get_default_coalesce_ms(),
             self.backend_builder.get_cache_mode(),
             // A freshly-started test authority has no persisted shallow DDL, so this
-            // replay is a no-op; no RLS registry or coordinator is needed here.
-            None,
+            // replay is a no-op; no RLS catalogs are needed here.
             None,
         )
         .await
@@ -846,7 +845,7 @@ impl TestBuilder {
         // The catalog owns the poller's shutdown sender; dropping it stops the poller, so it is
         // held alive for the adapter's lifetime (moved into the server task below) to keep
         // catalog polling running.
-        let rls_catalog = match cdc_url.as_deref() {
+        let rls_catalogs = match cdc_url.as_deref() {
             Some(url) if self.rls => {
                 let rls_config = match self.rls_poll_interval {
                     Some(interval) => {
@@ -859,6 +858,7 @@ impl TestBuilder {
                     .expect("RLS bootstrap TLS config");
                 RlsCatalog::load(
                     url,
+                    None,
                     verification,
                     rls_config,
                     Arc::clone(&shallow),
@@ -866,11 +866,16 @@ impl TestBuilder {
                 )
                 .await
                 .unwrap_or_else(|e| panic!("RLS bootstrap failed in test harness: {e}"))
+                .map(|catalog| {
+                    Arc::new(RlsCatalogs::new(
+                        catalog,
+                        Arc::clone(&shared_upstream_config),
+                        rls_config,
+                    ))
+                })
             }
             _ => None,
         };
-        let rls_registry = rls_catalog.as_ref().map(RlsCatalog::registry);
-        let rls_coordinator = rls_catalog.as_ref().map(RlsCatalog::coordinator);
 
         let shallow_for_schema = Arc::clone(&shallow);
 
@@ -961,10 +966,10 @@ impl TestBuilder {
         }
 
         tokio::spawn(async move {
-            // Keep the RLS catalog alive for the server's lifetime: it
-            // owns the poller's shutdown sender, so dropping it would stop catalog
-            // polling. It is released (poller stops) when this task ends.
-            let _rls_catalog = rls_catalog;
+            // Keep the RLS catalogs alive for the server's lifetime: they
+            // own the pollers' shutdown senders, so dropping them would stop catalog
+            // polling. They are released (pollers stop) when this task ends.
+            let _rls_catalogs = rls_catalogs.clone();
             let controller = ReadySetHandle::new(authority.clone()).await;
             let readyset_schema = ReadysetSchema::init(
                 "readyset",
@@ -990,10 +995,6 @@ impl TestBuilder {
                 loop {
                     let (s, _) = listener.accept().await.unwrap();
                     let backend_builder = self.backend_builder.clone();
-                    let backend_builder = match &rls_registry {
-                        Some(registry) => backend_builder.policy_registry(Arc::clone(registry)),
-                        None => backend_builder,
-                    };
                     let auto_increments = auto_increments.clone();
 
                     let upstream_url = match shared_upstream_config
@@ -1106,7 +1107,7 @@ impl TestBuilder {
                             status_reporter,
                             adapter_start_time,
                             shallow.clone(),
-                            rls_coordinator.clone(),
+                            rls_catalogs.clone(),
                             shallow_refresh_pool.clone(),
                         )
                         .await;

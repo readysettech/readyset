@@ -110,8 +110,9 @@ const BOOTSTRAP_MAX_ATTEMPTS: u32 = 5;
 const BOOTSTRAP_BACKOFF_INITIAL: Duration = Duration::from_millis(200);
 const BOOTSTRAP_BACKOFF_MAX: Duration = Duration::from_secs(10);
 
-/// Connect to `upstream_url`, verifying its certificate per `verification`, retrying transient
-/// connect failures, then call [`bootstrap`]. The poller's reconnects use the same settings.
+/// Connect to `upstream_url`, or to `database` on its server when that is set, verifying its
+/// certificate per `verification`, retrying transient connect failures, then call [`bootstrap`].
+/// The poller's reconnects use the same settings.
 ///
 /// Returns `Ok(None)` for non-Postgres URLs; MySQL deployments leave the registry empty and the
 /// analyzer reports Cacheable for every query.
@@ -121,6 +122,7 @@ const BOOTSTRAP_BACKOFF_MAX: Duration = Duration::from_secs(10);
 /// `BootstrapError` is returned so the caller can decide whether to abort.
 pub async fn bootstrap_from_url(
     upstream_url: &str,
+    database: Option<&str>,
     verification: ServerCertVerification,
     config: RlsConfig,
     sink: Option<Arc<dyn InvalidationSink>>,
@@ -128,7 +130,11 @@ pub async fn bootstrap_from_url(
     if !upstream_url.starts_with("postgres://") && !upstream_url.starts_with("postgresql://") {
         return Ok(None);
     }
-    let upstream_url: Arc<DatabaseURL> = Arc::new(upstream_url.parse()?);
+    let mut upstream_url: DatabaseURL = upstream_url.parse()?;
+    if let Some(database) = database {
+        upstream_url.set_db_name(database.to_owned());
+    }
+    let upstream_url = Arc::new(upstream_url);
     let verification = Arc::new(verification);
 
     let mut backoff = BOOTSTRAP_BACKOFF_INITIAL;
