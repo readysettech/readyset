@@ -76,3 +76,7 @@ pub const QUERY_LOG_BACKLOG_SIZE: &str = "readyset_query_log_backlog_size";
 
 /// Counter: The number of queries processed by the query logger.
 pub const QUERY_LOG_PROCESSED_EVENTS: &str = "readyset_query_log_processed_events";
+
+/// Counter: The number of query log events dropped because the query logger's backlog was full or
+/// the query logger had stopped.
+pub const QUERY_LOG_DROPPED_EVENTS: &str = "readyset_query_log_dropped_events";

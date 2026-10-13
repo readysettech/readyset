@@ -1927,7 +1927,7 @@ where
         // Gate query log code path on the log flag existing.
         let qlog_sender = if options.query_log_mode.is_enabled() {
             rs_connect.in_scope(|| info!("Query logs are enabled. Spawning query logger"));
-            let (qlog_sender, qlog_receiver) = tokio::sync::mpsc::unbounded_channel();
+            let (qlog_sender, qlog_receiver) = readyset_query_logger::channel();
 
             // Deliberately built without io/time drivers: the logger only awaits channels
             // and locks, so none are needed, and a driverless runtime parks on a condvar,

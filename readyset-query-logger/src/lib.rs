@@ -13,8 +13,48 @@ use readyset_util::shutdown::ShutdownReceiver;
 use readyset_util::timestamp::current_timestamp_ms;
 use schema_catalog::{RewriteContext, SchemaCatalog, SchemaCatalogHandle};
 use tokio::select;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing::info;
+
+/// Capacity of the channel feeding the query logger, in events. Senders drop events rather than
+/// wait when it is full, which bounds the backlog when the logger falls behind the request rate.
+const CHANNEL_CAPACITY: usize = 1 << 16;
+
+/// Creates the channel feeding the query logger, bounded at `CHANNEL_CAPACITY` events.
+pub fn channel() -> (QueryLogSender, Receiver<QueryExecutionEvent>) {
+    channel_with_capacity(CHANNEL_CAPACITY)
+}
+
+fn channel_with_capacity(capacity: usize) -> (QueryLogSender, Receiver<QueryExecutionEvent>) {
+    let (sender, receiver) = mpsc::channel(capacity);
+    let dropped_events = counter!(metric::QUERY_LOG_DROPPED_EVENTS);
+    (
+        QueryLogSender {
+            sender,
+            dropped_events,
+        },
+        receiver,
+    )
+}
+
+/// Sending half of the channel created by [`channel`].
+#[derive(Clone, Debug)]
+pub struct QueryLogSender {
+    sender: Sender<QueryExecutionEvent>,
+    /// Resolved once, so dropping an event under overload costs one increment rather than a
+    /// lookup in the metrics registry.
+    dropped_events: Counter,
+}
+
+impl QueryLogSender {
+    /// Offers `event` to the logger without waiting. When the channel is full or the logger has
+    /// stopped, the event is dropped and counted in `readyset_query_log_dropped_events`.
+    pub fn log(&self, event: QueryExecutionEvent) {
+        if self.sender.try_send(event).is_err() {
+            self.dropped_events.increment(1);
+        }
+    }
+}
 
 pub struct QueryLogger {
     parse_error_count: Counter,
@@ -212,10 +252,12 @@ impl QueryLogger {
     /// between shutdown checks.
     const EVENT_BATCH_SIZE: usize = 128;
 
-    /// Async task that logs query stats.
+    /// Logs query stats until shutdown or until every sender is gone. On exit it closes the
+    /// channel and counts the events still queued as dropped, so every offered event has been
+    /// either processed or dropped.
     pub async fn run(
         &mut self,
-        mut receiver: UnboundedReceiver<QueryExecutionEvent>,
+        mut receiver: Receiver<QueryExecutionEvent>,
         mut shutdown_recv: ShutdownReceiver,
     ) {
         let backlog_size = gauge!(metric::QUERY_LOG_BACKLOG_SIZE);
@@ -238,7 +280,7 @@ impl QueryLogger {
                         info!("Metrics task shutting down after request handle dropped.");
                         break;
                     }
-                    backlog_size.set(receiver.len() as f64);
+                    backlog_size.set(Self::backlog_size(&receiver) as f64);
                     for event in events.drain(..) {
                         self.handle_event(&event).await;
                     }
@@ -246,6 +288,16 @@ impl QueryLogger {
                 }
             }
         }
+        // Closing first means no event arrives after the backlog is counted.
+        receiver.close();
+        counter!(metric::QUERY_LOG_DROPPED_EVENTS).increment(Self::backlog_size(&receiver) as u64);
+    }
+
+    /// Number of events waiting in `receiver`, derived from the channel's free permits in constant
+    /// time. [`Receiver::len`] may walk the channel's block list, which costs time proportional to
+    /// the backlog.
+    fn backlog_size(receiver: &Receiver<QueryExecutionEvent>) -> usize {
+        receiver.max_capacity() - receiver.capacity()
     }
 
     async fn rewrite_context(&self) -> RewriteContext {
@@ -265,18 +317,20 @@ impl QueryLogger {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::Duration;
 
     use metrics::Key;
     use metrics_util::MetricKind;
-    use metrics_util::debugging::{DebuggingRecorder, Snapshotter};
+    use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
     use readyset_client::query::QueryId;
     use readyset_client_metrics::{
         EventType, QueryExecutionEvent, QueryLogMode, ReadysetExecutionEvent, SqlQueryType,
     };
     use readyset_sql::Dialect;
     use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
+    use readyset_util::shutdown;
     use schema_catalog::SchemaCatalogHandle;
 
     use super::QueryLogger;
@@ -391,6 +445,109 @@ mod tests {
                 "query label should only appear in verbose mode: {labels:?}"
             );
         }
+    }
+
+    /// Values of the recorded metrics by name. Taking a snapshot resets the recorder's values, so a
+    /// test reads every metric it checks from one call.
+    fn metric_values(snapshotter: &Snapshotter) -> HashMap<String, DebugValue> {
+        snapshotter
+            .snapshot()
+            .into_vec()
+            .into_iter()
+            .map(|(ck, _, _, val)| (ck.key().name().to_owned(), val))
+            .collect()
+    }
+
+    #[test]
+    fn channel_bounds_the_inline_size_of_its_backlog() {
+        // Bounds only the events' inline size; their heap parts, such as a parsed query, are not
+        // bounded.
+        const MAX_QUEUED_BYTES: usize = 32 << 20;
+        let (_tx, rx) = super::channel();
+        let queued_bytes = rx
+            .max_capacity()
+            .saturating_mul(size_of::<QueryExecutionEvent>());
+        assert!(queued_bytes <= MAX_QUEUED_BYTES, "{queued_bytes} bytes");
+    }
+
+    /// The recorder is installed only while the channel is created, so the counts also show that
+    /// the sender resolves its counter then.
+    #[test]
+    fn log_drops_and_counts_events_when_the_channel_is_full() {
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+        let (tx, rx) = metrics::with_local_recorder(&recorder, || super::channel_with_capacity(2));
+        for _ in 0..5 {
+            tx.log(cache_read_event(None));
+        }
+
+        assert_eq!(rx.len(), 2);
+        let dropped = metric_values(&snapshotter).remove(metric::QUERY_LOG_DROPPED_EVENTS);
+        assert_eq!(dropped, Some(DebugValue::Counter(3)));
+    }
+
+    /// When the logger falls behind and then shuts down with a full backlog, every offered event
+    /// has been either processed or dropped.
+    #[tokio::test]
+    async fn every_offered_event_is_processed_or_dropped() {
+        const CAPACITY: usize = 4 * QueryLogger::EVENT_BATCH_SIZE;
+        const BURST: usize = 3 * CAPACITY / 2;
+        const BURSTS: usize = 8;
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+        let guard = metrics::set_default_local_recorder(&recorder);
+        let (tx, rx) = super::channel_with_capacity(CAPACITY);
+        let (shutdown_tx, shutdown_rx) = shutdown::channel();
+        let mut logger = new_logger(QueryLogMode::Enabled);
+        let offer = async move {
+            for _ in 0..BURSTS {
+                tokio::task::yield_now().await;
+                for _ in 0..BURST {
+                    tx.log(cache_read_event(None));
+                }
+            }
+            // The last burst filled the channel, and the logger sees the signal before any event.
+            shutdown_tx.shutdown().await;
+        };
+        tokio::join!(logger.run(rx, shutdown_rx), offer);
+        drop(guard);
+
+        let mut values = metric_values(&snapshotter);
+        let mut counter = |name| match values.remove(name) {
+            Some(DebugValue::Counter(n)) => n,
+            other => panic!("{name}: {other:?}"),
+        };
+        let processed = counter(metric::QUERY_LOG_PROCESSED_EVENTS);
+        let dropped = counter(metric::QUERY_LOG_DROPPED_EVENTS);
+        assert!(dropped > 0, "the logger never fell behind");
+        assert!(
+            processed > CAPACITY as u64,
+            "the logger never ran between bursts"
+        );
+        assert_eq!(processed + dropped, (BURSTS * BURST) as u64);
+    }
+
+    #[tokio::test]
+    async fn run_processes_every_queued_event() {
+        const EVENTS: usize = 3 * QueryLogger::EVENT_BATCH_SIZE + 1;
+        let (tx, rx) = super::channel();
+        for _ in 0..EVENTS {
+            tx.log(cache_read_event(None));
+        }
+        drop(tx);
+        let (_shutdown_tx, shutdown_rx) = shutdown::channel();
+
+        let recorder = DebuggingRecorder::new();
+        let snapshotter = recorder.snapshotter();
+        let guard = metrics::set_default_local_recorder(&recorder);
+        new_logger(QueryLogMode::Enabled).run(rx, shutdown_rx).await;
+        drop(guard);
+
+        let mut values = metric_values(&snapshotter);
+        let processed = values.remove(metric::QUERY_LOG_PROCESSED_EVENTS);
+        assert_eq!(processed, Some(DebugValue::Counter(EVENTS as u64)));
+        let backlog = values.remove(metric::QUERY_LOG_BACKLOG_SIZE);
+        assert_eq!(backlog, Some(DebugValue::Gauge(0.0.into())));
     }
 
     #[tokio::test]

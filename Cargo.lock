@@ -6261,6 +6261,7 @@ dependencies = [
  "readyset-errors",
  "readyset-mcp",
  "readyset-metrics",
+ "readyset-query-logger",
  "readyset-rls",
  "readyset-schema",
  "readyset-server",

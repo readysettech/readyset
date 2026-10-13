@@ -587,7 +587,7 @@ impl TestBuilder {
             readyset_tracing::init_test_logging();
         }
 
-        let (query_log_tx, mut query_log_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (query_log_tx, mut query_log_rx) = readyset_query_logger::channel();
         tokio::spawn(async move {
             let mut logger = QueryLogger::new(
                 QueryLogMode::Enabled,

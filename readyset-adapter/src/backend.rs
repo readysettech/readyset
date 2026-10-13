@@ -108,6 +108,7 @@ use readyset_data::{DfType, DfValue};
 use readyset_errors::ReadySetError;
 use readyset_errors::{ReadySetResult, internal, internal_err, unsupported};
 use readyset_metrics::metrics_handle;
+use readyset_query_logger::QueryLogSender;
 use readyset_schema::{ReadysetSchema, ReadysetSchemaSession};
 use readyset_shallow::{CacheInsertGuard, CacheManager, ContentHash, Warning};
 use readyset_sql::ast::{
@@ -132,7 +133,6 @@ use readyset_util::logging::{ADAPTER_ACL_DECLINED, ADAPTER_SESSION_UPSTREAM_CONN
 use readyset_util::redacted::{RedactedString, Sensitive};
 use readyset_util::retry_with_exponential_backoff;
 use readyset_version::READYSET_VERSION;
-use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Notify, RwLock};
 use tracing::{debug, error, info, trace, warn};
 
@@ -436,7 +436,7 @@ pub struct BackendBuilder {
     users: Arc<AllowedUsers>,
     cache_acl: AclHandle,
     require_authentication: bool,
-    query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
+    query_log_sender: Option<QueryLogSender>,
     query_log_mode: Option<QueryLogMode>,
     unsupported_set_mode: UnsupportedSetMode,
     migration_mode: MigrationMode,
@@ -659,10 +659,7 @@ impl BackendBuilder {
         self
     }
 
-    pub fn query_log_sender(
-        mut self,
-        query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
-    ) -> Self {
+    pub fn query_log_sender(mut self, query_log_sender: Option<QueryLogSender>) -> Self {
         self.query_log_sender = query_log_sender;
         self
     }
@@ -1075,7 +1072,7 @@ where
     /// plus the freshness worker's queue. Disabled (always Unknown, sends dropped) when
     /// authentication is off, where the enforcement seams never consult it.
     acl: AclHandle,
-    query_log_sender: Option<UnboundedSender<QueryExecutionEvent>>,
+    query_log_sender: Option<QueryLogSender>,
     query_log_mode: Option<QueryLogMode>,
     /// Provides the ability to send [`TelemetryEvent`]s to Segment
     telemetry_sender: Option<TelemetrySender>,
@@ -2564,7 +2561,7 @@ where
 /// Offloads recording query metrics to a separate thread. Sends a
 /// message over a mpsc channel.
 fn log_query(
-    sender: Option<&UnboundedSender<QueryExecutionEvent>>,
+    sender: Option<&QueryLogSender>,
     event: QueryExecutionEvent,
     slowlog: bool,
     dialect: Dialect,
@@ -2591,10 +2588,7 @@ fn log_query(
     }
 
     if let Some(sender) = sender {
-        // Drop the error if something goes wrong with query logging.
-        if let Err(e) = sender.send(event) {
-            warn!("Error logging query with query logging enabled: {}", e);
-        }
+        sender.log(event);
     }
 }
 
