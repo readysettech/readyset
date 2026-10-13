@@ -29,6 +29,9 @@ const SETUP: &str = "
 
 const DEEP: &str = "SELECT id, num_ps, num, vc, ch, txt, mood FROM typmod WHERE id = $1";
 const DEEP_SIMPLE: &str = "SELECT id, num_ps, num, vc, ch, txt, mood FROM typmod WHERE id = 1";
+const DEEP_LIMIT: &str = "SELECT id, num_ps, vc FROM typmod WHERE txt = $1 ORDER BY id LIMIT 1";
+const DEEP_LIMIT_SIMPLE: &str =
+    "SELECT id, num_ps, vc FROM typmod WHERE txt = 'hello' ORDER BY id LIMIT 1";
 const SHALLOW: &str = "SELECT num_ps, vc, ch, mood, id FROM typmod WHERE id = $1";
 const PROXIED: &str =
     "SELECT id, num_ps, num, vc, ch, txt, mood, random() FROM typmod WHERE id = $1";
@@ -37,8 +40,9 @@ fn modifiers(stmt: &Statement) -> Vec<i32> {
     stmt.columns().iter().map(|c| c.type_modifier()).collect()
 }
 
-/// Type OID, type size, and type modifier of each column of the first row of a simple query.
-async fn simple_fields(conn: &Client, query: &str) -> Vec<(u32, i16, i32)> {
+/// Type OID, type size, type modifier, table OID, and column number of each column of the first
+/// row of a simple query.
+async fn simple_fields(conn: &Client, query: &str) -> Vec<(u32, i16, i32, u32, i16)> {
     let messages = conn.simple_query(query).await.unwrap();
     let row = messages
         .iter()
@@ -49,7 +53,7 @@ async fn simple_fields(conn: &Client, query: &str) -> Vec<(u32, i16, i32)> {
         .expect("query returned no rows");
     row.fields()
         .iter()
-        .map(|f| (f.type_oid(), f.type_size(), f.type_modifier()))
+        .map(|f| (f.type_oid(), f.type_size(), f.type_modifier(), f.table_oid(), f.column_id()))
         .collect()
 }
 
@@ -71,11 +75,15 @@ async fn row_description_matches_upstream() {
         .migration_mode(MigrationMode::OutOfBand)
         .fallback(true)
         .replicate_db(db_name)
+        .set_topk(true)
         .build::<PostgreSQLAdapter>()
         .await;
     let conn = psql_helpers::connect(opts).await;
     sleep().await;
     conn.simple_query(&format!("CREATE CACHE FROM {DEEP}"))
+        .await
+        .unwrap();
+    conn.simple_query(&format!("CREATE CACHE FROM {DEEP_LIMIT}"))
         .await
         .unwrap();
     conn.simple_query(&format!("CREATE SHALLOW CACHE FROM {SHALLOW}"))
@@ -100,6 +108,12 @@ async fn row_description_matches_upstream() {
     let info = last_query_info(&conn).await;
     assert_matches!(info.destination, QueryDestination::Readyset(_), "{info:?}");
     assert_eq!(actual, expected, "deep cache, simple query");
+
+    let expected = simple_fields(&upstream, DEEP_LIMIT_SIMPLE).await;
+    let actual = simple_fields(&conn, DEEP_LIMIT_SIMPLE).await;
+    let info = last_query_info(&conn).await;
+    assert_matches!(info.destination, QueryDestination::Readyset(_), "{info:?}");
+    assert_eq!(actual, expected, "deep cache with a LIMIT, simple query");
 
     let expected = modifiers(&upstream.prepare(PROXIED).await.unwrap());
     let stmt = conn.prepare(PROXIED).await.unwrap();

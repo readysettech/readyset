@@ -65,6 +65,8 @@ async fn left_join_right_columns_are_nullable() {
     for query in [
         "SELECT t.id, note.t_id, note.body FROM t LEFT JOIN note ON t.id = note.t_id
          WHERE t.grp = ? ORDER BY t.id",
+        "SELECT t.id, note.t_id, note.body FROM t LEFT JOIN note ON t.id = note.t_id
+         WHERE t.grp = ? ORDER BY t.id LIMIT 10",
         "SELECT body FROM v WHERE grp = ? ORDER BY body",
     ] {
         eventually!(run_test: {

@@ -48,6 +48,7 @@ async fn union_all_column_metadata_mysql() {
         .replicate_db(&test_name)
         .recreate_database(false)
         .fallback(true)
+        .set_topk(true)
         .build::<MySQLAdapter>()
         .await;
 
@@ -73,8 +74,11 @@ async fn union_all_column_metadata_mysql() {
     };
     for query in [
         "SELECT a, b FROM same_table WHERE k = ? ORDER BY a",
+        "SELECT a, b FROM same_table WHERE k = ? ORDER BY a LIMIT 3",
         "SELECT a, b FROM two_tables WHERE k = ? ORDER BY a",
+        "SELECT a, b FROM two_tables WHERE k = ? ORDER BY a LIMIT 3",
         "SELECT body FROM with_left_join WHERE k = ? ORDER BY body",
+        "SELECT body FROM with_left_join WHERE k = ? ORDER BY body LIMIT 3",
     ] {
         eventually!(run_test: {
             rs.query_drop(format!("CREATE CACHE FROM {query}")).await.map_err(|e| e.to_string())
@@ -149,6 +153,7 @@ async fn union_all_column_metadata_psql() {
         .migration_mode(MigrationMode::OutOfBand)
         .fallback(true)
         .replicate_db(db_name)
+        .set_topk(true)
         .build::<PostgreSQLAdapter>()
         .await;
     let conn = psql_helpers::connect(opts).await;
@@ -157,8 +162,11 @@ async fn union_all_column_metadata_psql() {
     // The table OID and column number of a view column are not compared: Readyset has no view OID
     for query in [
         "SELECT a, b, n FROM same_table WHERE k = $1 ORDER BY a",
+        "SELECT a, b, n FROM same_table WHERE k = $1 ORDER BY a LIMIT 3",
         "SELECT a, b, n FROM same_types WHERE k = $1 ORDER BY a",
+        "SELECT a, b, n FROM same_types WHERE k = $1 ORDER BY a LIMIT 3",
         "SELECT a, b, n FROM other_types WHERE k = $1 ORDER BY a",
+        "SELECT a, b, n FROM other_types WHERE k = $1 ORDER BY a LIMIT 3",
     ] {
         conn.simple_query(&format!("CREATE CACHE FROM {query}"))
             .await

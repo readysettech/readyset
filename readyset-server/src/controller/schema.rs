@@ -67,6 +67,18 @@ fn get_base_for_column(
         let (ni, cols) = &path[pos];
 
         let source_node = &graph[*ni];
+        if matches!(source_node.as_internal(), Some(NodeOperator::TopK(_))) {
+            // This TopK node happens to be the node farthest up this path from the reader node
+            // where the column index is still known.  Continue searching above this TopK node
+            // using the same column index.
+            let cols = cols.iter().flatten().copied().collect::<Vec<_>>();
+            let mut paths = vec![];
+            for parent in graph.neighbors_directed(*ni, petgraph::EdgeDirection::Incoming) {
+                paths.extend(provenance_of(graph, parent, &cols)?);
+            }
+            let (base, nullable) = get_base_for_paths(&paths, graph, recipe)?;
+            return Ok((base, nullable || left_join_right_column));
+        }
         if source_node.is_base() {
             if let Some(Schema::Table(BaseSchema { statement, pg_meta })) =
                 recipe.schema_for(source_node.name())
