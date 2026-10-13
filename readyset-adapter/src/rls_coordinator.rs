@@ -20,8 +20,12 @@ use std::sync::Arc;
 use papaya::HashMap;
 use parking_lot::Mutex;
 
+use database_utils::tls::ServerCertVerification;
 use readyset_client::query::QueryId;
-use readyset_rls::{Cacheability, InvalidationSink, Oid, PolicyRegistry, SessionInputType};
+use readyset_rls::{
+    BootstrapError, BootstrapHandle, Cacheability, DeferredSink, InvalidationSink, Oid,
+    PolicyRegistry, RlsConfig, SessionInputType, bootstrap_from_url,
+};
 use readyset_shallow::CacheManager;
 
 use crate::query_status_cache::QueryStatusCache;
@@ -307,5 +311,72 @@ where
             self.query_status_cache.invalidate_query(&query_id);
             self.unregister(&query_id);
         }
+    }
+}
+
+/// An upstream's RLS catalog poller, its registry, and the coordinator that bridges it to the
+/// shallow cache.
+#[derive(Debug)]
+pub struct RlsCatalog<V>
+where
+    V: Send + Sync + 'static,
+{
+    /// Owns the poller's only shutdown sender, so dropping it stops the catalog poller.
+    handle: BootstrapHandle,
+    coordinator: Arc<RlsCoordinator<V>>,
+}
+
+impl<V> RlsCatalog<V>
+where
+    V: Send + Sync + readyset_util::SizeOf + 'static,
+{
+    /// Bootstrap the RLS catalog poller for the upstream at `url` and build the coordinator that
+    /// bridges it to the shallow cache. Return `None` for a non-Postgres upstream.
+    pub async fn load(
+        url: &str,
+        verification: ServerCertVerification,
+        config: RlsConfig,
+        shallow: Arc<CacheManager<ShallowKey, V>>,
+        query_status_cache: &'static QueryStatusCache,
+    ) -> Result<Option<Self>, BootstrapError> {
+        // `bootstrap_from_url` creates the registry and starts the poller in one call, but the
+        // coordinator (the poller's sink) needs that registry to exist first. A `DeferredSink`
+        // breaks the cycle: it is handed to bootstrap, then has the coordinator installed once
+        // the registry returns.
+        let sink = Arc::new(DeferredSink::new());
+        let Some(handle) = bootstrap_from_url(
+            url,
+            verification,
+            config,
+            Some(Arc::clone(&sink) as Arc<dyn InvalidationSink>),
+        )
+        .await?
+        else {
+            return Ok(None);
+        };
+        let coordinator = Arc::new(RlsCoordinator::new(
+            Arc::clone(&handle.registry),
+            shallow,
+            query_status_cache,
+        ));
+        sink.set(Arc::clone(&coordinator) as Arc<dyn InvalidationSink>);
+        Ok(Some(Self {
+            handle,
+            coordinator,
+        }))
+    }
+
+    pub fn registry(&self) -> Arc<PolicyRegistry> {
+        Arc::clone(&self.handle.registry)
+    }
+
+    pub fn coordinator(&self) -> Arc<RlsCoordinator<V>> {
+        Arc::clone(&self.coordinator)
+    }
+
+    /// Signal the catalog poller to stop. Its current tick drains any in-flight upstream query and
+    /// returns cleanly.
+    pub fn shutdown(&self) {
+        let _ = self.handle.shutdown_tx.send(true);
     }
 }

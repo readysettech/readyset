@@ -53,6 +53,7 @@ use readyset_adapter::proxied_queries_reporter::ProxiedQueriesReporter;
 use readyset_adapter::query_status_cache::{
     InlineLiteralRecovery, MigrationStyle, QscSchemaChangeAdapter, QueryStatusCache,
 };
+use readyset_adapter::rls_coordinator::RlsCatalog;
 use readyset_adapter::shallow_refresh_pool::ShallowRefreshPool;
 use readyset_adapter::views_synchronizer::ViewsSynchronizer;
 use readyset_adapter::{
@@ -2163,22 +2164,15 @@ where
         rt.handle()
             .spawn(Arc::clone(&shallow).report_metrics(shutdown_rx.clone()));
 
-        // Bootstrap the RLS catalog poller for a Postgres upstream and
-        // build the coordinator that bridges it to the shallow cache.
-        // `bootstrap_from_url` creates the registry and starts the poller
-        // in one call, but the coordinator (the poller's sink) needs that
-        // registry to exist first. A `DeferredSink` breaks the cycle: it
-        // is handed to bootstrap, then has the coordinator installed once
-        // the registry returns. Non-Postgres upstreams yield `None` and
+        // Load the RLS catalog of a Postgres upstream. Non-Postgres upstreams yield `None` and
         // run RLS-disabled (every shallow cache stays plain).
-        let (rls_registry, rls_coordinator, rls_bootstrap_handle) = {
+        let rls_catalog = {
             let upstream_url = upstream_config
                 .preferred_upstream_server()
                 .map(|server| server.raw_url().0.clone());
-            let deferred_sink = Arc::new(readyset_rls::DeferredSink::new());
             let rls_config = readyset_rls::RlsConfig::default()
                 .with_poll_interval(Duration::from_secs(options.rls_poll_interval_secs));
-            let handle = if !options.enabled_rls {
+            if !options.enabled_rls {
                 // Explicit operator opt-out: skip the catalog bootstrap
                 // entirely and run RLS-disabled. Loud because it is unsafe
                 // if any table has or gains RLS.
@@ -2202,13 +2196,14 @@ where
                                 process::exit(1);
                             }
                         };
-                    match rt.block_on(readyset_rls::bootstrap_from_url(
+                    match rt.block_on(RlsCatalog::load(
                         url,
                         verification,
                         rls_config,
-                        Some(deferred_sink.clone() as Arc<dyn readyset_rls::InvalidationSink>),
+                        shallow.clone(),
+                        query_status_cache,
                     )) {
-                        Ok(handle) => handle,
+                        Ok(catalog) => catalog,
                         Err(e) => {
                             // A bootstrap error means a Postgres upstream whose RLS
                             // catalog could not be loaded -- unreachable upstream, TLS
@@ -2232,26 +2227,10 @@ where
                         }
                     }
                 })
-            };
-            match handle {
-                Some(handle) => {
-                    let registry = handle.registry.clone();
-                    let coordinator =
-                        Arc::new(readyset_adapter::rls_coordinator::RlsCoordinator::new(
-                            registry.clone(),
-                            shallow.clone(),
-                            query_status_cache,
-                        ));
-                    deferred_sink
-                        .set(coordinator.clone() as Arc<dyn readyset_rls::InvalidationSink>);
-                    // Retain the bootstrap handle: it owns the poller's only
-                    // shutdown sender, so dropping it here would close the watch
-                    // channel and stop the catalog poller right after startup.
-                    (Some(registry), Some(coordinator), Some(handle))
-                }
-                None => (None, None, None),
             }
         };
+        let rls_registry = rls_catalog.as_ref().map(RlsCatalog::registry);
+        let rls_coordinator = rls_catalog.as_ref().map(RlsCatalog::coordinator);
 
         if let Ok(shallow_ddl_requests) =
             rt.block_on(adapter_authority.shallow_cache_ddl_requests())
@@ -2648,8 +2627,8 @@ where
         // Signal the RLS catalog poller to stop before we tear down the runtime.
         // Sending `true` lets its current tick drain any in-flight upstream query
         // and return cleanly, rather than being aborted mid-request.
-        if let Some(rls_handle) = &rls_bootstrap_handle {
-            let _ = rls_handle.shutdown_tx.send(true);
+        if let Some(rls_catalog) = &rls_catalog {
+            rls_catalog.shutdown();
         }
 
         // We need to drop the last remaining `ShutdownReceiver` before sending the shutdown

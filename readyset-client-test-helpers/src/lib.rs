@@ -29,7 +29,7 @@ use readyset_adapter::cache_grants_vrel::AclCacheGrants;
 use readyset_adapter::query_status_cache::{
     InlineLiteralRecovery, MigrationStyle, QscSchemaChangeAdapter, QueryStatusCache,
 };
-use readyset_adapter::rls_coordinator::RlsCoordinator;
+use readyset_adapter::rls_coordinator::RlsCatalog;
 use readyset_adapter::shallow_refresh_pool::ShallowRefreshPool;
 use readyset_adapter::{
     recreate_inline_literal_caches, recreate_shallow_caches, Backend, ConnectionInfo, QueryHandler,
@@ -838,58 +838,39 @@ impl TestBuilder {
         };
         let schema_catalog_clone = schema_catalog.clone();
 
-        // Bootstrap the RLS registry + coordinator from the upstream when
-        // requested, mirroring the adapter binary. `bootstrap_from_url`
-        // synchronously loads the catalog snapshot, so the registry is seeded
-        // (and `CREATE CACHE` will see policies) before any connection is
-        // served. No-op for non-Postgres upstreams (returns `Ok(None)`).
+        // Load the RLS catalog from the upstream when requested, mirroring the adapter binary.
+        // Loading synchronously reads the catalog snapshot, so the registry is seeded (and
+        // `CREATE CACHE` will see policies) before any connection is served. No-op for
+        // non-Postgres upstreams.
         //
-        // The returned `BootstrapHandle` owns the poller's shutdown sender;
-        // dropping it closes the channel and stops the poller, so it is held
-        // alive for the adapter's lifetime (moved into the server task below) to
-        // keep catalog polling running.
-        let (rls_registry, rls_coordinator, rls_bootstrap_handle) = if self.rls {
-            match cdc_url.as_deref() {
-                Some(url) => {
-                    let sink = Arc::new(readyset_rls::DeferredSink::new());
-                    let rls_config = match self.rls_poll_interval {
-                        Some(interval) => {
-                            readyset_rls::RlsConfig::default().with_poll_interval(interval)
-                        }
-                        None => readyset_rls::RlsConfig::default(),
-                    };
-                    let verification = ServerCertVerification::from(&cdc_upstream_config)
-                        .await
-                        .expect("RLS bootstrap TLS config");
-                    match readyset_rls::bootstrap_from_url(
-                        url,
-                        verification,
-                        rls_config,
-                        Some(Arc::clone(&sink) as Arc<dyn readyset_rls::InvalidationSink>),
-                    )
-                    .await
-                    {
-                        Ok(Some(handle)) => {
-                            let registry = Arc::clone(&handle.registry);
-                            let coordinator = Arc::new(RlsCoordinator::new(
-                                Arc::clone(&registry),
-                                Arc::clone(&shallow),
-                                query_status_cache,
-                            ));
-                            sink.set(
-                                Arc::clone(&coordinator) as Arc<dyn readyset_rls::InvalidationSink>
-                            );
-                            (Some(registry), Some(coordinator), Some(handle))
-                        }
-                        Ok(None) => (None, None, None),
-                        Err(e) => panic!("RLS bootstrap failed in test harness: {e}"),
+        // The catalog owns the poller's shutdown sender; dropping it stops the poller, so it is
+        // held alive for the adapter's lifetime (moved into the server task below) to keep
+        // catalog polling running.
+        let rls_catalog = match cdc_url.as_deref() {
+            Some(url) if self.rls => {
+                let rls_config = match self.rls_poll_interval {
+                    Some(interval) => {
+                        readyset_rls::RlsConfig::default().with_poll_interval(interval)
                     }
-                }
-                None => (None, None, None),
+                    None => readyset_rls::RlsConfig::default(),
+                };
+                let verification = ServerCertVerification::from(&cdc_upstream_config)
+                    .await
+                    .expect("RLS bootstrap TLS config");
+                RlsCatalog::load(
+                    url,
+                    verification,
+                    rls_config,
+                    Arc::clone(&shallow),
+                    query_status_cache,
+                )
+                .await
+                .unwrap_or_else(|e| panic!("RLS bootstrap failed in test harness: {e}"))
             }
-        } else {
-            (None, None, None)
+            _ => None,
         };
+        let rls_registry = rls_catalog.as_ref().map(RlsCatalog::registry);
+        let rls_coordinator = rls_catalog.as_ref().map(RlsCatalog::coordinator);
 
         let shallow_for_schema = Arc::clone(&shallow);
 
@@ -980,10 +961,10 @@ impl TestBuilder {
         }
 
         tokio::spawn(async move {
-            // Keep the RLS bootstrap handle alive for the server's lifetime: it
+            // Keep the RLS catalog alive for the server's lifetime: it
             // owns the poller's shutdown sender, so dropping it would stop catalog
             // polling. It is released (poller stops) when this task ends.
-            let _rls_bootstrap_handle = rls_bootstrap_handle;
+            let _rls_catalog = rls_catalog;
             let controller = ReadySetHandle::new(authority.clone()).await;
             let readyset_schema = ReadysetSchema::init(
                 "readyset",
