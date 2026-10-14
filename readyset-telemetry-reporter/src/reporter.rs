@@ -12,8 +12,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use base64::Engine;
-use blake2::digest::{Update, VariableOutput};
-use blake2::Blake2bVar;
+use blake2::digest::consts::U8;
+use blake2::{Blake2b, Digest};
 use exponential_backoff::Backoff;
 use lazy_static::lazy_static;
 use readyset_util::shutdown::ShutdownReceiver;
@@ -326,13 +326,7 @@ impl TelemetryReporter {
 }
 
 fn blake2b_string(user_id: String) -> String {
-    let mut hasher = Blake2bVar::new(8).expect("8 is a valid output size for Blake2bVar");
-    hasher.update(user_id.as_bytes());
-    let mut buf = [0u8; 8];
-    hasher
-        .finalize_variable(&mut buf)
-        .expect("8 is a valid output size for Blake2bVar");
-    hex::encode(buf)
+    hex::encode(Blake2b::<U8>::digest(user_id.as_bytes()))
 }
 
 fn make_client(write_key: &str) -> Result<Client> {
@@ -476,5 +470,11 @@ mod tests {
         s.truncate(DEPLOYMENT_ENV_LEN_MAX);
         let (_, reporter) = TelemetryInitializer::test_init();
         assert_eq!(reporter.deployment_env, s);
+    }
+
+    /// The anonymized machine id must stay stable across releases.
+    #[test]
+    fn blake2b_string_is_stable() {
+        assert_eq!(blake2b_string("readyset".to_owned()), "f9e0f34f712dc784");
     }
 }
