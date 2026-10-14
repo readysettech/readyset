@@ -157,8 +157,8 @@ deny = [
 skip = [
     # arrow-cast (via datafusion) still uses atoi 2
     { name = "atoi", version = "2.0.0" },
-    # proptest (via bit-set) still uses bit-vec 0.8
-    { name = "bit-vec", version = "0.8.0" },
+    # postgres-types supports at most bit-vec 0.9; proptest (via bit-set) uses 0.10
+    { name = "bit-vec", version = "0.9.1" },
     { name = "hashbrown", version = "0.15.5" },
     # bindgen (via librocksdb-sys) caps itertools below 0.14;
     # datafusion and prost-derive use 0.14; the workspace is on 0.15
@@ -188,6 +188,8 @@ skip = [
 skip-tree = [
     { name = "darling", version = "0.20.11" },
     { name = "darling_macro", version = "0.20.11" },
+    # mysql-common-derive and rmcp-macros use darling 0.23; serde_with uses 0.24
+    { name = "darling", version = "0.23.0" },
     { name = "fail", version = "0.5.0" },
     { name = "fixedbitset", version = "0.4.2" },
     { name = "hashbrown", version = "0.14.5" },
