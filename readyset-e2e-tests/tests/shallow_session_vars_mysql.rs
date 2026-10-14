@@ -130,6 +130,27 @@ async fn group_concat_max_len_partitions_entries() {
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
 #[upstream(mysql)]
+async fn group_concat_max_len_expression_shares_entry() {
+    const QUERY: &str = "SELECT GROUP_CONCAT(LENGTH(s)) FROM t";
+    let (mut a, _upstream, opts, _handle, shutdown_tx) = setup(QUERY, "").await;
+
+    a.query_drop("SET group_concat_max_len = 4").await.unwrap();
+    let joined: String = a.query_first(QUERY).await.unwrap().unwrap();
+    assert_eq!(joined, "1,1,");
+    assert_filled(&mut a).await;
+
+    let mut b = mysql_async::Conn::new(opts).await.unwrap();
+    b.query_drop("SET group_concat_max_len = 2 * 2").await.unwrap();
+    let joined: String = b.query_first(QUERY).await.unwrap().unwrap();
+    assert_eq!(joined, "1,1,");
+    assert_hit(&mut b).await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
 async fn lc_time_names_partitions_entries() {
     const QUERY: &str = "SELECT DATE_FORMAT('2000-01-01', '%W') FROM t WHERE id = 1";
     let (mut a, _upstream, opts, _handle, shutdown_tx) = setup(QUERY, "").await;

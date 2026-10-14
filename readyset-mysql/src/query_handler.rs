@@ -16,8 +16,8 @@ use readyset_data::encoding::{mysql_character_set_name_to_collation_id, Encoding
 use readyset_data::{Collation, DfType, DfValue, TinyText};
 use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_sql::ast::{
-    Column, Expr, FieldDefinitionExpr, Literal, SetStatement, SetVariables, ShowStatement,
-    SqlIdentifier, SqlQuery, VariableScope,
+    BinaryOperator, Column, Expr, FieldDefinitionExpr, Literal, SetStatement, SetVariables,
+    ShowStatement, SqlIdentifier, SqlQuery, VariableScope,
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use tracing::warn;
@@ -73,6 +73,28 @@ fn boolean_value(value: &Literal) -> Option<bool> {
         }
         Literal::String(s) if s.eq_ignore_ascii_case("off") || s.eq_ignore_ascii_case("false") => {
             Some(false)
+        }
+        _ => None,
+    }
+}
+
+/// Evaluate integer literals combined with `+`, `-`, and `*`, such as `3 * 1024`. Return `None`
+/// for any other expression, and on overflow, which MySQL rejects.
+///
+/// The result keys shallow cache entries, and refresh workers set it on the upstream, so it must
+/// equal the value MySQL computes. The general constant evaluator differs from MySQL for some
+/// operators, such as `/`. This subset evaluates the same way in both.
+fn integer_value(expr: &Expr) -> Option<i64> {
+    match expr {
+        Expr::Literal(Literal::Integer(i)) => Some(*i),
+        Expr::BinaryOp { lhs, op, rhs } => {
+            let (lhs, rhs) = (integer_value(lhs)?, integer_value(rhs)?);
+            match op {
+                BinaryOperator::Add => lhs.checked_add(rhs),
+                BinaryOperator::Subtract => lhs.checked_sub(rhs),
+                BinaryOperator::Multiply => lhs.checked_mul(rhs),
+                _ => None,
+            }
         }
         _ => None,
     }
@@ -1181,7 +1203,13 @@ impl QueryHandler for MySqlQueryHandler {
                                             p,
                                             Some(cache_key_value(p, Literal::from(name.as_str()))),
                                         ),
-                                    _ => behavior.unsupported(true),
+                                    value => match integer_value(value) {
+                                        Some(i) => behavior.set_session_var(
+                                            p,
+                                            Some(cache_key_value(p, Literal::Integer(i))),
+                                        ),
+                                        None => behavior.unsupported(true),
+                                    },
                                 }
                             }
                         }
@@ -1867,12 +1895,12 @@ mod tests {
         }
     }
     #[test]
-    fn set_cache_keyed_variable_expression_unsupported() {
+    fn set_cache_keyed_variable_integer_expression_is_tracked() {
         let stmt = SetStatement::Variable(SetVariables {
             variables: vec![(
-                session_var("sql_select_limit"),
+                session_var("group_concat_max_len"),
                 Expr::BinaryOp {
-                    lhs: Box::new(Expr::Literal(Literal::Integer(1024))),
+                    lhs: Box::new(Expr::Literal(Literal::Integer(3))),
                     op: BinaryOperator::Multiply,
                     rhs: Box::new(Expr::Literal(Literal::Integer(1024))),
                 },
@@ -1880,8 +1908,38 @@ mod tests {
         });
         assert_eq!(
             MySqlQueryHandler::handle_set_statement(&stmt),
-            SetBehavior::default().unsupported(true)
+            SetBehavior::default()
+                .set_session_var("group_concat_max_len", Some(Literal::Integer(3072)))
         )
+    }
+
+    #[test]
+    fn set_cache_keyed_variable_other_expression_unsupported() {
+        for value in [
+            Expr::BinaryOp {
+                lhs: Box::new(Expr::Literal(Literal::Integer(1))),
+                op: BinaryOperator::Divide,
+                rhs: Box::new(Expr::Literal(Literal::Integer(2))),
+            },
+            Expr::BinaryOp {
+                lhs: Box::new(Expr::Literal(Literal::Integer(i64::MAX))),
+                op: BinaryOperator::Add,
+                rhs: Box::new(Expr::Literal(Literal::Integer(1))),
+            },
+            Expr::Variable(Variable {
+                scope: VariableScope::Session,
+                name: "max_allowed_packet".into(),
+            }),
+        ] {
+            let stmt = SetStatement::Variable(SetVariables {
+                variables: vec![(session_var("group_concat_max_len"), value.clone())],
+            });
+            assert_eq!(
+                MySqlQueryHandler::handle_set_statement(&stmt),
+                SetBehavior::default().unsupported(true),
+                "{value:?}"
+            )
+        }
     }
 
     #[test]
