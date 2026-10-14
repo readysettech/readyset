@@ -344,6 +344,34 @@ async fn forward_to_controller(
         Ok(Ok(Ok(reply))) => octet_stream(StatusCode::OK, reply),
         Ok(Ok(Err(reply))) => octet_stream(StatusCode::INTERNAL_SERVER_ERROR, reply),
         Ok(Err(status)) => status.into_response(),
-        Err(_) => StatusCode::NOT_FOUND.into_response(),
+        Err(_) => text(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "controller dropped the request",
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::Ipv4Addr;
+
+    use super::*;
+
+    /// If the controller drops a request without replying, the router returns a retryable 503.
+    #[tokio::test]
+    async fn a_request_the_controller_drops_is_unavailable() {
+        let (controller_tx, mut controller_rx) = tokio::sync::mpsc::channel(1);
+        tokio::spawn(async move { while controller_rx.recv().await.is_some() {} });
+        let router = NoriaServerHttpRouter {
+            listen_addr: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            port: 0,
+            controller_tx,
+            events_handle: EventsHandle::new(),
+            health_reporter: HealthReporter::new(),
+            failpoint_channel: None,
+        };
+        let request = Request::post("/flush_partial").body(Body::empty()).unwrap();
+        let response = forward_to_controller(State(router), request).await;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 }

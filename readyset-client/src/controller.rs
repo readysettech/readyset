@@ -132,6 +132,8 @@ async fn controller_request(
             let err: ReadySetError = bincode::deserialize(&body)?;
             Err(err.into())
         }
+        // The server responds with 404 only for an unknown path, which is not retryable.
+        StatusCode::NOT_FOUND => Err(ReadySetError::UnknownEndpoint.into()),
         s => Err(ControllerRequestError {
             error: internal_err!("HTTP status {s}"),
             invalidate_url: s == StatusCode::SERVICE_UNAVAILABLE,
@@ -1129,4 +1131,51 @@ impl ReadySetHandle {
         /// Set a failpoint with provided name and action
         failpoint(name: String, action: String,) -> ()
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use axum::Router;
+
+    use super::*;
+    use crate::consensus::LocalAuthority;
+
+    /// A handle whose authority names a stub controller that answers every request with 404, and
+    /// the number of requests the stub received.
+    async fn handle_over_404_stub() -> (ReadySetHandle, Arc<AtomicUsize>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let requests = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&requests);
+        let app = Router::new().fallback(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+            async { StatusCode::NOT_FOUND }
+        });
+        tokio::spawn(async move { axum::serve(listener, app).await });
+
+        let authority = Arc::new(Authority::from(LocalAuthority::new()));
+        let leader = ControllerDescriptor {
+            controller_uri: Url::parse(&format!("http://{addr}")).unwrap(),
+            nonce: 1,
+        };
+        authority.become_leader(leader).await.unwrap();
+        (ReadySetHandle::make(authority, None, None), requests)
+    }
+
+    /// The controller answers a path it does not serve with 404, which no retry changes.
+    #[tokio::test]
+    async fn an_unknown_endpoint_fails_without_retrying() {
+        let (mut handle, requests) = handle_over_404_stub().await;
+        let result = tokio::time::timeout(Duration::from_secs(5), handle.flush_partial())
+            .await
+            .expect("a request to an unknown endpoint did not end within 5 s");
+        let error = result.expect_err("a 404 is an error");
+        assert!(
+            error.any_cause(|e| matches!(e, ReadySetError::UnknownEndpoint)),
+            "{error:?}"
+        );
+        assert_eq!(requests.load(Ordering::SeqCst), 1);
+    }
 }
