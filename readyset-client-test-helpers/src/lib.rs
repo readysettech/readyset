@@ -774,28 +774,8 @@ impl TestBuilder {
         }
         let shallow = Arc::new(shallow);
 
-        // Replay any persisted shallow caches, mirroring the production adapter startup.
-        let shallow_ddl = authority
-            .shallow_cache_ddl_requests()
-            .await
-            .unwrap_or_default();
-        recreate_shallow_caches(
-            shallow.clone(),
-            query_status_cache,
-            shallow_ddl,
-            self.parsing_preset,
-            rewrite_params,
-            self.backend_builder.get_default_ttl_ms(),
-            self.backend_builder.get_default_coalesce_ms(),
-            self.backend_builder.get_cache_mode(),
-            // A freshly-started test authority has no persisted shallow DDL, so this
-            // replay is a no-op; no RLS catalogs are needed here.
-            None,
-        )
-        .await
-        .unwrap();
-
-        // Same for the caches that keep their literals inline.
+        // Replay any persisted caches that keep their literals inline, mirroring the production
+        // adapter startup.
         let cache_ddl = authority.cache_ddl_requests().await.unwrap_or_default();
         recreate_inline_literal_caches(
             query_status_cache,
@@ -876,6 +856,25 @@ impl TestBuilder {
             }
             _ => None,
         };
+
+        // Replay any persisted shallow caches, mirroring the production adapter startup.
+        let shallow_ddl = authority
+            .shallow_cache_ddl_requests()
+            .await
+            .unwrap_or_default();
+        recreate_shallow_caches(
+            shallow.clone(),
+            query_status_cache,
+            shallow_ddl,
+            self.parsing_preset,
+            rewrite_params,
+            self.backend_builder.get_default_ttl_ms(),
+            self.backend_builder.get_default_coalesce_ms(),
+            self.backend_builder.get_cache_mode(),
+            rls_catalogs.clone(),
+        )
+        .await
+        .unwrap();
 
         let shallow_for_schema = Arc::clone(&shallow);
 
