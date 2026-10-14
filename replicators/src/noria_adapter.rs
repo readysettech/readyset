@@ -293,6 +293,18 @@ impl<'a> NoriaAdapter<'a> {
                 }
             };
 
+            if matches!(
+                err,
+                ReadySetError::ResnapshotNeeded | ReadySetError::FullResnapshotNeeded
+            ) {
+                // The resnapshot re-creates changed tables, which removes the caches over them, so
+                // tell the leader at the decision, before the wait; it then refuses new caches
+                // until the resnapshot ends.
+                let _ = controller_tx.send(ControllerMessage::SnapshotStarting);
+                antithesis_sdk::assert_reachable!(
+                    "replicator marks the leader not ready before the wait for a resnapshot"
+                );
+            }
             match err {
                 ReadySetError::ResnapshotNeeded => {
                     set_failpoint!(failpoints::POSTGRES_PARTIAL_RESNAPSHOT);
