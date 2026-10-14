@@ -1,0 +1,29 @@
+# string_agg takes text, and Postgres drops a char's trailing blanks when it casts the char to text.
+
+statement ok
+CREATE TABLE char_sagg (id INT PRIMARY KEY, g INT, ch CHAR(5));
+
+statement ok
+INSERT INTO char_sagg VALUES (1, 1, 'a'), (2, 1, 'bb'), (3, 2, '');
+
+query IT nosort
+SELECT id, string_agg(ch, ',') FROM char_sagg GROUP BY id ORDER BY id
+----
+1
+a
+2
+bb
+3
+(empty)
+
+query T nosort
+SELECT string_agg(ch, ',') FROM char_sagg WHERE id = 2
+----
+bb
+
+query T nosort
+SELECT string_agg(ch, ',') FROM char_sagg WHERE id IN ($1, $2)
+$1 = 1
+$2 = 3
+----
+a,

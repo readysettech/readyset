@@ -43,6 +43,10 @@ pub struct Accumulator {
     out_ty: DfType,
     #[serde(default)]
     skip_finalization: bool,
+    /// The char type of the input of a string aggregate. The aggregate converts each value to
+    /// its text output type, which drops the char's padding.
+    #[serde(default)]
+    char_input: Option<DfType>,
 }
 
 impl Accumulator {
@@ -87,6 +91,18 @@ impl Accumulator {
             AccumulationOp::StringAgg { .. } => DfType::Text(collation),
         };
 
+        // MySQL reads a CHAR value without its trailing blanks, and Postgres's string_agg takes
+        // text, so both join a char's values unpadded.
+        let char_input = (over_col_ty.is_char()
+            && matches!(
+                op,
+                AccumulationOp::GroupConcat { .. } | AccumulationOp::StringAgg { .. }
+            ))
+        .then(|| {
+            antithesis_sdk::assert_reachable!("a string aggregate read a char without its padding");
+            over_col_ty.clone()
+        });
+
         Ok(GroupedOperator::new(
             src,
             Accumulator {
@@ -95,6 +111,7 @@ impl Accumulator {
                 group: group_by.into(),
                 out_ty,
                 skip_finalization,
+                char_input,
             },
         ))
     }
@@ -122,8 +139,11 @@ impl GroupedOperation for Accumulator {
         let group_hash = hash_grouped_records(record, self.group_by());
         let value = record
             .get(self.over)
-            .ok_or(ReadySetError::InvalidRecordLength)?
-            .clone();
+            .ok_or(ReadySetError::InvalidRecordLength)?;
+        let value = match &self.char_input {
+            Some(char_ty) => value.coerce_to(&self.out_ty, char_ty)?,
+            None => value.clone(),
+        };
         Ok(AccumulationDiff {
             value,
             is_positive,
@@ -445,6 +465,42 @@ mod tests {
             }),
         );
         assert_eq!(c.node().description(), "StringAgg(1, NULL) γ[0]",);
+    }
+
+    #[test]
+    fn string_aggregates_read_a_char_without_its_padding() {
+        let char5 = DfType::Char(5, Collation::Utf8);
+        for (op, dialect) in [
+            (
+                AccumulationOp::GroupConcat {
+                    separator: ",".to_string(),
+                    distinct: false.into(),
+                    order_by: None,
+                },
+                Dialect::DEFAULT_MYSQL,
+            ),
+            (
+                AccumulationOp::StringAgg {
+                    separator: Some(",".to_string()),
+                    distinct: false.into(),
+                    order_by: None,
+                },
+                Dialect::DEFAULT_POSTGRESQL,
+            ),
+        ] {
+            let mut g = ops::test::MockGraph::new();
+            let s = g.add_base("source", &["x", "y"]);
+            let c = Accumulator::over(op, s.as_global(), 1, &[0], &char5, &dialect, false).unwrap();
+            g.set_op("concat", &["x", "ys"], c, true);
+            g.narrow_one_row(vec![1.into(), "a    ".into()], true);
+            let rs = g.narrow_one_row(vec![1.into(), "     ".into()], true);
+            let concatenated = DfValue::from("a,");
+            assert!(
+                rs.iter()
+                    .any(|r| matches!(r, Record::Positive(r) if r[1] == concatenated)),
+                "{rs:?}"
+            );
+        }
     }
 
     #[test]

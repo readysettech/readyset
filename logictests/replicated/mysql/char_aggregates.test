@@ -1,0 +1,63 @@
+# MySQL reads a CHAR value without its trailing blanks, so GROUP_CONCAT over a CHAR column joins
+# the unpadded values.
+
+statement ok
+CREATE TABLE char_agg (id INT PRIMARY KEY, g INT, ch CHAR(10), c3 CHAR(3));
+
+statement ok
+INSERT INTO char_agg VALUES (1, 1, 'ab', 'x'), (2, 1, 'c', 'yy'), (3, 2, '', NULL), (4, 2, NULL, 'z');
+
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT id, GROUP_CONCAT(ch) FROM char_agg GROUP BY id ORDER BY id
+
+query IT nosort
+SELECT id, GROUP_CONCAT(ch) FROM char_agg GROUP BY id ORDER BY id
+----
+1
+ab
+2
+c
+3
+(empty)
+4
+NULL
+
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT g, GROUP_CONCAT(ch SEPARATOR ',') FROM char_agg GROUP BY g ORDER BY g
+
+query IT nosort
+SELECT g, GROUP_CONCAT(ch SEPARATOR ',') FROM char_agg GROUP BY g ORDER BY g
+----
+1
+ab,c
+2
+(empty)
+
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT GROUP_CONCAT(c3) FROM char_agg
+
+query T nosort
+SELECT GROUP_CONCAT(c3) FROM char_agg
+----
+x,yy,z
+
+query T nosort
+SELECT GROUP_CONCAT(c3) FROM char_agg WHERE id IN (?, ?)
+? = 1
+? = 2
+----
+x,yy
+
+statement ok
+UPDATE char_agg SET ch = 'd' WHERE id = 4;
+
+query IT nosort
+SELECT g, GROUP_CONCAT(ch SEPARATOR ',') FROM char_agg GROUP BY g ORDER BY g
+----
+1
+ab,c
+2
+,d
