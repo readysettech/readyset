@@ -483,7 +483,7 @@ impl Leader {
             }
             (&Method::GET | &Method::POST, "/get_statistics") => {
                 let ds = self.dataflow_state_handle.read().await;
-                return_serialized!(ds.get_statistics().await);
+                return_serialized!(ds.get_statistics().await?);
             }
             (&Method::GET | &Method::POST, "/instances") => {
                 let ds = self.dataflow_state_handle.read().await;

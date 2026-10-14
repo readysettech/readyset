@@ -813,7 +813,7 @@ impl ReadySetHandle {
         /// Get statistics about the time spent processing different parts of the graph.
         ///
         /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
-        statistics() -> stats::GraphStats
+        get_statistics() -> stats::GraphStats
     );
 
     simple_request!(

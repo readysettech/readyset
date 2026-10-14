@@ -2321,6 +2321,7 @@ async fn handle_controller_request(
 mod tests {
     use std::assert_matches;
     use std::collections::HashSet;
+    use std::time::Duration;
 
     use petgraph::visit::IntoNodeReferences;
 
@@ -3202,6 +3203,42 @@ mod tests {
         let mat = res.into_iter().next().unwrap();
         assert!(!mat.partial);
         assert_eq!(mat.node_description, "B");
+
+        shutdown_tx.shutdown().await;
+    }
+
+    /// The client's statistics request reaches the controller's endpoint and answers in bounded
+    /// time, with an entry for every domain.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn statistics_answers_with_the_domains() {
+        let (mut noria, shutdown_tx) = start_simple("statistics_answers_with_the_domains").await;
+        eventually! {
+            noria
+                .extend_recipe(ChangeList::from_change(
+                    Change::CreateTable {
+                        statement: parse_create_table(
+                            Dialect::MySQL,
+                            "CREATE TABLE t1 (x int primary key);",
+                        )
+                        .unwrap(),
+                        pg_meta: None,
+                    },
+                    DataDialect::DEFAULT_MYSQL,
+                ))
+                .await
+                .is_ok()
+        }
+
+        let stats = tokio::time::timeout(Duration::from_secs(10), noria.get_statistics())
+            .await
+            .expect("statistics() did not answer within 10 s")
+            .unwrap();
+        let domains: HashSet<DomainIndex> =
+            noria.domains().await.unwrap().keys().copied().collect();
+        assert_eq!(
+            stats.domains.keys().copied().collect::<HashSet<_>>(),
+            domains
+        );
 
         shutdown_tx.shutdown().await;
     }
