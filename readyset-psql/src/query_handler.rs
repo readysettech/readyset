@@ -15,7 +15,11 @@ use readyset_sql::ast::{
 
 /// Session variables that change a query's result. The shallow cache keys entries on their
 /// values, and refresh workers set them before rerunning a query.
-const CACHE_KEYED_VARIABLES: [&str; 2] = ["intervalstyle", "timezone_abbreviations"];
+const CACHE_KEYED_VARIABLES: [&str; 3] = [
+    "default_text_search_config",
+    "intervalstyle",
+    "timezone_abbreviations",
+];
 
 /// Parse PG's numeric `SET TimeZone = N` shorthand. PG documents this as
 /// "N hours behind UTC" — POSIX-style, sign-inverted relative to ISO 8601 —
@@ -77,7 +81,6 @@ lazy_static! {
             "autovacuum_vacuum_cost_limit",
             "autovacuum_vacuum_scale_factor",
             "autovacuum_vacuum_threshold",
-            "default_text_search_config",
             "server_encoding",
             "dynamic_library_path",
             "gin_fuzzy_search_limit",
@@ -879,6 +882,19 @@ mod tests {
             )),
             SetBehavior::default()
                 .set_session_var("intervalstyle", Some(Literal::from("iso_8601"))),
+        );
+    }
+
+    #[test]
+    fn set_default_text_search_config_is_tracked() {
+        assert_eq!(
+            PostgreSqlQueryHandler::handle_set_statement(&parse_set_statement(
+                "SET default_text_search_config = 'pg_catalog.simple'"
+            )),
+            SetBehavior::default().set_session_var(
+                "default_text_search_config",
+                Some(Literal::from("pg_catalog.simple"))
+            ),
         );
     }
 

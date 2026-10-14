@@ -194,6 +194,68 @@ async fn intervalstyle_survives_refresh() {
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
 #[upstream(postgres)]
+async fn default_text_search_config_partitions_entries() {
+    // "the" is a stopword in the english configuration but not in the simple one.
+    const QUERY: &str = "SELECT id FROM events WHERE length(to_tsvector('the')) > 0 ORDER BY id";
+    let (a, _upstream, opts, _handle, shutdown_tx) = setup(QUERY, "").await;
+
+    a.simple_query("SET default_text_search_config = 'pg_catalog.english'")
+        .await
+        .unwrap();
+    assert_eq!(simple_ids(&a, QUERY).await, Vec::<i32>::new());
+    assert_filled(&a).await;
+
+    let b = psql_helpers::connect(opts).await;
+    b.simple_query("SET default_text_search_config = 'pg_catalog.simple'")
+        .await
+        .unwrap();
+    assert_eq!(simple_ids(&b, QUERY).await, vec![1, 2]);
+    assert_filled(&b).await;
+    assert_eq!(simple_ids(&b, QUERY).await, vec![1, 2]);
+    assert_hit(&b).await;
+
+    assert_eq!(simple_ids(&a, QUERY).await, Vec::<i32>::new());
+    assert_hit(&a).await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn default_text_search_config_survives_refresh() {
+    const QUERY: &str = "SELECT id FROM events WHERE length(to_tsvector('the')) > 0 ORDER BY id";
+    let (_a, upstream, opts, _handle, shutdown_tx) =
+        setup(QUERY, "POLICY TTL 60 SECONDS REFRESH EVERY 1 SECONDS").await;
+
+    let b = psql_helpers::connect(opts).await;
+    b.simple_query("SET default_text_search_config = 'pg_catalog.simple'")
+        .await
+        .unwrap();
+    assert_eq!(simple_ids(&b, QUERY).await, vec![1, 2]);
+    assert_filled(&b).await;
+
+    upstream
+        .simple_query("INSERT INTO events (id) VALUES (3)")
+        .await
+        .unwrap();
+
+    eventually!(run_test: {
+        let ids = simple_ids(&b, QUERY).await;
+        let info = last_query_info(&b).await;
+        AssertUnwindSafe(move || (info, ids))
+    }, then_assert: |result| {
+        let (info, ids) = result();
+        assert_matches!(info.destination, QueryDestination::ReadysetShallow(..));
+        assert_eq!(ids, vec![1, 2, 3]);
+    });
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(postgres)]
 async fn timezone_abbreviations_survives_refresh() {
     const QUERY: &str = "SELECT id FROM events WHERE at = '2026-01-15 10:00 CST' ORDER BY id";
     let (_a, upstream, opts, _handle, shutdown_tx) =
