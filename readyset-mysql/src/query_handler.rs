@@ -831,7 +831,6 @@ lazy_static! {
         "slow_query_log_file",
         "sort_buffer_size",
         "source_verify_checksum",
-        "sql_auto_is_null",
         "sql_big_selects",
         "sql_buffer_result",
         "sql_generate_invisible_primary_key",
@@ -1080,6 +1079,23 @@ impl QueryHandler for MySqlQueryHandler {
                                 false
                             };
                             behavior.unsupported(!supported)
+                        }
+                        // While this is on, a query for `auto_col IS NULL` right after an insert
+                        // returns the session's new row, which a cache entry cannot reproduce.
+                        "sql_auto_is_null" => {
+                            let enabled = match value {
+                                Expr::Literal(literal) => boolean_value(literal),
+                                Expr::Column(Column { name, table: None })
+                                    if name.eq_ignore_ascii_case("default") =>
+                                {
+                                    Some(false)
+                                }
+                                Expr::Column(Column { name, table: None }) => {
+                                    boolean_value(&Literal::from(name.as_str()))
+                                }
+                                _ => None,
+                            };
+                            behavior.unsupported(enabled != Some(false))
                         }
                         "character_set_results" => {
                             match get_encoding_for_charset(value, var_name) {
@@ -1698,6 +1714,44 @@ mod tests {
                 MySqlQueryHandler::handle_set_statement(&stmt),
                 SetBehavior::default().unsupported(true),
                 "{var}"
+            )
+        }
+    }
+
+    #[test]
+    fn set_sql_auto_is_null_on_is_unsupported() {
+        for value in [
+            Expr::Literal(Literal::Integer(1)),
+            Expr::Literal(Literal::Boolean(true)),
+            Expr::Column(Column::from("ON")),
+            Expr::Literal(Literal::Integer(2)),
+        ] {
+            let stmt = SetStatement::Variable(SetVariables {
+                variables: vec![(session_var("sql_auto_is_null"), value.clone())],
+            });
+            assert_eq!(
+                MySqlQueryHandler::handle_set_statement(&stmt),
+                SetBehavior::default().unsupported(true),
+                "{value:?}"
+            )
+        }
+    }
+
+    #[test]
+    fn set_sql_auto_is_null_off_is_allowed() {
+        for value in [
+            Expr::Literal(Literal::Integer(0)),
+            Expr::Literal(Literal::Boolean(false)),
+            Expr::Column(Column::from("OFF")),
+            Expr::Column(Column::from("DEFAULT")),
+        ] {
+            let stmt = SetStatement::Variable(SetVariables {
+                variables: vec![(session_var("sql_auto_is_null"), value.clone())],
+            });
+            assert_eq!(
+                MySqlQueryHandler::handle_set_statement(&stmt),
+                SetBehavior::default(),
+                "{value:?}"
             )
         }
     }
