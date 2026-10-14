@@ -45,13 +45,27 @@ pub(crate) mod sql {
         SELECT oid, rolname, rolsuper, rolbypassrls \
         FROM   pg_catalog.pg_roles";
 
-    pub(crate) const VIEW_DEPS: &str = "\
-        SELECT rw.ev_class AS view_oid, d.refobjid AS underlying_oid \
-        FROM   pg_catalog.pg_rewrite rw \
-        JOIN   pg_catalog.pg_depend  d \
-          ON   d.classid = 'pg_rewrite'::regclass AND d.objid = rw.oid \
-        WHERE  d.refclassid = 'pg_class'::regclass \
-          AND  rw.ev_class <> d.refobjid";
+    macro_rules! view_deps {
+        () => {
+            "\
+            FROM   pg_catalog.pg_rewrite rw \
+            JOIN   pg_catalog.pg_depend  d \
+              ON   d.classid = 'pg_rewrite'::regclass AND d.objid = rw.oid \
+            WHERE  d.refclassid = 'pg_class'::regclass \
+              AND  rw.ev_class <> d.refobjid"
+        };
+    }
+
+    pub(crate) const VIEW_DEPS: &str = concat!(
+        "SELECT rw.ev_class AS view_oid, d.refobjid AS underlying_oid ",
+        view_deps!()
+    );
+
+    pub(crate) const VIEW_DEPS_FOR_VIEW: &str = concat!(
+        "SELECT d.refobjid AS underlying_oid ",
+        view_deps!(),
+        " AND rw.ev_class = $1"
+    );
 
     // Order by `setdatabase` so the global default (`setdatabase = 0`) is applied
     // before the database-specific default, letting the latter overwrite the
@@ -316,6 +330,19 @@ pub async fn reload_relation(
             },
         );
         registry.set_relation_name(&schema_name, &relname, relid);
+        if matches!(relkind as u8, b'v' | b'm') {
+            let deps = client
+                .query(sql::VIEW_DEPS_FOR_VIEW, &[&(relid as PgOid)])
+                .await?
+                .iter()
+                .map(|row| row.try_get("underlying_oid"))
+                .collect::<Result<Vec<PgOid>, _>>()?;
+            // An empty list does not make a view session-independent: it can still read through
+            // functions or session settings. Leave it unloaded so the analyzer refuses it.
+            if !deps.is_empty() {
+                registry.set_view_underlying(relid, deps);
+            }
+        }
     }
 
     let policy_rows = client

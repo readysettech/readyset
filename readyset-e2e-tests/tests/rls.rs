@@ -1803,3 +1803,72 @@ async fn pg_rls_shallow_cache_enable_rls_drops_plain_cache_extended() {
     run_enable_rls_drops_plain_cache(Protocol::Extended).await;
 }
 
+/// A `security_invoker` view over an RLS-active table, created after Readyset has started, must
+/// become cacheable once the poller observes it. `security_invoker` requires Postgres 15.
+async fn run_view_created_after_startup(proto: Protocol) {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    PostgreSQLAdapter::recreate_database(&test_name).await;
+    setup_todos_upstream(&test_name).await;
+    let (rs, _handle, shutdown_tx) = connect_rls(&test_name).await;
+
+    // Create the view upstream only after Readyset's initial catalog snapshot.
+    let mut upstream_cfg = psql_helpers::upstream_config();
+    upstream_cfg.dbname(&test_name);
+    let upstream = psql_helpers::connect(upstream_cfg).await;
+    for stmt in [
+        "CREATE VIEW api.todos_view WITH (security_invoker = true) AS SELECT * FROM api.todos",
+        "GRANT SELECT ON api.todos_view TO PUBLIC", // So that any role can access it.
+    ] {
+        upstream
+            .simple_query(stmt)
+            .await
+            .unwrap_or_else(|e| panic!("upstream `{stmt}` failed: {e}"));
+    }
+
+    let view = "SELECT * FROM api.todos_view";
+    rs.simple_query("SET ROLE authenticated")
+        .await
+        .expect("set role");
+    set_sub_claim(&rs, proto, "bob").await;
+
+    // Reads route upstream until the poller loads the view; in-request-path auto-caching then
+    // creates the scoped cache. Poll until a read is served from it.
+    let mut cached = false;
+    for _ in 0..40 {
+        let rows = read_owner_ids(&rs, proto, view).await;
+        assert_eq!(rows, ["bob"], "bob sees only his row through the view");
+        if matches!(
+            psql_helpers::last_query_info(&rs).await.destination,
+            QueryDestination::ReadysetShallow(_)
+        ) {
+            cached = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    assert!(cached, "a view created after startup never became cacheable");
+
+    // Check per-tenant isolation.
+    set_sub_claim(&rs, proto, "alice").await;
+    assert_owner_ids_cached(&rs, proto, view, &["alice", "alice"], "alice via the view").await;
+    set_sub_claim(&rs, proto, "bob").await;
+    assert_owner_ids_cached(&rs, proto, view, &["bob"], "bob via the view").await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres, 15)]
+async fn pg_rls_shallow_cache_view_created_after_startup_simple() {
+    run_view_created_after_startup(Protocol::Simple).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres, 15)]
+async fn pg_rls_shallow_cache_view_created_after_startup_extended() {
+    run_view_created_after_startup(Protocol::Extended).await;
+}
