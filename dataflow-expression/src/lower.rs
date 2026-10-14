@@ -32,6 +32,37 @@ pub trait LowerContext: Clone {
     fn resolve_type(&self, ty: Relation) -> Option<DfType>;
 }
 
+/// Read a column as `dialect` reads it. MySQL reads a CHAR value without its trailing blanks, and
+/// types an expression over it as a variable-length string.
+fn read_column(index: usize, ty: DfType, dialect: Dialect) -> Expr {
+    if let (SqlEngine::MySQL, DfType::Char(len, collation)) = (dialect.engine(), &ty) {
+        let unpadded = DfType::VarChar(*len, *collation);
+        return Expr::Cast {
+            expr: Box::new(Expr::Column { index, ty }),
+            ty: unpadded,
+            null_on_failure: false,
+            dialect,
+        };
+    }
+    Expr::Column { index, ty }
+}
+
+/// Whether `expr` is a column read as [`read_column`] reads it.
+fn reads_column(expr: &Expr) -> bool {
+    match expr {
+        Expr::Column { .. } => true,
+        Expr::Cast {
+            expr: inner,
+            dialect,
+            ..
+        } => matches!(
+            &**inner,
+            Expr::Column { index, ty } if read_column(*index, ty.clone(), *dialect) == *expr
+        ),
+        _ => false,
+    }
+}
+
 /// Resolve a single common collation across a set of expressions.
 ///
 /// Column references have stronger affinity than literals or function results, so a column's
@@ -57,10 +88,7 @@ fn resolve_collation(args: &[&Expr], dialect: Dialect) -> Collation {
             _ => continue,
         };
 
-        let affinity = match arg {
-            Expr::Column { .. } => COLUMN,
-            _ => OTHER,
-        };
+        let affinity = if reads_column(arg) { COLUMN } else { OTHER };
 
         if affinity < best_affinity {
             best_affinity = affinity;
@@ -1852,7 +1880,13 @@ impl Expr {
             }
             AstExpr::Column(col) => {
                 let (index, ty) = context.resolve_column(col)?;
-                Ok(Self::Column { index, ty })
+                let read = read_column(index, ty, dialect);
+                if matches!(read, Self::Cast { .. }) {
+                    antithesis_sdk::assert_reachable!(
+                        "lowering read a MySQL CHAR column without its padding"
+                    );
+                }
+                Ok(read)
             }
             AstExpr::BinaryOp { lhs, op, rhs } => {
                 let mut left = Box::new(Self::lower(*lhs, dialect, context)?);
@@ -2651,6 +2685,33 @@ pub(crate) mod tests {
             let expr = Expr::lower(input, Dialect::DEFAULT_MYSQL, &no_op_lower_context()).unwrap();
             assert_eq!(expr.ty(), &datetime(subsecond_digits), "{literal}");
         }
+    }
+
+    #[test]
+    fn mysql_expression_reads_a_char_without_its_padding() {
+        let context = resolve_columns(|_| Ok((0, DfType::Char(10, Collation::Utf8AiCi))));
+        for (sql, expected) in [
+            ("length(t.x)", DfValue::from(3)),
+            ("char_length(t.x)", DfValue::from(3)),
+            ("json_quote(t.x)", DfValue::from("\"abc\"")),
+            ("t.x = 'abc'", DfValue::from(true)),
+        ] {
+            let input = parse_expr(ParserDialect::MySQL, sql).unwrap();
+            let expr = Expr::lower(input, Dialect::DEFAULT_MYSQL, &context).unwrap();
+            assert_eq!(
+                expr.eval::<DfValue>(&["abc       ".into()]).unwrap(),
+                expected,
+                "{sql}"
+            );
+        }
+    }
+
+    #[test]
+    fn mysql_unpadded_char_column_keeps_its_collation_against_a_literal() {
+        let context = resolve_columns(|_| Ok((0, DfType::Char(3, Collation::Latin1SwedishCi))));
+        let input = parse_expr(ParserDialect::MySQL, "concat(t.x, 'a')").unwrap();
+        let expr = Expr::lower(input, Dialect::DEFAULT_MYSQL, &context).unwrap();
+        assert_eq!(*expr.ty(), DfType::Text(Collation::Latin1SwedishCi));
     }
 
     #[test]

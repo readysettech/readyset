@@ -1,0 +1,65 @@
+# MySQL strips a CHAR value's trailing blanks when it reads the value, so every expression over a
+# CHAR column sees the value without padding. A cache gives the same results as MySQL.
+
+statement ok
+CREATE TABLE char_pad (id INT PRIMARY KEY, ch CHAR(10), c3 CHAR(3), vc VARCHAR(10));
+
+statement ok
+INSERT INTO char_pad VALUES (1, 'aaaaaaaa', 'ab', 'aaa'), (2, 'a', 'a', 'a'), (3, '', '', ''), (4, NULL, NULL, NULL);
+
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT id, LENGTH(ch), CHAR_LENGTH(c3), JSON_QUOTE(ch) FROM char_pad ORDER BY id
+
+query IIIT nosort
+SELECT id, LENGTH(ch), CHAR_LENGTH(c3), JSON_QUOTE(ch) FROM char_pad ORDER BY id
+----
+1
+8
+2
+"aaaaaaaa"
+2
+1
+1
+"a"
+3
+0
+0
+""
+4
+NULL
+NULL
+NULL
+
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT id, CONCAT(ch, '|'), UPPER(c3), IFNULL(ch, c3) FROM char_pad ORDER BY id
+
+query ITTT nosort
+SELECT id, CONCAT(ch, '|'), UPPER(c3), IFNULL(ch, c3) FROM char_pad ORDER BY id
+----
+1
+aaaaaaaa|
+AB
+aaaaaaaa
+2
+a|
+A
+a
+3
+|
+(empty)
+(empty)
+4
+NULL
+NULL
+NULL
+
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT id FROM char_pad WHERE LENGTH(ch) = 1 ORDER BY id
+
+query I nosort
+SELECT id FROM char_pad WHERE LENGTH(ch) = 1 ORDER BY id
+----
+2
