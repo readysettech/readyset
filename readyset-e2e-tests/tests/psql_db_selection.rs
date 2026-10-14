@@ -503,6 +503,56 @@ async fn rls_role_defaults_key_only_later_sessions() {
     shutdown_tx.shutdown().await;
 }
 
+/// Readyset recovers each cache with the RLS catalog of its own database.
+#[tokio::test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn rls_recovers_per_database() {
+    readyset_tracing::init_test_logging();
+
+    let url_db = derive_test_name();
+    let other_db = format!("{url_db}_other");
+    PostgreSQLAdapter::recreate_database(&url_db).await;
+    PostgreSQLAdapter::recreate_database(&other_db).await;
+    create_table(&url_db, 100).await;
+    let other_upstream = create_table(&other_db, 200).await;
+
+    let backend = BackendBuilder::new().require_authentication(false);
+    let (mut rs_opts, handle, shutdown_tx) = TestBuilder::new(backend)
+        .cache_mode(CacheMode::Shallow)
+        .recreate_database(false)
+        .replicate_db(&url_db)
+        .fallback(true)
+        .rls(true)
+        .build::<PostgreSQLAdapter>()
+        .await;
+    for (db, name) in [(&url_db, "url_cache"), (&other_db, "other_cache")] {
+        rs_opts.dbname(db);
+        let conn = psql_helpers::connect(rs_opts.clone()).await;
+        conn.simple_query(&format!("CREATE SHALLOW CACHE {name} FROM {QUERY}"))
+            .await
+            .unwrap();
+    }
+
+    // Readyset can't cache this policy, so recovery skips the cache on the other database.
+    other_upstream
+        .simple_query(
+            "CREATE TABLE u (a INT);
+             ALTER TABLE t ENABLE ROW LEVEL SECURITY;
+             CREATE POLICY p ON t FOR SELECT USING (a IN (SELECT a FROM u))",
+        )
+        .await
+        .unwrap();
+
+    let (rs_opts, _handle, shutdown_tx) = shutdown_tx.restart(handle).await;
+    let conn = psql_helpers::connect(rs_opts).await;
+    let caches = conn.simple_query("SHOW CACHES").await.unwrap();
+    let names: Vec<_> = rows(&caches).map(|row| row.get("name").unwrap()).collect();
+    assert_eq!(names, ["url_cache"]);
+
+    shutdown_tx.shutdown().await;
+}
+
 /// Readyset probes cache ACLs on each cache's database. A user who can't connect to a database
 /// is never served its caches.
 #[tokio::test]
