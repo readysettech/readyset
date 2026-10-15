@@ -3927,7 +3927,9 @@ async fn mysql_replicate_json_field() {
             INSERT INTO j_table (id, data, c) VALUES (1, '{\"age\": 30, \"car\": [\"Ford\", \"BMW\", \"Fiat\"], \"name\": \"John\"}', 'A');
             INSERT INTO j_table (id, data, c) VALUES (2, '{\"car\": [\"Ford\", \"BMW\", \"Fiat\"], \"name\": \"John\", \"age\":30}', 'A');
             INSERT INTO j_table (id, data, c) VALUES (3, '{\"amount\": {\"amount\": \"0.0\", \"currency\": \"USD\"}, \"is_custom\": false, \"description\": \"My Description\", \"amount_formatted\": \"$0.00\"}', 'A');
-            INSERT INTO j_table (id, data, c) VALUES (4, NULL, 'A');",
+            INSERT INTO j_table (id, data, c) VALUES (4, NULL, 'A');
+            INSERT INTO j_table (id, data, c) VALUES (5, '{\"zeta\":1,\"alpha\":2,\"middle\":{\"z\":1,\"a\":2,\"m\":3}}', 'A');
+            INSERT INTO j_table (id, data, c) VALUES (6, '{\"10\":\"ten\",\"2\":\"two\",\"1\":\"one\",\"20\":\"twenty\"}', 'A');",
         )
         .await
         .unwrap();
@@ -3949,7 +3951,7 @@ async fn mysql_replicate_json_field() {
         &[
             DfValue::Int(1),
             DfValue::Text(
-                "{\"age\":30,\"car\":[\"Ford\",\"BMW\",\"Fiat\"],\"name\":\"John\"}"
+                "{\"age\": 30, \"car\": [\"Ford\", \"BMW\", \"Fiat\"], \"name\": \"John\"}"
                     .into(),
             ),
             DfValue::Text("A".into()),
@@ -3957,7 +3959,7 @@ async fn mysql_replicate_json_field() {
         &[
             DfValue::Int(2),
             DfValue::Text(
-                "{\"age\":30,\"car\":[\"Ford\",\"BMW\",\"Fiat\"],\"name\":\"John\"}"
+                "{\"age\": 30, \"car\": [\"Ford\", \"BMW\", \"Fiat\"], \"name\": \"John\"}"
                     .into(),
             ),
             DfValue::Text("A".into()),
@@ -3965,17 +3967,33 @@ async fn mysql_replicate_json_field() {
         &[
             DfValue::Int(3),
             DfValue::Text(
-                "{\"amount\":{\"amount\":\"0.0\",\"currency\":\"USD\"},\"amount_formatted\":\"$0.00\",\"description\":\"My Description\",\"is_custom\":false}"
+                "{\"amount\": {\"amount\": \"0.0\", \"currency\": \"USD\"}, \"is_custom\": false, \"description\": \"My Description\", \"amount_formatted\": \"$0.00\"}"
                     .into(),
             ),
             DfValue::Text("A".into()),
         ],
         &[DfValue::Int(4), DfValue::None, DfValue::Text("A".into())],
+        &[
+            DfValue::Int(5),
+            DfValue::Text(
+                "{\"zeta\": 1, \"alpha\": 2, \"middle\": {\"a\": 2, \"m\": 3, \"z\": 1}}"
+                    .into(),
+            ),
+            DfValue::Text("A".into()),
+        ],
+        &[
+            DfValue::Int(6),
+            DfValue::Text(
+                "{\"1\": \"one\", \"2\": \"two\", \"10\": \"ten\", \"20\": \"twenty\"}"
+                    .into(),
+            ),
+            DfValue::Text("A".into()),
+        ],
     ],);
 
     // Update the JSON data
     client
-        .query("UPDATE j_table SET c = 'B' WHERE id IN (1, 2, 3, 4);")
+        .query("UPDATE j_table SET c = 'B' WHERE id IN (1, 2, 3, 4, 5, 6);")
         .await
         .unwrap();
 
@@ -3986,7 +4004,7 @@ async fn mysql_replicate_json_field() {
         &[
             DfValue::Int(1),
             DfValue::Text(
-                "{\"age\":30,\"car\":[\"Ford\",\"BMW\",\"Fiat\"],\"name\":\"John\"}"
+                "{\"age\": 30, \"car\": [\"Ford\", \"BMW\", \"Fiat\"], \"name\": \"John\"}"
                     .into(),
             ),
             DfValue::Text("B".into()),
@@ -3994,7 +4012,7 @@ async fn mysql_replicate_json_field() {
         &[
             DfValue::Int(2),
             DfValue::Text(
-                "{\"age\":30,\"car\":[\"Ford\",\"BMW\",\"Fiat\"],\"name\":\"John\"}"
+                "{\"age\": 30, \"car\": [\"Ford\", \"BMW\", \"Fiat\"], \"name\": \"John\"}"
                     .into(),
             ),
             DfValue::Text("B".into()),
@@ -4002,12 +4020,28 @@ async fn mysql_replicate_json_field() {
         &[
             DfValue::Int(3),
             DfValue::Text(
-                "{\"amount\":{\"amount\":\"0.0\",\"currency\":\"USD\"},\"amount_formatted\":\"$0.00\",\"description\":\"My Description\",\"is_custom\":false}"
+                "{\"amount\": {\"amount\": \"0.0\", \"currency\": \"USD\"}, \"is_custom\": false, \"description\": \"My Description\", \"amount_formatted\": \"$0.00\"}"
                     .into(),
             ),
             DfValue::Text("B".into()),
         ],
         &[DfValue::Int(4), DfValue::None, DfValue::Text("B".into())],
+        &[
+            DfValue::Int(5),
+            DfValue::Text(
+                "{\"zeta\": 1, \"alpha\": 2, \"middle\": {\"a\": 2, \"m\": 3, \"z\": 1}}"
+                    .into(),
+            ),
+            DfValue::Text("B".into()),
+        ],
+        &[
+            DfValue::Int(6),
+            DfValue::Text(
+                "{\"1\": \"one\", \"2\": \"two\", \"10\": \"ten\", \"20\": \"twenty\"}"
+                    .into(),
+            ),
+            DfValue::Text("B".into()),
+        ],
     ],);
 
     shutdown_tx.shutdown().await;
