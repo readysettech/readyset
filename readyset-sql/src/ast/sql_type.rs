@@ -261,6 +261,7 @@ impl TryFromDialect<sqlparser::ast::DataType> for SqlType {
             JSONB => Ok(Self::Jsonb),
             Regclass => unsupported!("REGCLASS type"),
             String(_) => not_yet_implemented!("STRING type"),
+            Collate(..) => unsupported!("COLLATE in a data type"),
             FixedString(_) => unsupported!("FIXEDSTRING type"),
             Bytea => Ok(Self::ByteArray),
             Bit(n) => Ok(Self::Bit(n.map(|n| n as u16))),
@@ -306,6 +307,7 @@ impl TryFromDialect<sqlparser::ast::DataType> for SqlType {
             Map(_data_type, _data_type1, _bracket_kind) => unsupported!("MAP type"),
             Tuple(_vec) => unsupported!("TUPLE type"),
             Nested(_vec) => unsupported!("NESTED type"),
+            Object(..) => unsupported!("OBJECT type"),
             // XXX bits is a Clickhouse extension for ENUM8/ENUM16
             Enum(variants, _bits) => Ok(Self::Enum(
                 variants
@@ -409,6 +411,7 @@ impl TryFromDialect<sqlparser::ast::ArrayElemTypeDef> for SqlType {
             // TODO: Should we explicitly reject numbers in the square brackets?
             ArrayElemTypeDef::SquareBracket(data_type, _) => data_type.try_into_dialect(dialect),
             ArrayElemTypeDef::Parenthesis(data_type) => data_type.try_into_dialect(dialect),
+            ArrayElemTypeDef::ParenthesisNotNull(..) => unsupported!("ARRAY(<type> NOT NULL) type"),
             ArrayElemTypeDef::Qualified(data_type, _) => data_type.try_into_dialect(dialect),
         }
     }

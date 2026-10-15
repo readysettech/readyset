@@ -1679,7 +1679,7 @@ dependencies = [
  "log",
  "object_store",
  "parking_lot",
- "sqlparser 0.62.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sqlparser 0.62.0",
  "tempfile",
  "tokio",
  "url",
@@ -1753,7 +1753,7 @@ dependencies = [
  "log",
  "object_store",
  "recursive",
- "sqlparser 0.62.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sqlparser 0.62.0",
  "tokio",
  "uuid",
  "web-time",
@@ -1918,7 +1918,7 @@ dependencies = [
  "itertools 0.14.0",
  "recursive",
  "serde_json",
- "sqlparser 0.62.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sqlparser 0.62.0",
 ]
 
 [[package]]
@@ -2245,7 +2245,7 @@ dependencies = [
  "log",
  "recursive",
  "regex",
- "sqlparser 0.62.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sqlparser 0.62.0",
 ]
 
 [[package]]
@@ -4786,7 +4786,7 @@ dependencies = [
  "proptest",
  "readyset-sql",
  "readyset-util",
- "sqlparser 0.62.0 (git+https://github.com/readysettech/datafusion-sqlparser-rs?rev=b39ef86de0eeed910636301c55943c3ec2593846)",
+ "sqlparser 0.63.0",
  "test-strategy",
  "test-utils",
 ]
@@ -6281,7 +6281,7 @@ dependencies = [
  "slab",
  "smallvec",
  "sqlformat",
- "sqlparser 0.62.0 (git+https://github.com/readysettech/datafusion-sqlparser-rs?rev=b39ef86de0eeed910636301c55943c3ec2593846)",
+ "sqlparser 0.63.0",
  "streaming-iterator",
  "test-strategy",
  "tokio",
@@ -7165,7 +7165,7 @@ dependencies = [
  "readyset-util",
  "serde",
  "serde_json",
- "sqlparser 0.62.0 (git+https://github.com/readysettech/datafusion-sqlparser-rs?rev=b39ef86de0eeed910636301c55943c3ec2593846)",
+ "sqlparser 0.63.0",
  "stacker",
  "strum",
  "test-strategy",
@@ -7188,7 +7188,7 @@ dependencies = [
  "readyset-sql",
  "readyset-util",
  "serde",
- "sqlparser 0.62.0 (git+https://github.com/readysettech/datafusion-sqlparser-rs?rev=b39ef86de0eeed910636301c55943c3ec2593846)",
+ "sqlparser 0.63.0",
  "test-discovery",
  "test-strategy",
  "test-utils",
@@ -7216,7 +7216,7 @@ dependencies = [
  "readyset-sql",
  "readyset-sql-parsing",
  "serde",
- "sqlparser 0.62.0 (git+https://github.com/readysettech/datafusion-sqlparser-rs?rev=b39ef86de0eeed910636301c55943c3ec2593846)",
+ "sqlparser 0.63.0",
  "strum",
  "test-strategy",
  "test-utils",
@@ -8349,18 +8349,18 @@ checksum = "13c6d1b651dc4edf07eead2a0c6c78016ce971bc2c10da5266861b13f25e7cec"
 dependencies = [
  "log",
  "recursive",
- "sqlparser_derive 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sqlparser_derive 0.5.0",
 ]
 
 [[package]]
 name = "sqlparser"
-version = "0.62.0"
-source = "git+https://github.com/readysettech/datafusion-sqlparser-rs?rev=b39ef86de0eeed910636301c55943c3ec2593846#b39ef86de0eeed910636301c55943c3ec2593846"
+version = "0.63.0"
+source = "git+https://github.com/apache/datafusion-sqlparser-rs?rev=f1854e47e463bbe8cd2f7c08fb008b7ced268598#f1854e47e463bbe8cd2f7c08fb008b7ced268598"
 dependencies = [
  "log",
  "recursive",
  "serde",
- "sqlparser_derive 0.5.0 (git+https://github.com/readysettech/datafusion-sqlparser-rs?rev=b39ef86de0eeed910636301c55943c3ec2593846)",
+ "sqlparser_derive 0.6.0",
 ]
 
 [[package]]
@@ -8376,12 +8376,12 @@ dependencies = [
 
 [[package]]
 name = "sqlparser_derive"
-version = "0.5.0"
-source = "git+https://github.com/readysettech/datafusion-sqlparser-rs?rev=b39ef86de0eeed910636301c55943c3ec2593846#b39ef86de0eeed910636301c55943c3ec2593846"
+version = "0.6.0"
+source = "git+https://github.com/apache/datafusion-sqlparser-rs?rev=f1854e47e463bbe8cd2f7c08fb008b7ced268598#f1854e47e463bbe8cd2f7c08fb008b7ced268598"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.119",
+ "syn 3.0.9",
 ]
 
 [[package]]

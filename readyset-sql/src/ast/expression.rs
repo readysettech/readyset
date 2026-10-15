@@ -2474,6 +2474,7 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 expr,
                 list,
                 negated,
+                global: false,
             } => Ok(Self::In {
                 lhs: expr.try_into_dialect(dialect)?,
                 rhs: crate::ast::InValue::List(list.try_into_dialect(dialect)?),
@@ -2483,11 +2484,15 @@ impl TryFromDialect<sqlparser::ast::Expr> for Expr {
                 expr,
                 subquery,
                 negated,
+                global: false,
             } => Ok(Self::In {
                 lhs: expr.try_into_dialect(dialect)?,
                 rhs: crate::ast::InValue::Subquery(subquery.try_into_dialect(dialect)?),
                 negated,
             }),
+            InList { global: true, .. } | InSubquery { global: true, .. } => {
+                unsupported!("GLOBAL IN")
+            }
             Interval(_interval) => not_yet_implemented!("INTERVAL"),
             InUnnest {
                 expr: _,

@@ -272,6 +272,7 @@ impl TryFromDialect<sqlparser::ast::TableConstraint> for TableKey {
             Check(sqlparser::ast::CheckConstraint {
                 name,
                 expr,
+                no_inherit: _,
                 enforced,
             }) => Ok(Self::CheckConstraint {
                 constraint_name: name.into_dialect(dialect),
