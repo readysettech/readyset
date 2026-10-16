@@ -1,6 +1,7 @@
 use std::assert_matches;
 use std::panic::AssertUnwindSafe;
 
+use futures::FutureExt;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter, last_query_info};
 use readyset_client_test_helpers::{TestBuilder, TestShutdownSender};
@@ -42,6 +43,30 @@ async fn setup(
     upstream_opts.dbname(opts.get_dbname().unwrap());
     let upstream_conn = psql_helpers::connect(upstream_opts).await;
     (conn, upstream_conn, opts, handle, shutdown_tx)
+}
+
+/// Run `test` with the default of `name` for `database` set to `value`, then reset it, even if
+/// `test` panics.
+async fn with_database_default<F: Future<Output = ()>>(
+    database: &str,
+    name: &str,
+    value: &str,
+    test: F,
+) {
+    let upstream = psql_helpers::connect(psql_helpers::upstream_config()).await;
+    let alter = |clause: String| format!("ALTER DATABASE \"{database}\" {clause}");
+    upstream
+        .simple_query(&alter(format!("SET {name} = {value}")))
+        .await
+        .unwrap();
+    let result = AssertUnwindSafe(test).catch_unwind().await;
+    upstream
+        .simple_query(&alter(format!("RESET {name}")))
+        .await
+        .unwrap();
+    if let Err(panic) = result {
+        std::panic::resume_unwind(panic);
+    }
 }
 
 async fn assert_filled(conn: &Client) {
@@ -152,6 +177,58 @@ async fn intervalstyle_partitions_entries() {
 
     assert_eq!(simple_texts(&a, QUERY).await, vec!["1 day 02:00:00"]);
     assert_hit(&a).await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn inherited_intervalstyle_partitions_entries() {
+    const QUERY: &str = "SELECT duration FROM events WHERE id = 2";
+    let (a, _upstream, opts, _handle, shutdown_tx) = setup(QUERY, "").await;
+
+    assert_eq!(simple_texts(&a, QUERY).await, vec!["1 day 02:00:00"]);
+    assert_filled(&a).await;
+
+    let database = opts.get_dbname().unwrap();
+    with_database_default(database, "intervalstyle", "'iso_8601'", async {
+        let b = psql_helpers::connect(opts.clone()).await;
+        assert_eq!(simple_texts(&b, QUERY).await, vec!["P1DT2H"]);
+        assert_filled(&b).await;
+        assert_eq!(simple_texts(&b, QUERY).await, vec!["P1DT2H"]);
+        assert_hit(&b).await;
+
+        assert_eq!(simple_texts(&a, QUERY).await, vec!["1 day 02:00:00"]);
+        assert_hit(&a).await;
+
+        // DEFAULT returns to the value the session started with.
+        b.simple_query("SET intervalstyle = DEFAULT").await.unwrap();
+        assert_eq!(simple_texts(&b, QUERY).await, vec!["P1DT2H"]);
+        assert_hit(&b).await;
+    })
+    .await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn inherited_non_iso_datestyle_proxies() {
+    const QUERY: &str = "SELECT duration FROM events WHERE id = 2";
+    let (_a, _upstream, opts, _handle, shutdown_tx) = setup(QUERY, "").await;
+
+    let database = opts.get_dbname().unwrap();
+    with_database_default(database, "datestyle", "'SQL, DMY'", async {
+        let b = psql_helpers::connect(opts.clone()).await;
+        assert_eq!(simple_texts(&b, QUERY).await, vec!["1 day 02:00:00"]);
+        assert_eq!(
+            last_query_info(&b).await.destination,
+            QueryDestination::Upstream
+        );
+    })
+    .await;
 
     shutdown_tx.shutdown().await;
 }

@@ -94,12 +94,12 @@ where
             set_timezone,
         } = Handler::handle_set_statement(set);
 
-        // A variable set to its default takes the global value on the session's upstream server.
+        // A variable set to its default takes the upstream's default value for the session.
         let mut defaults = None;
         for (name, value) in &mut set_session_vars {
             if value.is_none() {
                 *value = defaults
-                    .get_or_insert_with(|| Self::session_defaults(state))
+                    .get_or_insert_with(|| Self::session_defaults(connectors, state))
                     .get(name)
                     .cloned();
             }

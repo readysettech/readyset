@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::mem::{size_of, size_of_val};
 use std::ops::Range;
@@ -45,6 +46,11 @@ use crate::resultset::{Resultset, copy_simple_query_message};
 /// during connection phase if the version for the upstream server is too low.
 const MIN_UPSTREAM_MAJOR_VERSION: u16 = 13;
 const MIN_UPSTREAM_MINOR_VERSION: u16 = 0;
+
+/// Session variables whose starting values the upstream reports when a connection opens, and
+/// that change cached results.
+const REPORTED_SESSION_VARIABLES: [&str; 3] =
+    ["DateStyle", "IntervalStyle", "standard_conforming_strings"];
 
 /// Whether an ACL probe error is the engine withholding the statement from this
 /// identity. INSUFFICIENT_PRIVILEGE covers both the statement's permission check
@@ -111,6 +117,9 @@ pub struct PostgreSqlUpstream {
 
     /// ReadySet-wrapped Postgresql version string, to return to clients
     version: String,
+    /// The starting values of session variables that the upstream reported when the connection
+    /// opened, by lowercased name.
+    reported_session_variables: BTreeMap<String, String>,
 }
 
 pub enum QueryResult {
@@ -454,6 +463,13 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             }));
         }
         let version = format!("{version} Readyset");
+        let reported_session_variables = REPORTED_SESSION_VARIABLES
+            .iter()
+            .filter_map(|&name| {
+                let value = connection.parameter(name)?;
+                Some((name.to_ascii_lowercase(), value.to_string()))
+            })
+            .collect();
         let _connection_handle = tokio::spawn(connection);
         span.in_scope(|| debug!("Established connection to upstream"));
         gauge!(metric::CLIENT_UPSTREAM_CONNECTIONS).increment(1.0);
@@ -465,6 +481,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             statement_id_counter: 0,
             user,
             version,
+            reported_session_variables,
         })
     }
 
@@ -502,6 +519,10 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     // that they're going via ReadySet
     fn version(&self) -> String {
         self.version.clone()
+    }
+
+    fn reported_session_variables(&self) -> BTreeMap<String, String> {
+        self.reported_session_variables.clone()
     }
 
     async fn can_prepare<S>(&mut self, query: S) -> anyhow::Result<()>

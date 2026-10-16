@@ -390,6 +390,12 @@ pub trait UpstreamDatabase: Sized + Send {
         Ok(BTreeMap::new())
     }
 
+    /// Return the starting values of session variables that the upstream reported when this
+    /// connection opened. The default implementation returns none, for upstreams that report none.
+    fn reported_session_variables(&self) -> BTreeMap<String, String> {
+        BTreeMap::new()
+    }
+
     /// Convert the supplied metadata into temporary metadata during a shallow cache insertion.
     async fn shallow_exec_meta(
         &mut self,

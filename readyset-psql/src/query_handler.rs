@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use lazy_static::lazy_static;
 use readyset_adapter::backend::noria_connector;
@@ -513,6 +513,27 @@ impl QueryHandler for PostgreSqlQueryHandler {
             _ => behavior.unsupported(true),
         }
     }
+
+    fn session_defaults(raw: &BTreeMap<String, String>) -> BTreeMap<String, Literal> {
+        raw.iter()
+            .map(|(name, value)| (name.clone(), Literal::from(value.as_str())))
+            .collect()
+    }
+
+    fn unsupported_session_vars(vars: &BTreeMap<String, Literal>) -> bool {
+        let value = |name: &str| match vars.get(name) {
+            Some(Literal::String(value)) => Some(value.as_str()),
+            _ => None,
+        };
+        // A SET of either variable to any other value is also unsupported. The DateStyle input
+        // order after the comma stays in the cache key.
+        let iso_dates = |style: &str| {
+            let output = style.split(',').next().unwrap_or_default();
+            output.trim().eq_ignore_ascii_case("iso")
+        };
+        value("datestyle").is_some_and(|style| !iso_dates(style))
+            || value("standard_conforming_strings").is_some_and(|v| !v.eq_ignore_ascii_case("on"))
+    }
 }
 
 #[cfg(test)]
@@ -539,6 +560,44 @@ mod tests {
     #[test]
     fn standard_conforming_strings_on_allowed() {
         is_proxy("SET standard_conforming_strings = on");
+    }
+
+    fn reported(vars: &[(&str, &str)]) -> BTreeMap<String, Literal> {
+        let raw = vars
+            .iter()
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect();
+        PostgreSqlQueryHandler::session_defaults(&raw)
+    }
+
+    #[test]
+    fn reported_defaults_match_set_values() {
+        assert_eq!(
+            reported(&[("intervalstyle", "iso_8601")]),
+            BTreeMap::from([("intervalstyle".to_string(), Literal::from("iso_8601"))])
+        );
+    }
+
+    #[test]
+    fn reported_iso_datestyle_is_supported() {
+        let vars = reported(&[
+            ("datestyle", "ISO, DMY"),
+            ("intervalstyle", "postgres"),
+            ("standard_conforming_strings", "on"),
+        ]);
+        assert!(!PostgreSqlQueryHandler::unsupported_session_vars(&vars));
+    }
+
+    #[test]
+    fn reported_non_iso_datestyle_is_unsupported() {
+        let vars = reported(&[("datestyle", "SQL, DMY")]);
+        assert!(PostgreSqlQueryHandler::unsupported_session_vars(&vars));
+    }
+
+    #[test]
+    fn reported_standard_conforming_strings_off_is_unsupported() {
+        let vars = reported(&[("standard_conforming_strings", "off")]);
+        assert!(PostgreSqlQueryHandler::unsupported_session_vars(&vars));
     }
 
     #[test]

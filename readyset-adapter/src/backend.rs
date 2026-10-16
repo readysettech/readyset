@@ -2069,20 +2069,31 @@ where
         }
     }
 
-    /// Return the global values of session variables on this session's upstream server.
-    fn session_defaults(state: &BackendState<DB>) -> BTreeMap<String, Literal> {
-        state
-            .picked_server
+    /// Return the values this session's upstream session started with, as reported by the upstream
+    /// connection or read from the upstream server's global values.
+    fn session_defaults(
+        connectors: &BackendConnectors<DB>,
+        state: &BackendState<DB>,
+    ) -> BTreeMap<String, Literal> {
+        let mut raw = connectors
+            .upstream
             .as_ref()
-            .map_or_else(BTreeMap::new, |picked| {
-                Handler::session_defaults(&picked.session_defaults())
-            })
+            .map(DB::reported_session_variables)
+            .unwrap_or_default();
+        if let Some(picked) = &state.picked_server {
+            raw.extend(
+                picked
+                    .session_defaults()
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone())),
+            );
+        }
+        Handler::session_defaults(&raw)
     }
 
-    /// Give this session's variables the global values on its upstream server, which the upstream
-    /// session starts with.
+    /// Give this session's variables the values its upstream session starts with.
     fn seed_session_vars(&mut self) {
-        let defaults = Self::session_defaults(&self.state);
+        let defaults = Self::session_defaults(&self.connectors, &self.state);
         if Handler::unsupported_session_vars(&defaults)
             && self.settings.unsupported_set_mode != UnsupportedSetMode::Allow
         {
