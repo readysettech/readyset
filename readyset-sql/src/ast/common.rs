@@ -204,7 +204,8 @@ impl From<Column> for IndexKeyPart {
 impl DialectDisplay for IndexKeyPart {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| match self {
-            IndexKeyPart::Column(col) => write!(f, "{}", col.display(dialect)),
+            // Only the bare column name is valid in a key definition.
+            IndexKeyPart::Column(col) => write!(f, "{}", dialect.quote_identifier(&col.name)),
             IndexKeyPart::Expr(expr) => write!(f, "({})", expr.display(dialect)),
         })
     }
@@ -711,20 +712,22 @@ impl DialectDisplay for TableKey {
                     on_update,
                     ..
                 } => {
-                    let index_name = fmt_with(|f| {
-                        if let Some(index_name) = index_name {
-                            write!(f, "{}", dialect.quote_identifier(index_name))?;
-                        }
-                        Ok(())
-                    });
-
+                    write!(f, "FOREIGN KEY ")?;
+                    if let Some(index_name) = index_name {
+                        write!(f, "{} ", dialect.quote_identifier(index_name))?;
+                    }
                     write!(
                         f,
-                        "FOREIGN KEY {} ({}) REFERENCES {} ({})",
-                        index_name,
-                        columns.iter().map(|c| c.display(dialect)).join(", "),
+                        "({}) REFERENCES {} ({})",
+                        columns
+                            .iter()
+                            .map(|c| dialect.quote_identifier(&c.name))
+                            .join(", "),
                         target_table.display(dialect),
-                        target_columns.iter().map(|c| c.display(dialect)).join(", ")
+                        target_columns
+                            .iter()
+                            .map(|c| dialect.quote_identifier(&c.name))
+                            .join(", ")
                     )?;
                     if let Some(on_delete) = on_delete {
                         write!(f, " ON DELETE {on_delete}")?;
@@ -735,13 +738,7 @@ impl DialectDisplay for TableKey {
                     Ok(())
                 }
                 TableKey::CheckConstraint { expr, enforced, .. } => {
-                    // NOTE: MySQL does not allow an optional 'CONSTRAINT' here and expects only
-                    // "ADD CHECK" https://dev.mysql.com/doc/refman/5.7/en/alter-table.html
-
-                    // Postgres is fine with it, but since this is our own display, leave it out.
-                    // https://www.postgresql.org/docs/current/sql-altertable.html
-                    write!(f, " CHECK {}", expr.display(dialect))?;
-
+                    write!(f, "CHECK {}", expr.display(dialect))?;
                     if let Some(enforced) = enforced {
                         if !enforced {
                             write!(f, " NOT")?;
@@ -1096,5 +1093,112 @@ mod tests {
         };
         // ForeignKey doesn't support functional expressions, should return false
         assert!(!fk.has_functional_expressions());
+    }
+
+    #[test]
+    fn key_columns_display_unqualified() {
+        let rel = |name: &str| Relation {
+            schema: Some("db".into()),
+            name: name.into(),
+        };
+        let col = |name: &str| Column {
+            name: name.into(),
+            table: Some(rel("foo")),
+        };
+        let cols = |names: &[&str]| -> Vec<IndexKeyPart> {
+            names
+                .iter()
+                .map(|&name| IndexKeyPart::Column(col(name)))
+                .collect()
+        };
+        let foreign_key = |index_name: Option<&str>| TableKey::ForeignKey {
+            constraint_name: None,
+            index_name: index_name.map(Into::into),
+            columns: vec![col("a")],
+            target_table: rel("bar"),
+            target_columns: vec![col("a")],
+            on_delete: None,
+            on_update: None,
+        };
+        let cases = [
+            (
+                TableKey::PrimaryKey {
+                    constraint_name: None,
+                    constraint_timing: None,
+                    index_name: None,
+                    columns: cols(&["a", "b"]),
+                },
+                "PRIMARY KEY (`a`, `b`)",
+                r#"PRIMARY KEY ("a", "b")"#,
+            ),
+            (
+                TableKey::UniqueKey {
+                    constraint_name: None,
+                    constraint_timing: None,
+                    index_name: None,
+                    columns: cols(&["a", "b"]),
+                    index_type: None,
+                    nulls_distinct: None,
+                },
+                "UNIQUE KEY (`a`, `b`)",
+                r#"UNIQUE ("a", "b")"#,
+            ),
+            (
+                TableKey::Key {
+                    index_name: None,
+                    columns: cols(&["a", "b"]),
+                    index_type: None,
+                },
+                "KEY (`a`, `b`)",
+                r#"KEY ("a", "b")"#,
+            ),
+            (
+                TableKey::FulltextKey {
+                    index_name: None,
+                    columns: cols(&["a", "b"]),
+                },
+                "FULLTEXT KEY (`a`, `b`)",
+                r#"FULLTEXT KEY ("a", "b")"#,
+            ),
+            (
+                foreign_key(None),
+                "FOREIGN KEY (`a`) REFERENCES `db`.`bar` (`a`)",
+                r#"FOREIGN KEY ("a") REFERENCES "db"."bar" ("a")"#,
+            ),
+            (
+                foreign_key(Some("fk_a")),
+                "FOREIGN KEY `fk_a` (`a`) REFERENCES `db`.`bar` (`a`)",
+                r#"FOREIGN KEY "fk_a" ("a") REFERENCES "db"."bar" ("a")"#,
+            ),
+        ];
+        for (key, mysql, psql) in cases {
+            assert_eq!(key.display(Dialect::MySQL).to_string(), mysql);
+            assert_eq!(key.display(Dialect::PostgreSQL).to_string(), psql);
+        }
+    }
+
+    #[test]
+    fn check_constraint_display() {
+        let check =
+            |constraint_name: Option<&str>, enforced: Option<bool>| TableKey::CheckConstraint {
+                constraint_name: constraint_name.map(Into::into),
+                expr: Expr::BinaryOp {
+                    lhs: Box::new(Expr::Column("a".into())),
+                    op: BinaryOperator::Greater,
+                    rhs: Box::new(Expr::Literal(Literal::Integer(0))),
+                },
+                enforced,
+            };
+        let cases = [
+            (check(None, None), "CHECK (`a` > 0)"),
+            (check(Some("ck"), None), "CONSTRAINT `ck` CHECK (`a` > 0)"),
+            (
+                check(Some("ck"), Some(false)),
+                "CONSTRAINT `ck` CHECK (`a` > 0) NOT ENFORCED",
+            ),
+        ];
+        for (key, expected) in cases {
+            assert_eq!(key.display(Dialect::MySQL).to_string(), expected);
+        }
     }
 }

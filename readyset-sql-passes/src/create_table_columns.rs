@@ -53,8 +53,36 @@ mod tests {
             "CREATE TABLE x.t (a int, b int, unique (a))",
         )
         .unwrap();
-        let expected = "CREATE TABLE `x`.`t` (`a` INT, `b` INT, UNIQUE KEY (`x`.`t`.`a`))";
+        let expected = "CREATE TABLE `x`.`t` (`a` INT, `b` INT, UNIQUE KEY (`a`))";
         orig.normalize_create_table_columns();
         assert_eq!(format!("{}", orig.display(Dialect::MySQL)), expected);
+        assert_eq!(
+            orig.body.as_ref().unwrap().keys.as_ref().unwrap()[0].get_columns()[0].table,
+            Some(Relation {
+                schema: Some("x".into()),
+                name: "t".into()
+            })
+        );
+    }
+
+    #[test]
+    fn normalized_keys_reparse() {
+        for (dialect, sql) in [
+            (
+                Dialect::MySQL,
+                "CREATE TABLE x.t (a INT, b INT, PRIMARY KEY (a), UNIQUE KEY (b), KEY (a, b), \
+                 FULLTEXT KEY (b), FOREIGN KEY (b) REFERENCES x.u (a))",
+            ),
+            (
+                Dialect::PostgreSQL,
+                "CREATE TABLE x.t (a INT, b INT, PRIMARY KEY (a), UNIQUE (b), \
+                 FOREIGN KEY (b) REFERENCES x.u (a))",
+            ),
+        ] {
+            let mut stmt = parse_create_table(dialect, sql).unwrap();
+            stmt.normalize_create_table_columns();
+            let displayed = stmt.display(dialect).to_string();
+            parse_create_table(dialect, &displayed).expect(&displayed);
+        }
     }
 }
