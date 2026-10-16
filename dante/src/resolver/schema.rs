@@ -440,8 +440,15 @@ fn resolve_join_using_shared_column(
         .table_mut(&rhs_table_name)
         .ok_or(ResolveError::Unbound(rhs_table))?;
 
-    // If rhs_table already has a column with this name, nothing to do.
-    if rhs_schema.columns.contains_key(&col_name) {
+    // If rhs_table already has a column with this name, USING compares the two, so their types
+    // must be comparable.
+    if let Some(existing) = rhs_schema.columns.get(&col_name) {
+        if !types_compatible(&col_type, &existing.sql_type) {
+            return Err(ResolveError::TypeMismatch {
+                expected: format!("{col_type:?}"),
+                actual: format!("{:?}", existing.sql_type),
+            });
+        }
         return Ok(());
     }
 
@@ -1152,6 +1159,50 @@ mod tests {
         // Column should be bound
         let binding = env.get(c).expect("should be bound");
         assert!(matches!(binding, Binding::Column { .. }));
+    }
+
+    #[test]
+    fn join_using_requires_comparable_rhs_column_type() {
+        let (mut state, _) = test_env(Dialect::PostgreSQL);
+        let mut rhs = TableSchema::new(SqlIdentifier::from("t1"));
+        rhs.add_column(
+            SqlIdentifier::from("c4"),
+            ColumnMeta {
+                sql_type: SqlType::Date,
+                gen_spec: ColumnGenerationSpec::Unique,
+            },
+        );
+        state.add_table(rhs);
+
+        let (col, rhs_table, lhs_table) = (VarId(0), VarId(1), VarId(2));
+        let mut env = Env::new(3);
+        env.bind(
+            rhs_table,
+            Binding::Table {
+                name: SqlIdentifier::from("t1"),
+                alias: None,
+            },
+        );
+        let bind_col = |env: &mut Env, sql_type| {
+            env.bind(
+                col,
+                Binding::Column {
+                    name: SqlIdentifier::from("c4"),
+                    sql_type,
+                    table_var: lhs_table,
+                },
+            )
+        };
+
+        bind_col(&mut env, SqlType::Int(None));
+        assert!(matches!(
+            resolve_join_using_shared_column(&mut env, col, rhs_table, &mut state),
+            Err(ResolveError::TypeMismatch { .. })
+        ));
+
+        bind_col(&mut env, SqlType::Date);
+        resolve_join_using_shared_column(&mut env, col, rhs_table, &mut state)
+            .expect("same-typed USING column should resolve");
     }
 
     #[test]

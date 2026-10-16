@@ -213,4 +213,36 @@ mod tests {
         assert!(sql.contains("ORDER BY"), "sql: {sql}");
         assert!(sql.contains("LIMIT"), "sql: {sql}");
     }
+
+    #[test]
+    fn distinct_order_by_breaks_ties_on_the_projection() {
+        // The primary key is not projected, so DISTINCT forbids it in ORDER BY.
+        let mut b = PatternBuilder::new("distinct_ordered");
+        let t = b.table();
+        let c_proj = b.column(t);
+        let c_other = b.column(t);
+        let c_key = b.column(t);
+        b.column_unique_not_null(c_key);
+        b.from(t);
+        b.project_column(c_proj, t);
+        b.project_column(c_other, t);
+        b.order_by(c_proj, t, OrderType::OrderAscending, None);
+        b.distinct();
+        let p = b.build();
+
+        for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
+            let sql = resolve_pattern(&p, dialect);
+            let projection = sql
+                .strip_prefix("SELECT DISTINCT ")
+                .and_then(|rest| rest.split(" FROM ").next())
+                .expect("SELECT DISTINCT list");
+            let order = sql.split(" ORDER BY ").nth(1).expect("ORDER BY clause");
+            let ordered: Vec<&str> = order
+                .split(", ")
+                .map(|item| item.split(" ASC").next().unwrap_or(item))
+                .collect();
+            let projected: Vec<&str> = projection.split(", ").collect();
+            assert_eq!(ordered, projected, "{dialect:?}: {sql}");
+        }
+    }
 }

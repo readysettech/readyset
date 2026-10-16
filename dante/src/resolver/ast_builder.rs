@@ -1092,7 +1092,14 @@ fn build_select_inner(
         let already = order_bys
             .iter()
             .any(|ob| matches!(&ob.field, FieldReference::Expr(e) if *e == pk_expr));
-        if !already {
+        let projected = fields
+            .iter()
+            .any(|f| matches!(f, FieldDefinitionExpr::Expr { expr, .. } if *expr == pk_expr));
+        if !already && distinct && !projected {
+            // Under DISTINCT, ORDER BY may only reference projected expressions. The output rows
+            // are unique over the projection, so ordering by every projected expression is total.
+            push_projection_tiebreakers(&fields, &mut order_bys)?;
+        } else if !already {
             order_bys.push(OrderBy {
                 field: FieldReference::Expr(pk_expr),
                 order_type: Some(OrderType::OrderAscending),
@@ -1108,6 +1115,8 @@ fn build_select_inner(
             order_by: order_bys,
         })
     };
+
+    check_using_columns(&tables, &joins, &ctes, state)?;
 
     // MySQL parses `FROM A, B JOIN C ON ...` as `FROM A, (B JOIN C ON ...)` —
     // A is *not* in scope for the JOIN's ON clause. Convert any extra FROMs
@@ -1387,6 +1396,124 @@ fn first_projected_column(stmt: &SelectStatement) -> Option<SqlIdentifier> {
         } => Some(col.name.clone()),
         _ => None,
     }
+}
+
+/// Append each projected expression not already in `order_bys` as an ascending tiebreaker.
+/// Literals are constant, so they are skipped. A window function or subquery fails resolution
+/// instead of landing in ORDER BY.
+fn push_projection_tiebreakers(
+    fields: &[FieldDefinitionExpr],
+    order_bys: &mut Vec<OrderBy>,
+) -> Result<(), ResolveError> {
+    for field in fields {
+        let expr = match field {
+            FieldDefinitionExpr::Expr { expr, .. } => expr,
+            FieldDefinitionExpr::All | FieldDefinitionExpr::AllInTable(_) => {
+                return Err(ResolveError::Unsupported {
+                    variant: "wildcard projection",
+                    location: "DISTINCT ORDER BY tiebreaker",
+                });
+            }
+        };
+        match expr {
+            Expr::Literal(_) => continue,
+            Expr::WindowFunction { .. } | Expr::NestedSelect(_) | Expr::Exists(_) => {
+                return Err(ResolveError::Unsupported {
+                    variant: "window function or subquery projection",
+                    location: "DISTINCT ORDER BY tiebreaker",
+                });
+            }
+            _ => {}
+        }
+        if !order_bys
+            .iter()
+            .any(|ob| matches!(&ob.field, FieldReference::Expr(e) if e == expr))
+        {
+            order_bys.push(OrderBy {
+                field: FieldReference::Expr(expr.clone()),
+                order_type: Some(OrderType::OrderAscending),
+                null_order: NullOrder::NullsLast,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Reject a `JOIN ... USING (col)` unless `col` appears exactly once among the relations to the
+/// left of that join. Both upstreams refuse an ambiguous USING column. `tables` holds the FROM
+/// list, which is emitted ahead of every join.
+fn check_using_columns(
+    tables: &[TableExpr],
+    joins: &[JoinClause],
+    ctes: &[CommonTableExpr],
+    state: &GenerationState,
+) -> Result<(), ResolveError> {
+    for (idx, join) in joins.iter().enumerate() {
+        let JoinConstraint::Using(using_cols) = &join.constraint else {
+            continue;
+        };
+        let left: Vec<&TableExpr> = tables
+            .iter()
+            .chain(joins[..idx].iter().flat_map(|j| j.right.table_exprs()))
+            .collect();
+        for using_col in using_cols {
+            let mut occurrences = 0;
+            for table in &left {
+                let names =
+                    relation_column_names(table, ctes, state).ok_or(ResolveError::Unsupported {
+                        variant: "relation with unknown column names",
+                        location: "left side of a USING join",
+                    })?;
+                occurrences += names.iter().filter(|n| **n == using_col.name).count();
+            }
+            if occurrences != 1 {
+                return Err(ResolveError::UsingColumnNotUnique {
+                    column: using_col.name.clone(),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Return the column names `table` exposes to the enclosing SELECT, or `None` if they are unknown.
+fn relation_column_names(
+    table: &TableExpr,
+    ctes: &[CommonTableExpr],
+    state: &GenerationState,
+) -> Option<Vec<SqlIdentifier>> {
+    if !table.column_aliases.is_empty() {
+        return Some(table.column_aliases.clone());
+    }
+    match &table.inner {
+        TableExprInner::Table(rel) => match ctes.iter().find(|cte| cte.name == rel.name) {
+            Some(cte) => field_names(&cte.statement.fields),
+            None => state
+                .table(&rel.name)
+                .map(|schema| schema.columns.keys().cloned().collect()),
+        },
+        TableExprInner::Subquery(stmt) => field_names(&stmt.fields),
+        TableExprInner::Values { .. } => None,
+    }
+}
+
+/// Return the output column names of `fields`, or `None` if any is unknown. The database names an
+/// unaliased expression other than a column itself, and Postgres can reuse a column name for it
+/// (e.g. for a CAST), so such a name is unknown, as is a wildcard.
+fn field_names(fields: &[FieldDefinitionExpr]) -> Option<Vec<SqlIdentifier>> {
+    fields
+        .iter()
+        .map(|field| match field {
+            FieldDefinitionExpr::Expr { alias: Some(a), .. } => Some(a.clone()),
+            FieldDefinitionExpr::Expr {
+                expr: Expr::Column(c),
+                ..
+            } => Some(c.name.clone()),
+            FieldDefinitionExpr::Expr { .. }
+            | FieldDefinitionExpr::All
+            | FieldDefinitionExpr::AllInTable(_) => None,
+        })
+        .collect()
 }
 
 /// Make a column expression: table.col

@@ -219,6 +219,8 @@ pub enum ResolveError {
     InnerVarKindsTruncated { referenced: usize, declared: usize },
     #[error("internal error: synthesized table {table} has no columns")]
     EmptyTableSchema { table: SqlIdentifier },
+    #[error("USING column {column} does not appear exactly once to the left of its join")]
+    UsingColumnNotUnique { column: SqlIdentifier },
 }
 
 /// One resolved example, ready for the oracle to materialize.

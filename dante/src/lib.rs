@@ -31,10 +31,17 @@ pub(crate) mod test_util {
 
     use crate::entropy::Entropy;
     use crate::pattern::Pattern;
-    use crate::resolver::resolve;
+    use crate::resolver::{ResolveError, resolve};
     use crate::state::{GenerationState, GeneratorConfig};
 
     pub fn resolve_pattern(pattern: &Pattern, dialect: Dialect) -> String {
+        try_resolve_pattern(pattern, dialect).expect("should resolve")
+    }
+
+    pub fn try_resolve_pattern(
+        pattern: &Pattern,
+        dialect: Dialect,
+    ) -> Result<String, ResolveError> {
         let config = GeneratorConfig {
             reuse_preference: 0.0,
             ..Default::default()
@@ -47,8 +54,7 @@ pub(crate) mod test_util {
             &pattern.vars,
             &mut state,
             &mut entropy,
-        )
-        .expect("should resolve");
-        output.query.display(dialect).to_string()
+        )?;
+        Ok(output.query.display(dialect).to_string())
     }
 }

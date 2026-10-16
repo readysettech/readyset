@@ -3,7 +3,9 @@
 //! The compatibility system prevents conflicting patterns from being
 //! combined in the same query.
 
-use crate::constraint::{Constraint, DialectSupport};
+use std::collections::HashSet;
+
+use crate::constraint::{Constraint, DialectSupport, ScalarFn};
 use crate::var::VarId;
 
 /// A rule that declares when constraint sets are incompatible.
@@ -298,6 +300,62 @@ pub fn default_rules() -> Vec<CompatibilityRule> {
             reason: "aggregate with non-grouped projected column",
         },
         CompatibilityRule {
+            name: "aggregate_with_ungrouped_order_by",
+            condition: CompatCondition::Custom(|constraints| {
+                // The resolver orders an ungrouped aggregate by its aggregate expression, but
+                // under GROUP BY it orders by the bare column, which must then be a grouping key.
+                let grouped: HashSet<VarId> = constraints
+                    .iter()
+                    .filter_map(|c| match c {
+                        Constraint::GroupBy { col, .. } => Some(*col),
+                        _ => None,
+                    })
+                    .collect();
+                let aggregated: HashSet<VarId> = constraints
+                    .iter()
+                    .filter_map(|c| match c {
+                        Constraint::ProjectAggregate { col, .. }
+                        | Constraint::ProjectArrayToStringAgg { col, .. } => Some(*col),
+                        _ => None,
+                    })
+                    .collect();
+                if grouped.is_empty() && aggregated.is_empty() {
+                    return false;
+                }
+                let orderable = if grouped.is_empty() {
+                    &aggregated
+                } else {
+                    &grouped
+                };
+                constraints.iter().any(|c| match c {
+                    Constraint::OrderBy { col, .. } => !orderable.contains(col),
+                    _ => false,
+                })
+            }),
+            reason: "grouped or aggregated query ordered by a column that is neither grouped nor \
+                     aggregated",
+        },
+        CompatibilityRule {
+            name: "distinct_with_pg_json_projection",
+            condition: CompatCondition::Custom(|constraints| {
+                // DISTINCT compares rows, and Postgres has no equality operator for `json`
+                // (unlike `jsonb`).
+                has_constraint(constraints, |c| matches!(c, Constraint::Distinct))
+                    && has_constraint(constraints, |c| {
+                        matches!(
+                            c,
+                            Constraint::ProjectFunction {
+                                function: ScalarFn::JsonBuildObject
+                                    | ScalarFn::JsonBuildArray
+                                    | ScalarFn::JsonStripNulls,
+                                ..
+                            }
+                        )
+                    })
+            }),
+            reason: "DISTINCT over a Postgres json projection, which has no equality operator",
+        },
+        CompatibilityRule {
             name: "max_cte_nesting",
             condition: CompatCondition::MaxOccurrences("cte", 2),
             reason: "limit CTE nesting depth to 2",
@@ -497,8 +555,10 @@ pub fn check_rules(
 
 #[cfg(test)]
 mod tests {
+    use readyset_sql::ast::OrderType;
+
     use super::*;
-    use crate::constraint::{SubqueryExprKind, WindowFn};
+    use crate::constraint::{AggregateFn, SubqueryExprKind, WindowFn};
 
     #[test]
     fn tag_conflict_rejects_conflicting_tags() {
@@ -992,6 +1052,64 @@ mod tests {
             result.is_none(),
             "DISTINCT + ORDER BY with projected column should be allowed"
         );
+    }
+
+    fn rule(name: &str) -> CompatibilityRule {
+        default_rules()
+            .into_iter()
+            .find(|r| r.name == name)
+            .expect("rule exists")
+    }
+
+    fn order_by(col: VarId) -> Constraint {
+        Constraint::OrderBy {
+            col,
+            table: VarId(0),
+            direction: OrderType::OrderDescending,
+            null_order: None,
+        }
+    }
+
+    #[test]
+    fn aggregate_with_ungrouped_order_by() {
+        let rule = rule("aggregate_with_ungrouped_order_by");
+        let count = Constraint::ProjectAggregate {
+            function: AggregateFn::Count { distinct: false },
+            col: VarId(1),
+            table: VarId(0),
+        };
+        let group_by = Constraint::GroupBy {
+            col: VarId(2),
+            table: VarId(0),
+        };
+
+        // A bare aggregate ordered by its own column resolves to ORDER BY count(c1).
+        assert!(!rule.is_violated(&[count.clone(), order_by(VarId(1))], &[]));
+        // A composed GROUP BY turns that into ORDER BY c1, which is not grouped.
+        assert!(rule.is_violated(&[count.clone(), group_by.clone(), order_by(VarId(1))], &[]));
+        assert!(!rule.is_violated(&[count.clone(), group_by.clone(), order_by(VarId(2))], &[]));
+        assert!(rule.is_violated(&[group_by, order_by(VarId(3))], &[]));
+        assert!(rule.is_violated(&[count, order_by(VarId(3))], &[]));
+        assert!(!rule.is_violated(&[order_by(VarId(3))], &[]));
+    }
+
+    #[test]
+    fn distinct_with_pg_json_projection() {
+        let rule = rule("distinct_with_pg_json_projection");
+        let project = |function| Constraint::ProjectFunction {
+            function,
+            args: vec![(VarId(1), VarId(0))],
+        };
+
+        assert!(rule.is_violated(
+            &[Constraint::Distinct, project(ScalarFn::JsonStripNulls)],
+            &[]
+        ));
+        assert!(!rule.is_violated(
+            &[Constraint::Distinct, project(ScalarFn::JsonbBuildObject)],
+            &[]
+        ));
+        assert!(!rule.is_violated(&[project(ScalarFn::JsonBuildObject)], &[]));
     }
 
     #[test]

@@ -362,7 +362,8 @@ mod tests {
 
     use super::*;
     use crate::constraint::Constraint;
-    use crate::test_util::resolve_pattern;
+    use crate::resolver::ResolveError;
+    use crate::test_util::{resolve_pattern, try_resolve_pattern};
 
     #[test]
     fn inner_join_builds() {
@@ -658,6 +659,32 @@ mod tests {
         let sql = resolve_pattern(&p, Dialect::PostgreSQL);
         assert!(sql.contains("USING ("), "expected USING ( in sql: {sql}");
         assert!(sql.contains("JOIN"), "expected JOIN keyword in sql: {sql}");
+    }
+
+    #[test]
+    fn inner_join_using_rejects_column_ambiguous_on_left() {
+        // Self-joining t0 first puts the USING column's name on both left relations.
+        let mut b = PatternBuilder::new("ambiguous_using");
+        let t0 = b.table();
+        let a = b.alias_of(t0);
+        let t1 = b.table();
+        b.not_eq(t0, t1);
+        let c_left = b.column(t0);
+        let c_right = b.column(a);
+        let c_shared = b.column(t0);
+        b.from(t0);
+        b.join_table(JoinOperator::InnerJoin, a, c_left, c_right);
+        b.join_table_using(JoinOperator::InnerJoin, t1, c_shared);
+        b.project_column(c_left, t0);
+        let p = b.build();
+
+        for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
+            let result = try_resolve_pattern(&p, dialect);
+            assert!(
+                matches!(result, Err(ResolveError::UsingColumnNotUnique { .. })),
+                "{dialect:?}: {result:?}"
+            );
+        }
     }
 
     #[test]
