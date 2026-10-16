@@ -16,7 +16,7 @@ use crossbeam_skiplist::SkipSet;
 use database_utils::tls::ServerCertVerification;
 use database_utils::{
     DatabaseConnection, QueryableConnection, ReplicationServerId, SharedUpstreamRegistry,
-    UpstreamServers,
+    UpstreamHealthMonitor, UpstreamServers,
 };
 use mysql_srv::{AuthCache, AuthPlugin};
 use readyset_adapter::backend::noria_connector::NoriaConnector;
@@ -279,6 +279,7 @@ pub struct TestBuilder {
     rls_poll_interval: Option<Duration>,
     shallow_adaptive_max_extra_load_percent: Option<u64>,
     cache_acl_refresh_interval: Option<Duration>,
+    upstream_health_interval: Option<Duration>,
     cdc_db_url: bool,
     load_stored_upstream_servers: bool,
     external_addr: Option<SocketAddr>,
@@ -322,6 +323,7 @@ impl TestBuilder {
             rls_poll_interval: None,
             shallow_adaptive_max_extra_load_percent: None,
             cache_acl_refresh_interval: None,
+            upstream_health_interval: None,
             cdc_db_url: true,
             load_stored_upstream_servers: false,
             external_addr: None,
@@ -339,6 +341,12 @@ impl TestBuilder {
     /// in place.
     pub fn load_stored_upstream_servers(mut self, load: bool) -> Self {
         self.load_stored_upstream_servers = load;
+        self
+    }
+
+    /// Run the upstream health monitor at `interval`, as the adapter binary does. Off by default.
+    pub fn upstream_health_interval(mut self, interval: Duration) -> Self {
+        self.upstream_health_interval = Some(interval);
         self
     }
 
@@ -948,6 +956,19 @@ impl TestBuilder {
                 .map(UpstreamServers::into_vec)
                 .unwrap_or_default();
             shared_upstream_registry.replace(upstream);
+        }
+
+        if let Some(interval) = self.upstream_health_interval {
+            tokio::spawn(
+                UpstreamHealthMonitor::new(
+                    Arc::clone(&shared_upstream_config),
+                    Arc::clone(&shared_upstream_registry),
+                    interval,
+                    shutdown_tx.subscribe(),
+                    A::Handler::session_defaults_query(),
+                )
+                .run(),
+            );
         }
 
         tokio::spawn(async move {

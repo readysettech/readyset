@@ -8,7 +8,7 @@
 //! interval, so a server that dies while idle is marked down before a session picks it. Servers
 //! marked down are probed again once their backoff has elapsed.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -371,6 +371,9 @@ pub struct UpstreamHealthMonitor {
     registry: Arc<SharedUpstreamRegistry>,
     interval: Duration,
     shutdown: ShutdownReceiver,
+    /// A query returning the names and global values of session variables, run in place of a
+    /// ping.
+    session_defaults_query: Option<String>,
     /// Long-lived connections to servers believed up, keyed by `host:port`.
     connections: HashMap<String, HeldConnection>,
 }
@@ -390,12 +393,14 @@ impl UpstreamHealthMonitor {
         registry: Arc<SharedUpstreamRegistry>,
         interval: Duration,
         shutdown: ShutdownReceiver,
+        session_defaults_query: Option<String>,
     ) -> Self {
         Self {
             config,
             registry,
             interval,
             shutdown,
+            session_defaults_query,
             connections: HashMap::new(),
         }
     }
@@ -457,7 +462,15 @@ impl UpstreamHealthMonitor {
             })
             .filter_map(|idx| {
                 let held = self.connections.remove(registry.get(idx)?.display());
-                Some(ping_or_connect(&registry, idx, held, verification, timeout))
+                let query = self.session_defaults_query.as_deref();
+                Some(ping_or_connect(
+                    &registry,
+                    idx,
+                    held,
+                    query,
+                    verification,
+                    timeout,
+                ))
             })
             .collect();
         let mut checks = futures::stream::iter(checks).buffer_unordered(MAX_CONCURRENT_CHECKS);
@@ -470,32 +483,71 @@ impl UpstreamHealthMonitor {
     }
 }
 
-/// Ping server `idx` over its held connection, or connect to it when there is none or the ping
-/// fails. Returns the connection to keep, if any.
+/// Check server `idx` over its held connection, or connect to it when there is none or the
+/// check fails. Return the connection to keep, if any.
 async fn ping_or_connect(
     registry: &Arc<UpstreamServerRegistry>,
     idx: usize,
     held: Option<HeldConnection>,
+    session_defaults_query: Option<&str>,
     verification: &ServerCertVerification,
     timeout: Duration,
 ) -> Option<HeldConnection> {
     if let Some((mut conn, picked)) = held {
-        // Bound the ping so a server that never answers does not hold up the pass.
-        let error = match tokio::time::timeout(timeout, conn.ping()).await {
-            Ok(Ok(())) => {
+        match check_connection(registry, idx, &mut conn, session_defaults_query, timeout).await {
+            Ok(()) => {
                 registry.mark_up(idx);
                 return Some((conn, picked));
             }
-            Ok(Err(error)) => error.to_string(),
-            Err(_) => format!("no response within {timeout:?}"),
-        };
-        // The held connection may have been killed on its own, e.g. by KILL. Try reconnecting.
-        debug!(server = %picked.server().display(), %error, "Health ping failed; reconnecting");
+            // The held connection may have been killed on its own, e.g. by KILL. Try
+            // reconnecting.
+            Err(error) => {
+                let server = picked.server().display();
+                debug!(%server, %error, "Health check failed; reconnecting")
+            }
+        }
     }
-    connect_and_record(registry, idx, verification, timeout).await
+    let (mut conn, picked) = connect_and_record(registry, idx, verification, timeout).await?;
+    match check_connection(registry, idx, &mut conn, session_defaults_query, timeout).await {
+        Ok(()) => Some((conn, picked)),
+        Err(error) => {
+            let server = picked.server().display();
+            debug!(%server, %error, "Health check failed after connecting");
+            None
+        }
+    }
 }
 
-/// Connect to server `idx` and update its status. Returns the new connection when it is
+/// Run `session_defaults_query` over `conn` and record the result for server `idx`, or ping when
+/// there is no query. Fail if the server does not answer within `timeout`.
+async fn check_connection(
+    registry: &UpstreamServerRegistry,
+    idx: usize,
+    conn: &mut DatabaseConnection,
+    session_defaults_query: Option<&str>,
+    timeout: Duration,
+) -> Result<(), String> {
+    let check = async {
+        let Some(query) = session_defaults_query else {
+            return conn.ping().await;
+        };
+        let defaults = conn
+            .query(query)
+            .await?
+            .into_iter()
+            .map(|row| Ok((row.get(0)?, row.get(1)?)))
+            .collect::<Result<BTreeMap<String, String>, DatabaseError>>()?;
+        registry.state(idx).set_session_defaults(defaults);
+        Ok(())
+    };
+    // Bound the check so a server that never answers does not hold up the pass.
+    match tokio::time::timeout(timeout, check).await {
+        Ok(result) => result.map_err(|error| error.to_string()),
+        Err(_) => Err(format!("no response within {timeout:?}")),
+    }
+}
+
+/// Connect to server `idx` and update its status. Return the new connection when it is
 /// reachable.
 async fn connect_and_record(
     registry: &Arc<UpstreamServerRegistry>,

@@ -957,6 +957,11 @@ impl NoriaConnector {
         }
     }
 
+    /// Record the values of several session variables.
+    pub fn extend_session_vars(&mut self, vars: BTreeMap<String, Literal>) {
+        self.session_vars = Arc::new(vars);
+    }
+
     /// Set the encoding in which to return text results.
     pub fn set_results_encoding(&mut self, encoding: Encoding) {
         self.results_encoding = encoding;

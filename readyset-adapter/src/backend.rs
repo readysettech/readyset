@@ -69,7 +69,7 @@
 //! being too heavy handed.
 
 use std::borrow::{Borrow, Cow};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Debug};
 use std::marker::PhantomData;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -111,9 +111,9 @@ use readyset_metrics::metrics_handle;
 use readyset_schema::{ReadysetSchema, ReadysetSchemaSession};
 use readyset_shallow::{CacheInsertGuard, CacheManager, ContentHash, Warning};
 use readyset_sql::ast::{
-    self, CacheInner, CacheType, CreateCacheOptions, CreateCacheStatement, ReadysetHintDirective,
-    Relation, SelectStatement, ShallowCacheQuery, ShowLimit, SqlIdentifier, SqlQuery,
-    TrxCachePolicy, UseStatement,
+    self, CacheInner, CacheType, CreateCacheOptions, CreateCacheStatement, Literal,
+    ReadysetHintDirective, Relation, SelectStatement, ShallowCacheQuery, ShowLimit, SqlIdentifier,
+    SqlQuery, TrxCachePolicy, UseStatement,
 };
 use readyset_sql::{Dialect, DialectDisplay, TryFromDialect};
 use readyset_sql_parsing::ParsingPreset;
@@ -2010,6 +2010,7 @@ where
         if let Some(upstream) = &mut self.connectors.upstream {
             upstream.reset().await?;
             self.state.proxy_state = ProxyState::Fallback;
+            self.seed_session_vars();
             Ok(())
         } else {
             // proxy_state is already Never when no upstream exists
@@ -2066,6 +2067,29 @@ where
         if let Some(connections) = &self.state.connections {
             connections.insert(self.state.connection_info());
         }
+    }
+
+    /// Return the global values of session variables on this session's upstream server.
+    fn session_defaults(state: &BackendState<DB>) -> BTreeMap<String, Literal> {
+        state
+            .picked_server
+            .as_ref()
+            .map_or_else(BTreeMap::new, |picked| {
+                Handler::session_defaults(&picked.session_defaults())
+            })
+    }
+
+    /// Give this session's variables the global values on its upstream server, which the upstream
+    /// session starts with.
+    fn seed_session_vars(&mut self) {
+        let defaults = Self::session_defaults(&self.state);
+        if Handler::unsupported_session_vars(&defaults)
+            && self.settings.unsupported_set_mode != UnsupportedSetMode::Allow
+        {
+            debug!("Session starts with unsupported variable values; all queries will be proxied");
+            self.state.proxy_state = ProxyState::ProxyAlways;
+        }
+        self.connectors.noria.extend_session_vars(defaults);
     }
 
     /// Updates connection tracking when this session's upstream connection is picked.
@@ -2134,6 +2158,7 @@ where
             Ok((upstream, picked)) => {
                 self.connectors.upstream = Some(upstream);
                 self.update_connection_upstream(picked);
+                self.seed_session_vars();
                 if let Some(telemetry_sender) = &self.state.telemetry_sender
                     && let Err(error) =
                         telemetry_sender.send_event(TelemetryEvent::UpstreamConnected)

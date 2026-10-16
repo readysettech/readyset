@@ -2298,6 +2298,7 @@ where
                     Arc::clone(&upstream_registry),
                     Duration::from_secs(options.upstream_health_interval_secs),
                     shutdown_rx.clone(),
+                    H::Handler::session_defaults_query(),
                 )
                 .run(),
             );

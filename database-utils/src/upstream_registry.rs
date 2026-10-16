@@ -3,6 +3,7 @@
 //! Each field is its own atomic, so only replacing the list takes a lock. A reader can see a mix
 //! of two updates to one server; at worst a probe runs early or late.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, RwLock};
@@ -65,6 +66,8 @@ pub struct UpstreamServerState {
     last_ok: AtomicU64,
     /// Live connections this process holds to the server.
     connections: AtomicU64,
+    /// The global values of session variables as of the last time they were read.
+    session_defaults: RwLock<Arc<BTreeMap<String, String>>>,
 }
 
 impl UpstreamServerState {
@@ -82,6 +85,24 @@ impl UpstreamServerState {
 
     pub fn connections(&self) -> u64 {
         self.connections.load(Ordering::Relaxed)
+    }
+
+    /// The global values of session variables as of the last time they were read. Empty until
+    /// the first reading.
+    pub fn session_defaults(&self) -> Arc<BTreeMap<String, String>> {
+        Arc::clone(
+            &self
+                .session_defaults
+                .read()
+                .unwrap_or_else(|e| e.into_inner()),
+        )
+    }
+
+    pub fn set_session_defaults(&self, defaults: BTreeMap<String, String>) {
+        *self
+            .session_defaults
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = Arc::new(defaults);
     }
 }
 
@@ -305,6 +326,11 @@ impl PickedServer {
 
     pub fn server(&self) -> &UpstreamServer {
         self.guard.server()
+    }
+
+    /// The server's global values of session variables as of the last time they were read.
+    pub fn session_defaults(&self) -> Arc<BTreeMap<String, String>> {
+        self.guard.registry.state(self.guard.idx).session_defaults()
     }
 
     /// Whether the server is still in the current list with the same URL.

@@ -89,10 +89,26 @@ where
             set_results_collation,
             set_results_encoding,
             set_client_encoding,
-            set_session_vars,
+            mut set_session_vars,
             upstream_rewrite,
             set_timezone,
         } = Handler::handle_set_statement(set);
+
+        // A variable set to its default takes the global value on the session's upstream server.
+        let mut defaults = None;
+        for (name, value) in &mut set_session_vars {
+            if value.is_none() {
+                *value = defaults
+                    .get_or_insert_with(|| Self::session_defaults(state))
+                    .get(name)
+                    .cloned();
+            }
+        }
+        let set_values = set_session_vars
+            .iter()
+            .filter_map(|(name, value)| Some((name.clone(), value.clone()?)))
+            .collect();
+        let unsupported = unsupported || Handler::unsupported_session_vars(&set_values);
 
         // NOTE: The unsupported check runs before autocommit processing intentionally.
         // A compound SET like `SET autocommit=0, unknown_var=1` is rejected atomically

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use chrono::FixedOffset;
 use readyset_data::TimestampTz;
 use readyset_errors::ReadySetResult;
@@ -312,6 +314,24 @@ pub trait QueryHandler: Sized + Send {
     ///
     /// See the documentation of [`SetStatement`] for more information.
     fn handle_set_statement(stmt: &SetStatement) -> SetBehavior;
+
+    /// Return a query whose rows are the names and global values of the session variables that
+    /// affect cached results, or `None` for upstreams that have no such query.
+    fn session_defaults_query() -> Option<String> {
+        None
+    }
+
+    /// Convert the rows of [`QueryHandler::session_defaults_query`] to the values a session
+    /// starts with.
+    fn session_defaults(_raw: &BTreeMap<String, String>) -> BTreeMap<String, Literal> {
+        BTreeMap::new()
+    }
+
+    /// Return whether a session whose variables have the values in `vars` cannot be served from
+    /// caches, as if it ran an unsupported SET.
+    fn unsupported_session_vars(_vars: &BTreeMap<String, Literal>) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]

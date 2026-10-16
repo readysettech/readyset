@@ -36,9 +36,20 @@ const CACHE_KEYED_VARIABLES: [&str; 8] = [
     "windowing_use_high_precision",
 ];
 
+const SQL_AUTO_IS_NULL: &str = "sql_auto_is_null";
+
+/// Return whether `value` is the `DEFAULT` keyword.
+fn is_default(value: &Expr) -> bool {
+    matches!(value, Expr::Column(Column { name, table: None }) if name.eq_ignore_ascii_case("default"))
+}
+
 /// Return the canonical form of a cache keyed variable's value, so spellings the upstream treats
 /// alike share a cache key.
 fn cache_key_value(var: &str, value: Literal) -> Literal {
+    let value = match value {
+        Literal::UnsignedInteger(i) => i64::try_from(i).map_or(value, Literal::Integer),
+        value => value,
+    };
     match value {
         // MySQL matches locale names case-insensitively and reports them in the form `fr_FR`.
         Literal::String(locale) if var == "lc_time_names" => {
@@ -55,7 +66,7 @@ fn cache_key_value(var: &str, value: Literal) -> Literal {
         Literal::String(mode) if var == "block_encryption_mode" => {
             Literal::String(mode.to_ascii_lowercase())
         }
-        value if var == "windowing_use_high_precision" => {
+        value if var == "windowing_use_high_precision" || var == SQL_AUTO_IS_NULL => {
             boolean_value(&value).map_or(value, Literal::Boolean)
         }
         value => value,
@@ -1104,20 +1115,25 @@ impl QueryHandler for MySqlQueryHandler {
                         }
                         // While this is on, a query for `auto_col IS NULL` right after an insert
                         // returns the session's new row, which a cache entry cannot reproduce.
+                        "sql_auto_is_null" if variable.scope == VariableScope::Global => behavior,
+                        "sql_auto_is_null" if is_default(value) => {
+                            behavior.set_session_var(SQL_AUTO_IS_NULL, None)
+                        }
                         "sql_auto_is_null" => {
                             let enabled = match value {
                                 Expr::Literal(literal) => boolean_value(literal),
-                                Expr::Column(Column { name, table: None })
-                                    if name.eq_ignore_ascii_case("default") =>
-                                {
-                                    Some(false)
-                                }
                                 Expr::Column(Column { name, table: None }) => {
                                     boolean_value(&Literal::from(name.as_str()))
                                 }
                                 _ => None,
                             };
-                            behavior.unsupported(enabled != Some(false))
+                            match enabled {
+                                Some(false) => behavior.set_session_var(
+                                    SQL_AUTO_IS_NULL,
+                                    Some(Literal::Boolean(false)),
+                                ),
+                                _ => behavior.unsupported(true),
+                            }
                         }
                         "character_set_results" => {
                             match get_encoding_for_charset(value, var_name) {
@@ -1193,11 +1209,7 @@ impl QueryHandler for MySqlQueryHandler {
                                         p,
                                         Some(cache_key_value(p, literal.clone())),
                                     ),
-                                    Expr::Column(Column { name, table: None })
-                                        if name.eq_ignore_ascii_case("default") =>
-                                    {
-                                        behavior.set_session_var(p, None)
-                                    }
+                                    value if is_default(value) => behavior.set_session_var(p, None),
                                     Expr::Column(Column { name, table: None }) => behavior
                                         .set_session_var(
                                             p,
@@ -1299,6 +1311,37 @@ impl QueryHandler for MySqlQueryHandler {
             }
         }
         behavior
+    }
+
+    fn session_defaults_query() -> Option<String> {
+        let names: Vec<String> = CACHE_KEYED_VARIABLES
+            .iter()
+            .chain([&SQL_AUTO_IS_NULL])
+            .map(|name| format!("'{name}'"))
+            .collect();
+        Some(format!(
+            "SHOW GLOBAL VARIABLES WHERE Variable_name IN ({})",
+            names.join(", ")
+        ))
+    }
+
+    fn session_defaults(raw: &BTreeMap<String, String>) -> BTreeMap<String, Literal> {
+        raw.iter()
+            .map(|(name, value)| {
+                let literal = if let Ok(i) = value.parse::<i64>() {
+                    Literal::Integer(i)
+                } else if let Ok(i) = value.parse::<u64>() {
+                    Literal::UnsignedInteger(i)
+                } else {
+                    Literal::from(value.as_str())
+                };
+                (name.clone(), cache_key_value(name, literal))
+            })
+            .collect()
+    }
+
+    fn unsupported_session_vars(vars: &BTreeMap<String, Literal>) -> bool {
+        vars.get(SQL_AUTO_IS_NULL) == Some(&Literal::Boolean(true))
     }
 }
 
@@ -1766,22 +1809,101 @@ mod tests {
     }
 
     #[test]
-    fn set_sql_auto_is_null_off_is_allowed() {
+    fn set_sql_auto_is_null_off_is_tracked() {
         for value in [
             Expr::Literal(Literal::Integer(0)),
             Expr::Literal(Literal::Boolean(false)),
             Expr::Column(Column::from("OFF")),
-            Expr::Column(Column::from("DEFAULT")),
         ] {
             let stmt = SetStatement::Variable(SetVariables {
                 variables: vec![(session_var("sql_auto_is_null"), value.clone())],
             });
             assert_eq!(
                 MySqlQueryHandler::handle_set_statement(&stmt),
-                SetBehavior::default(),
+                SetBehavior::default()
+                    .set_session_var("sql_auto_is_null", Some(Literal::Boolean(false))),
                 "{value:?}"
             )
         }
+    }
+
+    #[test]
+    fn set_sql_auto_is_null_default_clears_it() {
+        let stmt = SetStatement::Variable(SetVariables {
+            variables: vec![(
+                session_var("sql_auto_is_null"),
+                Expr::Column(Column::from("DEFAULT")),
+            )],
+        });
+        assert_eq!(
+            MySqlQueryHandler::handle_set_statement(&stmt),
+            SetBehavior::default().set_session_var("sql_auto_is_null", None)
+        )
+    }
+
+    #[test]
+    fn set_global_sql_auto_is_null_not_tracked() {
+        let stmt = SetStatement::Variable(SetVariables {
+            variables: vec![(
+                Variable {
+                    scope: VariableScope::Global,
+                    name: "sql_auto_is_null".into(),
+                },
+                Expr::Literal(Literal::Integer(1)),
+            )],
+        });
+        assert_eq!(
+            MySqlQueryHandler::handle_set_statement(&stmt),
+            SetBehavior::default()
+        )
+    }
+
+    #[test]
+    fn session_defaults_match_set_values() {
+        let raw = BTreeMap::from(
+            [
+                ("sql_select_limit", "18446744073709551615"),
+                ("group_concat_max_len", "1024"),
+                ("lc_time_names", "en_US"),
+                ("windowing_use_high_precision", "ON"),
+                ("sql_auto_is_null", "OFF"),
+            ]
+            .map(|(name, value)| (name.to_string(), value.to_string())),
+        );
+        let expected = BTreeMap::from(
+            [
+                ("sql_select_limit", Literal::UnsignedInteger(u64::MAX)),
+                ("group_concat_max_len", Literal::Integer(1024)),
+                ("lc_time_names", Literal::from("en_US")),
+                ("windowing_use_high_precision", Literal::Boolean(true)),
+                ("sql_auto_is_null", Literal::Boolean(false)),
+            ]
+            .map(|(name, value)| (name.to_string(), value)),
+        );
+        assert_eq!(MySqlQueryHandler::session_defaults(&raw), expected);
+    }
+
+    #[test]
+    fn sql_auto_is_null_on_is_unsupported_session_var() {
+        let on = BTreeMap::from([("sql_auto_is_null".to_string(), Literal::Boolean(true))]);
+        let off = BTreeMap::from([("sql_auto_is_null".to_string(), Literal::Boolean(false))]);
+        assert!(MySqlQueryHandler::unsupported_session_vars(&on));
+        assert!(!MySqlQueryHandler::unsupported_session_vars(&off));
+        assert!(!MySqlQueryHandler::unsupported_session_vars(
+            &BTreeMap::new()
+        ));
+    }
+
+    #[test]
+    fn unsigned_cache_keyed_value_is_canonical() {
+        assert_eq!(
+            cache_key_value("sql_select_limit", Literal::UnsignedInteger(10)),
+            Literal::Integer(10)
+        );
+        assert_eq!(
+            cache_key_value("windowing_use_high_precision", Literal::UnsignedInteger(0)),
+            Literal::Boolean(false)
+        );
     }
 
     #[test]

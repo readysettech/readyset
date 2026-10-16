@@ -1,6 +1,8 @@
 use std::assert_matches;
 use std::panic::AssertUnwindSafe;
+use std::time::Duration;
 
+use futures::FutureExt;
 use mysql_async::prelude::Queryable;
 
 use readyset_client_metrics::QueryDestination;
@@ -11,19 +13,28 @@ use readyset_sql_parsing::ParsingPreset;
 use readyset_util::eventually;
 use test_utils::{tags, upstream};
 
-/// Build an adapter with fallback, a three row table `t`, and a shallow cache on `query`.
-async fn setup(
-    query: &str,
-    options: &str,
-) -> (
+type Setup = (
     mysql_async::Conn,
     mysql_async::Conn,
     mysql_async::Opts,
     Handle,
     TestShutdownSender<MySQLAdapter>,
-) {
+);
+
+/// Build an adapter with fallback, a three row table `t`, and a shallow cache on `query`.
+async fn setup(query: &str, options: &str) -> Setup {
+    setup_with(TestBuilder::default(), query, options).await
+}
+
+/// Like [`setup`], with the health monitor reading upstream global variables every second.
+async fn setup_with_health_checks(query: &str) -> Setup {
+    let builder = TestBuilder::default().upstream_health_interval(Duration::from_secs(1));
+    setup_with(builder, query, "").await
+}
+
+async fn setup_with(builder: TestBuilder, query: &str, options: &str) -> Setup {
     readyset_tracing::init_test_logging();
-    let (opts, handle, shutdown_tx) = TestBuilder::default()
+    let (opts, handle, shutdown_tx) = builder
         .fallback(true)
         .parsing_preset(ParsingPreset::OnlySqlparser)
         .build::<MySQLAdapter>()
@@ -41,6 +52,32 @@ async fn setup(
     let upstream_opts = mysql_helpers::upstream_config().db_name(opts.db_name());
     let upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
     (conn, upstream_conn, opts, handle, shutdown_tx)
+}
+
+/// Run `test` with the upstream global variable `name` set to `value`, then restore the original
+/// value, even if `test` panics.
+async fn with_global<F: Future<Output = ()>>(name: &str, value: &str, test: F) {
+    let mut upstream = mysql_async::Conn::new(mysql_helpers::upstream_config())
+        .await
+        .unwrap();
+    // The binary protocol returns the value with its type, so it can be bound to restore it.
+    let original: mysql_async::Value = upstream
+        .exec_first(format!("SELECT @@GLOBAL.{name}"), ())
+        .await
+        .unwrap()
+        .unwrap();
+    upstream
+        .query_drop(format!("SET GLOBAL {name} = {value}"))
+        .await
+        .unwrap();
+    let result = AssertUnwindSafe(test).catch_unwind().await;
+    upstream
+        .exec_drop(format!("SET GLOBAL {name} = ?"), (original,))
+        .await
+        .unwrap();
+    if let Err(panic) = result {
+        std::panic::resume_unwind(panic);
+    }
 }
 
 async fn assert_filled(conn: &mut mysql_async::Conn) {
@@ -335,6 +372,88 @@ async fn sql_select_limit_survives_refresh() {
 
     let ids: Vec<i64> = a.query(QUERY).await.unwrap();
     assert_eq!(ids, vec![4, 3, 2, 1]);
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn global_sql_select_limit_partitions_entries() {
+    const QUERY: &str = "SELECT id FROM t ORDER BY id";
+    let (mut a, _upstream, opts, _handle, shutdown_tx) = setup_with_health_checks(QUERY).await;
+
+    let ids: Vec<i64> = a.query(QUERY).await.unwrap();
+    assert_eq!(ids, vec![1, 2, 3]);
+
+    with_global("sql_select_limit", "1", async {
+        // Sessions that connect before the next health check start with the old value.
+        eventually!(run_test: {
+            let mut b = mysql_async::Conn::new(opts.clone()).await.unwrap();
+            let first: Vec<i64> = b.query(QUERY).await.unwrap();
+            let second: Vec<i64> = b.query(QUERY).await.unwrap();
+            let info = last_query_info(&mut b).await;
+            AssertUnwindSafe(move || (first, second, info))
+        }, then_assert: |result| {
+            let (first, second, info) = result();
+            assert_eq!(first, vec![1]);
+            assert_eq!(second, vec![1]);
+            assert_matches!(info.destination, QueryDestination::ReadysetShallow(..));
+        });
+
+        let ids: Vec<i64> = a.query(QUERY).await.unwrap();
+        assert_eq!(ids, vec![1, 2, 3]);
+        assert_hit(&mut a).await;
+    })
+    .await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn global_sql_auto_is_null_proxies_new_sessions() {
+    const QUERY: &str = "SELECT id FROM t ORDER BY id";
+    let (_a, _upstream, opts, _handle, shutdown_tx) = setup_with_health_checks(QUERY).await;
+
+    with_global("sql_auto_is_null", "1", async {
+        eventually!(run_test: {
+            let mut b = mysql_async::Conn::new(opts.clone()).await.unwrap();
+            let ids: Vec<i64> = b.query(QUERY).await.unwrap();
+            let info = last_query_info(&mut b).await;
+            AssertUnwindSafe(move || (ids, info))
+        }, then_assert: |result| {
+            let (ids, info) = result();
+            assert_eq!(ids, vec![1, 2, 3]);
+            assert_eq!(info.destination, QueryDestination::Upstream);
+        });
+    })
+    .await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn reset_connection_restores_default_entries() {
+    const QUERY: &str = "SELECT id FROM t ORDER BY id";
+    let (_a, _upstream, opts, _handle, shutdown_tx) = setup_with_health_checks(QUERY).await;
+
+    // A session that connects before the first health check has no defaults to restore.
+    eventually!(run_test: {
+        let mut b = mysql_async::Conn::new(opts.clone()).await.unwrap();
+        b.query_drop("SET sql_select_limit = 1").await.unwrap();
+        let limited: Vec<i64> = b.query(QUERY).await.unwrap();
+        b.reset().await.unwrap();
+        let ids: Vec<i64> = b.query(QUERY).await.unwrap();
+        AssertUnwindSafe(move || (limited, ids))
+    }, then_assert: |result| {
+        let (limited, ids) = result();
+        assert_eq!(limited, vec![1]);
+        assert_eq!(ids, vec![1, 2, 3]);
+    });
 
     shutdown_tx.shutdown().await;
 }
