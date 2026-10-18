@@ -1,4 +1,5 @@
 use std::panic::AssertUnwindSafe;
+use std::time::Duration;
 
 use chrono::DateTime;
 use mysql_async::Params;
@@ -23,6 +24,11 @@ use readyset_util::arbitrary::{
 use readyset_util::eventually;
 use test_strategy::proptest;
 use test_utils::{tags, upstream};
+
+/// Replication usually reaches Readyset within milliseconds, so each check polls often. The total
+/// sleep of a check stays at 20 s.
+const POLL_INTERVAL: Duration = Duration::from_millis(50);
+const POLL_ATTEMPTS: usize = 400;
 
 fn get_value(results: &[Row], expected_value: &Value) -> Value {
     let err = || panic!("No row found for value: {expected_value:?}");
@@ -98,7 +104,7 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, initial_val: Value, upda
     let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();
 
     // Check the result of snapshot on Readyset
-    eventually!(run_test: {
+    eventually!(attempts: POLL_ATTEMPTS, sleep: POLL_INTERVAL, run_test: {
         let rs_rows: Result<Vec<Row>, _> = rs_conn
             .exec(
                 "SELECT * FROM snapshot WHERE value = ?",
@@ -137,7 +143,7 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, initial_val: Value, upda
     assert_eq!(upstream_val, &replicated_upstream_rows[0][0]);
 
     // Check the result of streaming replication on Readyset
-    eventually!(run_test: {
+    eventually!(attempts: POLL_ATTEMPTS, sleep: POLL_INTERVAL, run_test: {
         let replicated_rs_rows: Result<Vec<Row>, _> = rs_conn
             .exec(
                 "SELECT * FROM replicate WHERE value = ?",
@@ -172,7 +178,7 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, initial_val: Value, upda
     let updated_upstream_val = &updated_upstream_rows[0][0];
 
     // Check the update propogated through Readyset
-    eventually!(run_test: {
+    eventually!(attempts: POLL_ATTEMPTS, sleep: POLL_INTERVAL, run_test: {
         let updated_rs_rows: Result<Vec<Row>, _> = rs_conn
             .exec(
                 "SELECT * FROM snapshot WHERE value = ?",
@@ -207,7 +213,7 @@ async fn round_trip_mysql_type_inner(sql_type: SqlType, initial_val: Value, upda
     );
 
     // Check the update propogated through Readyset
-    eventually!(run_test: {
+    eventually!(attempts: POLL_ATTEMPTS, sleep: POLL_INTERVAL, run_test: {
         let updated_rs_rows: Result<Vec<Row>, _> = rs_conn
             .exec(
                 "SELECT * FROM replicate WHERE value = ?",
