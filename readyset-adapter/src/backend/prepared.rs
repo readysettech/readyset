@@ -621,26 +621,15 @@ where
         Ok(res)
     }
 
-    /// Prepare a `DISCARD` / `RESET ALL`: mirror the full-session reset into the
-    /// `SessionContext` (matching the simple-protocol pre-dispatch path) and
-    /// proxy the statement upstream so it takes effect on that connection. The
-    /// extended path otherwise routed `DISCARD` through `prepare_fallback`, which
-    /// proxies upstream but never resets the mirror, leaving stale role/GUC
-    /// state behind a reset session.
+    /// Prepare a `DISCARD` / `RESET ALL` on the upstream. Executing `DISCARD ALL` resets the
+    /// `SessionContext` once upstream accepts it.
     async fn prepare_discard(
         &mut self,
-        stmt: &DiscardStatement,
         query: &str,
         data: DB::PrepareData<'_>,
         statement_type: PreparedStatementType,
     ) -> Result<PrepareResultInner<DB>, DB::Error> {
         Self::check_routing(&self.connectors, &mut self.state).await?;
-
-        if stmt.object_type == DiscardObject::All
-            && let Some(session) = self.connectors.session.as_ref()
-        {
-            session.discard_all();
-        }
 
         let Some(upstream) = self.connectors.upstream.as_mut() else {
             return Err(unsupported_err!("DISCARD not supported without an upstream").into());
@@ -923,10 +912,7 @@ where
                 self.prepare_set(stmt, query, data, statement_type, event)
                     .await
             }
-            PrepareMeta::Discard { stmt } => {
-                self.prepare_discard(stmt, query, data, statement_type)
-                    .await
-            }
+            PrepareMeta::Discard { .. } => self.prepare_discard(query, data, statement_type).await,
             PrepareMeta::Proxy
             | PrepareMeta::FailedToParse
             | PrepareMeta::FailedToRewrite(_)
@@ -1821,6 +1807,14 @@ where
             && let Some(SqlQuery::Set(set)) = cached_statement.parsed_query.as_deref()
         {
             Self::mirror_set_role(session, self.state.policy_registry.as_ref(), set);
+        }
+
+        if result.is_ok()
+            && let Some(session) = self.connectors.session.as_ref()
+            && let Some(SqlQuery::Discard(d)) = cached_statement.parsed_query.as_deref()
+            && d.object_type == DiscardObject::All
+        {
+            session.discard_all();
         }
 
         if let Some(q) = &cached_statement.parsed_query {

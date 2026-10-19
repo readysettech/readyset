@@ -508,20 +508,14 @@ where
             convert_or_parse_query(settings, deep_ast, query)
         };
 
-        // Mirror full-session resets into the SessionContext before the query
-        // runs. `DISCARD ALL` / `RESET ALL` fully reset run-time state. A `SET
-        // [LOCAL] SESSION AUTHORIZATION` identity change is mirrored separately,
-        // *after* upstream accepts it (see `query_adhoc_non_select`), so a
-        // rejected statement cannot leave the mirror pointing at an identity
-        // upstream never adopted.
-        if let Some(session) = connectors.session.as_ref() {
-            match &parsed {
-                Ok(SqlQuery::Discard(d)) if d.object_type == DiscardObject::All => {
-                    session.discard_all()
-                }
-                _ => {}
+        // `DISCARD ALL` / `RESET ALL` reset the SessionContext only after upstream accepts them.
+        // Upstream rejects them inside a transaction.
+        let discard_all_session = match &parsed {
+            Ok(SqlQuery::Discard(d)) if d.object_type == DiscardObject::All => {
+                connectors.session.clone()
             }
-        }
+            _ => None,
+        };
 
         // Mirror a simple-protocol `set_config(...)` batch into the session.
         // The extended protocol recognizes it at prepare and applies it at
@@ -562,7 +556,7 @@ where
             _ => {}
         }
 
-        match parsed {
+        let result = match parsed {
             // Parse error, but no fallback exists
             Err(e) if !connectors.has_fallback() => {
                 event.set_noria_error(&e);
@@ -777,7 +771,14 @@ where
                 }
                 result
             }
+        };
+
+        if result.is_ok()
+            && let Some(session) = discard_all_session
+        {
+            session.discard_all();
         }
+        result
     }
 
     /// Executes `query` using the reader/writer belonging to the calling `Backend` struct.

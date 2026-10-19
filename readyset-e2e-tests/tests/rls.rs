@@ -987,6 +987,53 @@ async fn pg_rls_shallow_cache_discard_all_extended() {
     run_discard_all(Protocol::Extended).await;
 }
 
+/// A `DISCARD ALL` that upstream rejects inside a transaction leaves the session's role and
+/// settings in place. The login partition is filled first, so a read keyed to it returns alice's
+/// rows.
+async fn run_discard_all_in_transaction(proto: Protocol) {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    PostgreSQLAdapter::recreate_database(&test_name).await;
+    setup_todos_upstream(&test_name).await;
+    let (rs, _handle, shutdown_tx) = connect_rls(&test_name).await;
+
+    rs.simple_query("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM SELECT * FROM api.todos")
+        .await
+        .expect("create cache");
+    assert_served_from_cache(&rs, proto, &["alice", "alice", "bob"], "login partition").await;
+    rs.simple_query("SET ROLE authenticated")
+        .await
+        .expect("set role");
+    set_sub_claim(&rs, proto, "bob").await;
+    assert_served_from_cache(&rs, proto, &["bob"], "bob scoped before DISCARD ALL").await;
+
+    run_stmt(&rs, proto, "BEGIN").await;
+    let discard = match proto {
+        Protocol::Simple => rs.simple_query("DISCARD ALL").await.map(drop),
+        Protocol::Extended => rs.execute("DISCARD ALL", &[]).await.map(drop),
+    };
+    discard.expect_err("upstream rejects DISCARD ALL inside a transaction");
+    run_stmt(&rs, proto, "ROLLBACK").await;
+    assert_served_from_cache(&rs, proto, &["bob"], "bob scoped after rejected DISCARD ALL").await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_discard_all_in_transaction_simple() {
+    run_discard_all_in_transaction(Protocol::Simple).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_discard_all_in_transaction_extended() {
+    run_discard_all_in_transaction(Protocol::Extended).await;
+}
+
 /// `RESET request.jwt.claims` clears the keyed claim while the role stays
 /// `authenticated`, so the policy resolves the claim to NULL and scopes the read
 /// to zero rows -- a distinct partition that does not serve the prior tenant's
