@@ -1821,6 +1821,7 @@ where
             Self::update_transaction_boundaries(
                 &mut self.state.proxy_state,
                 &mut self.state.write_tracker,
+                self.connectors.session.as_ref(),
                 q.as_ref(),
             );
         }

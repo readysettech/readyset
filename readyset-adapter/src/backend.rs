@@ -2383,13 +2383,16 @@ where
         ));
     }
 
-    /// Should only be called with a SqlQuery that is of type StartTransaction, Commit, or
-    /// Rollback. Used to handle transaction boundary queries. Updates both the
-    /// `ProxyState` machine and the [`SessionWriteTracker`] timestamp lifecycle (BEGIN
-    /// clears, COMMIT refreshes-if-set, ROLLBACK clears).
+    /// Update session state for a transaction boundary statement, which must be a
+    /// StartTransaction, Commit, or Rollback. BEGIN starts a transaction in the `ProxyState`
+    /// machine and clears the [`SessionWriteTracker`] timestamp. COMMIT ends the transaction and
+    /// refreshes the timestamp if it is set. A ROLLBACK that ends the transaction clears the
+    /// timestamp. When the transaction ends, the session drops its transaction-local settings and
+    /// role.
     fn update_transaction_boundaries(
         proxy_state: &mut ProxyState,
         write_tracker: &mut SessionWriteTracker,
+        session: Option<&Arc<SessionContext>>,
         query: &SqlQuery,
     ) {
         match query {
@@ -2400,10 +2403,16 @@ where
             SqlQuery::Commit(_) => {
                 proxy_state.end_transaction();
                 write_tracker.on_commit();
+                if let Some(session) = session {
+                    session.on_trx_end();
+                }
             }
             SqlQuery::Rollback(rollback_stmt) if rollback_stmt.ends_transaction() => {
                 proxy_state.end_transaction();
                 write_tracker.on_rollback();
+                if let Some(session) = session {
+                    session.on_trx_end();
+                }
             }
             _ => (),
         }

@@ -1318,11 +1318,11 @@ async fn run_transaction_local_claim(proto: Protocol) {
     // T1: the local context scopes reads inside the transaction (served from the
     // tenant's cached partition), and reverts after COMMIT -- outside the
     // transaction the superuser login bypasses RLS and the cache serves all rows.
-    rs.simple_query("BEGIN").await.expect("begin");
+    run_stmt(&rs, proto, "BEGIN").await;
     run_stmt(&rs, proto, "SET LOCAL ROLE authenticated").await;
     set_sub_claim_local(&rs, proto, "bob").await;
     assert_served_from_cache(&rs, proto, &["bob"], "bob scoped inside the transaction").await;
-    rs.simple_query("COMMIT").await.expect("commit");
+    run_stmt(&rs, proto, "COMMIT").await;
     assert_served_from_cache(
         &rs,
         proto,
@@ -1332,12 +1332,12 @@ async fn run_transaction_local_claim(proto: Protocol) {
     .await;
 
     // T2: the local context is discarded on ROLLBACK, back to the bypass login.
-    rs.simple_query("BEGIN").await.expect("begin");
+    run_stmt(&rs, proto, "BEGIN").await;
     run_stmt(&rs, proto, "SET LOCAL ROLE authenticated").await;
     set_sub_claim_local(&rs, proto, "alice").await;
     assert_served_from_cache(&rs, proto, &["alice", "alice"], "alice scoped inside the transaction")
         .await;
-    rs.simple_query("ROLLBACK").await.expect("rollback");
+    run_stmt(&rs, proto, "ROLLBACK").await;
     assert_served_from_cache(
         &rs,
         proto,
