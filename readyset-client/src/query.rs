@@ -5,8 +5,8 @@
 //! in the process of being migrated, or whether the migration succeeded or failed
 //! This module contains the types that handle that tracking.
 
-use std::fmt::{self, Display};
-use std::hash::{Hash, Hasher};
+use std::fmt::{self, Display, Write as _};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -54,7 +54,22 @@ impl QueryId {
         query: &ShallowCacheQuery,
         schema_search_path: &[SqlIdentifier],
     ) -> Self {
-        QueryId(hash(&(query, schema_search_path)))
+        struct HashWriter<'a>(&'a mut DefaultHasher);
+
+        impl fmt::Write for HashWriter<'_> {
+            fn write_str(&mut self, s: &str) -> fmt::Result {
+                self.0.write(s.as_bytes());
+                Ok(())
+            }
+        }
+
+        // Same id as `hash(&(query, schema_search_path))`, which hashes the rendered query as a
+        // `str`: its bytes, then 0xff.
+        let mut hasher = DefaultHasher::new();
+        write!(HashWriter(&mut hasher), "{query}").expect("rendering a query never fails");
+        hasher.write_u8(0xff);
+        schema_search_path.hash(&mut hasher);
+        QueryId(hasher.finish())
     }
 
     #[cfg(any(test, feature = "test-util"))]
@@ -77,7 +92,10 @@ impl From<&ShallowViewRequest> for QueryId {
 
 impl From<&Query> for QueryId {
     fn from(value: &Query) -> Self {
-        QueryId(hash(value))
+        match value {
+            Query::ShallowParsed(request) => request.query_id(),
+            _ => QueryId(hash(value)),
+        }
     }
 }
 
@@ -662,4 +680,28 @@ mod tests {
     }
 
     hash_laws!(Query);
+
+    #[test]
+    fn shallow_query_id_matches_hashing_the_query() {
+        let long = format!(
+            "SELECT * FROM t WHERE x IN ({})",
+            ["'caf\u{e9}'"; 1000].join(", ")
+        );
+        let path: [SqlIdentifier; 2] = ["public".into(), "sch\u{e9}ma".into()];
+        for sql in [
+            "SELECT 1",
+            "SELECT \"\u{e9}\" FROM t WHERE x = '\u{1f600}'",
+            &long,
+        ] {
+            let (query, _) =
+                readyset_sql_parsing::parse_shallow_query(readyset_sql::Dialect::PostgreSQL, sql)
+                    .unwrap();
+            for path in [&path[..], &[]] {
+                let expected = QueryId(hash(&(&query, path)));
+                assert_eq!(QueryId::from_shallow_query(&query, path), expected, "{sql}");
+                let request = ShallowViewRequest::new(query.clone(), path.to_vec(), query.clone());
+                assert_eq!(QueryId::from(&Query::from(request)), expected, "{sql}");
+            }
+        }
+    }
 }
