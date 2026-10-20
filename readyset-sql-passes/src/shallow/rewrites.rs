@@ -78,13 +78,6 @@ pub fn rewrite_shallow(
         has_user_placeholders,
     );
 
-    number_placeholders(query)?;
-    trace!(
-        parent: &span,
-        pass = "number_placeholders",
-        query = %query.display(flags.dialect),
-    );
-
     Ok(ShallowQueryParameters::new(
         flags.dialect,
         reordered_placeholders,
@@ -173,7 +166,7 @@ pub fn literalize_shallow_query(
 ///
 /// Unlike the deep cache version, this does NOT mutate the placeholders in place.
 /// The deep cache version both collects the map AND renumbers placeholders, but that
-/// mutation is redundant since [`number_placeholders`] renumbers everything at the end
+/// mutation is redundant since [`fully_parameterize_query`] renumbers every placeholder
 /// anyway. We keep the two concerns separate for clarity.
 ///
 /// Returns `None` if placeholders are already sequential (optimization to avoid work at runtime).
@@ -200,7 +193,8 @@ fn reorder_numbered_placeholders(query: &Query) -> Option<Vec<usize>> {
     if contiguous { None } else { Some(visitor.out) }
 }
 
-/// Replaces ALL literals with placeholders, extracting them as parameters.
+/// Replaces ALL literals with placeholders, extracting them as parameters, and numbers every
+/// placeholder `$1`, `$2`, etc. in visit order.
 ///
 /// This is the sqlparser-AST equivalent of deep cache's `autoparameterize` pass.
 /// Unlike the deep cache's auto-parameterization, this replaces ALL literals regardless
@@ -221,19 +215,6 @@ fn fully_parameterize_query(
             visitor.in_array_params,
             visitor.has_user_placeholders,
         )),
-        ControlFlow::Break(e) => Err(e),
-    }
-}
-
-/// Renumbers all placeholders to sequential `$1`, `$2`, etc.
-///
-/// This is the sqlparser-AST equivalent of the deep cache's `number_placeholders`.
-fn number_placeholders(query: &mut Query) -> ReadySetResult<()> {
-    let mut visitor = NumberPlaceholdersVisitor {
-        next_param_number: 1,
-    };
-    match VisitMut::visit(query, &mut visitor) {
-        ControlFlow::Continue(()) => Ok(()),
         ControlFlow::Break(e) => Err(e),
     }
 }
@@ -260,12 +241,15 @@ impl Visitor for ReorderNumberedPlaceholdersVisitor {
     }
 }
 
-/// Replaces all literals with `?` placeholders, collapsing IN lists to single placeholders.
+/// Replaces all literals with placeholders, collapsing IN lists to single placeholders, and
+/// numbers every placeholder in visit order.
 ///
 /// Mirrors `autoparameterize::FullyParameterizeVisitor` for the Readyset AST.
 #[derive(Default)]
 struct FullyParameterizeVisitor {
     param_idx: usize,
+    /// Number of placeholders numbered so far.
+    numbered: u32,
     out: Vec<(usize, Literal)>,
     in_array_params: Vec<InArrayParam>,
     /// Number of placeholders we auto-inserted that haven't been visited yet.
@@ -274,6 +258,14 @@ struct FullyParameterizeVisitor {
     pending_auto_placeholders: usize,
     /// Whether the query arrived with placeholders, which only a bind can fill.
     has_user_placeholders: bool,
+}
+
+impl FullyParameterizeVisitor {
+    /// The next placeholder in numbering order.
+    fn next_placeholder(&mut self) -> String {
+        self.numbered += 1;
+        format!("${}", self.numbered)
+    }
 }
 
 impl VisitorMut for FullyParameterizeVisitor {
@@ -355,7 +347,14 @@ impl VisitorMut for FullyParameterizeVisitor {
 
         // Handle placeholders: either auto-inserted ones (don't count) or user-provided ones
         // (count)
-        if matches!(value, Value::Placeholder(_)) {
+        if let Value::Placeholder(placeholder) = value {
+            match ItemPlaceholder::try_from(&*placeholder) {
+                Err(e) => break_err!(internal_err!("Invalid placeholder: {:?}", e)),
+                Ok(ItemPlaceholder::ColonNumber(_)) => break_err!(unsupported_err!(
+                    "colon-number placeholders aren't supported"
+                )),
+                Ok(ItemPlaceholder::QuestionMark | ItemPlaceholder::DollarNumber(_)) => {}
+            }
             if self.pending_auto_placeholders > 0 {
                 // This is a placeholder we inserted in pre_visit_expr - don't increment param_idx
                 // since we already accounted for it when processing the IN list
@@ -365,58 +364,17 @@ impl VisitorMut for FullyParameterizeVisitor {
                 self.param_idx += 1;
                 self.has_user_placeholders = true;
             }
+            *placeholder = self.next_placeholder();
             return ControlFlow::Continue(());
         }
 
         match sqlparser_value_to_literal(value.clone()) {
             Ok(literal) => {
-                let _ = mem::replace(value, Value::Placeholder("?".into()));
+                *value = Value::Placeholder(self.next_placeholder());
                 self.out.push((self.param_idx, literal));
                 self.param_idx += 1;
             }
             Err(e) => break_err!(e),
-        }
-
-        ControlFlow::Continue(())
-    }
-}
-
-/// Renumbers all placeholders to sequential `$1`, `$2`, etc.
-///
-/// Mirrors `NumberPlaceholdersVisitor` for the Readyset AST.
-struct NumberPlaceholdersVisitor {
-    next_param_number: u32,
-}
-
-impl VisitorMut for NumberPlaceholdersVisitor {
-    type Break = ReadySetError;
-
-    fn post_visit_expr(&mut self, expr: &mut Expr) -> ControlFlow<Self::Break> {
-        let Expr::Value(ValueWithSpan {
-            value: Value::Placeholder(placeholder_str),
-            ..
-        }) = expr
-        else {
-            return ControlFlow::Continue(());
-        };
-
-        let placeholder = ItemPlaceholder::try_from(&*placeholder_str)
-            .map_err(|e| internal_err!("Invalid placeholder: {:?}", e));
-
-        match placeholder {
-            Err(e) => break_err!(e),
-            // client-provided queries aren't allowed to mix question-mark and dollar-number
-            // placeholders, but autoparameterization creates question mark placeholders,
-            // which in the intermediate state does end up with a query that has both styles.
-            Ok(ItemPlaceholder::QuestionMark | ItemPlaceholder::DollarNumber(_)) => {
-                *placeholder_str = format!("${}", self.next_param_number);
-                self.next_param_number += 1;
-            }
-            Ok(ItemPlaceholder::ColonNumber(_)) => {
-                break_err!(unsupported_err!(
-                    "colon-number placeholders aren't supported"
-                ))
-            }
         }
 
         ControlFlow::Continue(())
@@ -865,6 +823,28 @@ mod tests {
         let query_str = format!("{query}");
         assert!(query_str.contains("$1"));
         assert!(query_str.contains("$2"));
+    }
+
+    #[test]
+    fn rewrite_numbers_placeholders_in_visit_order() {
+        for (sql, expected) in [
+            (
+                "SELECT * FROM t WHERE COALESCE(b, 0) IN (1, 2)",
+                "SELECT * FROM t WHERE COALESCE(b, $1) IN ($2)",
+            ),
+            (
+                "SELECT * FROM t WHERE ? IN (1, ?) AND c = 'x'",
+                "SELECT * FROM t WHERE $1 IN ($2) AND c = $3",
+            ),
+            (
+                "SELECT * FROM t WHERE a = ? AND b = 1 LIMIT 10 OFFSET ?",
+                "SELECT * FROM t WHERE a = $1 AND b = $2 LIMIT $3 OFFSET $4",
+            ),
+        ] {
+            let mut query = parse_query(Dialect::MySQL, sql);
+            rewrite_shallow(&mut query, AdapterRewriteParams::new(Dialect::MySQL)).unwrap();
+            assert_eq!(format!("{query}"), expected, "{sql}");
+        }
     }
 
     #[test]
