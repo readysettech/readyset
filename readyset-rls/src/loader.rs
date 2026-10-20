@@ -37,7 +37,7 @@ pub(crate) mod sql {
                c.reloptions, c.relname, n.nspname AS schema_name \
         FROM   pg_catalog.pg_class c \
         JOIN   pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
-        WHERE  c.relkind IN ('r','p','v','m') \
+        WHERE  c.relkind IN ('r','p') \
           AND  n.nspname NOT IN \
                ('pg_catalog','information_schema','pg_toast')";
 
@@ -48,24 +48,22 @@ pub(crate) mod sql {
     macro_rules! view_deps {
         () => {
             "\
-            FROM   pg_catalog.pg_rewrite rw \
-            JOIN   pg_catalog.pg_depend  d \
-              ON   d.classid = 'pg_rewrite'::regclass AND d.objid = rw.oid \
-            WHERE  d.refclassid = 'pg_class'::regclass \
-              AND  rw.ev_class <> d.refobjid"
+            SELECT DISTINCT v.oid AS view_oid, v.relkind, v.reloptions, v.relname, \
+                   n.nspname AS schema_name, d.refobjid AS dep_oid \
+            FROM   pg_catalog.pg_class     v \
+            JOIN   pg_catalog.pg_namespace n  ON n.oid = v.relnamespace \
+            JOIN   pg_catalog.pg_rewrite   rw ON rw.ev_class = v.oid AND rw.rulename = '_RETURN' \
+            LEFT JOIN pg_catalog.pg_depend d \
+                   ON  d.classid = 'pg_rewrite'::regclass AND d.objid = rw.oid \
+                   AND d.refclassid = 'pg_class'::regclass AND d.refobjid <> v.oid \
+            WHERE  v.relkind IN ('v','m') \
+              AND  n.nspname NOT IN ('pg_catalog','information_schema','pg_toast')"
         };
     }
 
-    pub(crate) const VIEW_DEPS: &str = concat!(
-        "SELECT rw.ev_class AS view_oid, d.refobjid AS underlying_oid ",
-        view_deps!()
-    );
+    pub(crate) const VIEW_DEPS: &str = view_deps!();
 
-    pub(crate) const VIEW_DEPS_FOR_VIEW: &str = concat!(
-        "SELECT d.refobjid AS underlying_oid ",
-        view_deps!(),
-        " AND rw.ev_class = $1"
-    );
+    pub(crate) const VIEW_DEPS_FOR_VIEW: &str = concat!(view_deps!(), " AND v.oid = $1");
 
     // Order by `setdatabase` so the global default (`setdatabase = 0`) is applied
     // before the database-specific default, letting the latter overwrite the
@@ -193,13 +191,7 @@ async fn load_relations(
         let relname: String = row.try_get("relname")?;
         let schema_name: String = row.try_get("schema_name")?;
 
-        let security_invoker = reloptions
-            .as_deref()
-            .map(|opts| {
-                opts.iter()
-                    .any(|opt| opt.eq_ignore_ascii_case("security_invoker=true"))
-            })
-            .unwrap_or(false);
+        let security_invoker = is_security_invoker(reloptions.as_deref());
 
         registry.set_flags(
             oid,
@@ -271,16 +263,84 @@ async fn load_view_deps(
     client: &tokio_postgres::Client,
     registry: &Arc<PolicyRegistry>,
 ) -> Result<(), LoaderError> {
+    let rows = client.query(sql::VIEW_DEPS, &[]).await?;
+    apply_view_rows(registry, &rows)
+}
+
+/// Load each view's flags, name, and relation dependencies from [`sql::VIEW_DEPS`]-shaped rows.
+/// A view with no relation dependency is left without a dependency entry: it may still read
+/// through functions or session settings, so the analyzer must refuse it rather than treat it as
+/// reading nothing.
+fn apply_view_rows(
+    registry: &Arc<PolicyRegistry>,
+    rows: &[tokio_postgres::Row],
+) -> Result<(), LoaderError> {
     let mut by_view: HashMap<PgOid, Vec<PgOid>> = HashMap::new();
-    for row in client.query(sql::VIEW_DEPS, &[]).await? {
+    for row in rows {
         let view_oid: PgOid = row.try_get("view_oid")?;
-        let underlying_oid: PgOid = row.try_get("underlying_oid")?;
-        by_view.entry(view_oid).or_default().push(underlying_oid);
+        let relkind: i8 = row.try_get("relkind")?;
+        let reloptions: Option<Vec<String>> = row.try_get("reloptions")?;
+        let relname: String = row.try_get("relname")?;
+        let schema_name: String = row.try_get("schema_name")?;
+        let dep_oid: Option<PgOid> = row.try_get("dep_oid")?;
+
+        let security_invoker = is_security_invoker(reloptions.as_deref());
+        registry.set_flags(
+            view_oid,
+            RelationFlags {
+                relkind: relkind as u8,
+                security_invoker,
+                ..Default::default()
+            },
+        );
+        registry.set_relation_name(&schema_name, &relname, view_oid);
+
+        let deps = by_view.entry(view_oid).or_default();
+        if let Some(dep) = dep_oid {
+            deps.push(dep);
+        }
     }
     for (view, deps) in by_view {
-        registry.set_view_underlying(view, deps);
+        if deps.is_empty() {
+            registry.remove_view_deps(view);
+        } else {
+            registry.set_view_underlying(view, deps);
+        }
     }
     Ok(())
+}
+
+/// Whether `reloptions` turns `security_invoker` on. Postgres stores a reloption's value as
+/// written, so `on`, `1`, or `yes` are as valid as `true`.
+fn is_security_invoker(reloptions: Option<&[String]>) -> bool {
+    reloptions.into_iter().flatten().any(|opt| {
+        opt.split_once('=').is_some_and(|(name, value)| {
+            name.eq_ignore_ascii_case("security_invoker") && parse_pg_bool(value) == Some(true)
+        })
+    })
+}
+
+/// Parse a boolean the way Postgres's `parse_bool` does: `true`/`false`, `yes`/`no`, `on`/`off`
+/// (or `of`), `1`/`0`, case-insensitive, plus any prefix of `true`, `false`, `yes`, or `no`.
+fn parse_pg_bool(value: &str) -> Option<bool> {
+    let prefix_of = |word: &str| {
+        !value.is_empty()
+            && word
+                .get(..value.len())
+                .is_some_and(|p| p.eq_ignore_ascii_case(value))
+    };
+    if prefix_of("true") || prefix_of("yes") || value == "1" || value.eq_ignore_ascii_case("on") {
+        Some(true)
+    } else if prefix_of("false")
+        || prefix_of("no")
+        || value.eq_ignore_ascii_case("of")
+        || value.eq_ignore_ascii_case("off")
+        || value == "0"
+    {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 /// Reload a single relation's policies and flags. Used by the poller when a
@@ -313,13 +373,7 @@ pub async fn reload_relation(
         let reloptions: Option<Vec<String>> = row.try_get("reloptions").ok();
         let relname: String = row.try_get("relname")?;
         let schema_name: String = row.try_get("schema_name")?;
-        let security_invoker = reloptions
-            .as_deref()
-            .map(|opts| {
-                opts.iter()
-                    .any(|opt| opt.eq_ignore_ascii_case("security_invoker=true"))
-            })
-            .unwrap_or(false);
+        let security_invoker = is_security_invoker(reloptions.as_deref());
         registry.set_flags(
             relid,
             RelationFlags {
@@ -330,19 +384,6 @@ pub async fn reload_relation(
             },
         );
         registry.set_relation_name(&schema_name, &relname, relid);
-        if matches!(relkind as u8, b'v' | b'm') {
-            let deps = client
-                .query(sql::VIEW_DEPS_FOR_VIEW, &[&(relid as PgOid)])
-                .await?
-                .iter()
-                .map(|row| row.try_get("underlying_oid"))
-                .collect::<Result<Vec<PgOid>, _>>()?;
-            // An empty list does not make a view session-independent: it can still read through
-            // functions or session settings. Leave it unloaded so the analyzer refuses it.
-            if !deps.is_empty() {
-                registry.set_view_underlying(relid, deps);
-            }
-        }
     }
 
     let policy_rows = client
@@ -375,6 +416,26 @@ pub async fn reload_relation(
     }
     registry.set_policies(relid, policies);
     Ok(())
+}
+
+/// Reload a single view's flags, name, and relation dependencies in one query. Used by the poller
+/// when a view's dependency fingerprint changes, appears, or disappears.
+pub async fn reload_view(
+    client: &tokio_postgres::Client,
+    registry: &Arc<PolicyRegistry>,
+    view_oid: crate::Oid,
+) -> Result<(), LoaderError> {
+    let rows = client
+        .query(sql::VIEW_DEPS_FOR_VIEW, &[&(view_oid as PgOid)])
+        .await?;
+    if rows.is_empty() {
+        // View dropped since the fingerprint diff observed it. Purge its catalog state rather
+        // than leaving stale entries in the registry.
+        registry.remove_relation(view_oid);
+        registry.remove_view_deps(view_oid);
+        return Ok(());
+    }
+    apply_view_rows(registry, &rows)
 }
 
 /// Reload a single role's attributes from pg_roles.
@@ -451,5 +512,22 @@ mod tests {
         assert!(sql::ROLE_DEFAULT_GUCS.contains("pg_db_role_setting"));
         // Must not read pg_authid.
         assert!(!sql::ROLES.contains("pg_authid"));
+    }
+
+    #[test]
+    fn security_invoker_accepts_every_postgres_boolean_spelling() {
+        let set = |opts: &[&str]| {
+            let opts: Vec<String> = opts.iter().map(|o| o.to_string()).collect();
+            is_security_invoker(Some(&opts))
+        };
+        for on in ["true", "TRUE", "t", "tr", "on", "ON", "1", "yes", "y", "Ye"] {
+            assert!(set(&[&format!("security_invoker={on}")]), "{on}");
+        }
+        for off in ["false", "f", "off", "OF", "0", "no", "n", "o", ""] {
+            assert!(!set(&[&format!("security_invoker={off}")]), "{off}");
+        }
+        assert!(set(&["check_option=local", "security_invoker=on"]));
+        assert!(!set(&["security_barrier=true"]));
+        assert!(!is_security_invoker(None));
     }
 }

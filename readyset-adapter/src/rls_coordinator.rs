@@ -158,6 +158,14 @@ where
         }
     }
 
+    /// Drop one registered cache: remove it from the shallow manager, reset its migration status
+    /// so the next read re-migrates instead of routing to the dropped cache, and unregister it.
+    pub fn drop_registered(&self, query_id: &QueryId) {
+        let _ = self.shallow.drop_cache(None, Some(query_id));
+        self.query_status_cache.invalidate_query(query_id);
+        self.unregister(query_id);
+    }
+
     /// Forget a cache: drop its descriptor and remove it from the relation reverse index.
     pub fn unregister(&self, query_id: &QueryId) {
         let descriptor = self.descriptors.pin().remove(query_id).cloned();
@@ -284,11 +292,7 @@ where
                     self.descriptors.pin().insert(query_id, refreshed);
                 }
                 Cacheability::Refuse(_) => {
-                    let _ = self.shallow.drop_cache(None, Some(&query_id));
-                    // Reset the migration status so the read re-routes instead of hitting the
-                    // dropped shallow cache.
-                    self.query_status_cache.invalidate_query(&query_id);
-                    self.unregister(&query_id);
+                    self.drop_registered(&query_id);
                 }
             }
         }
@@ -309,11 +313,17 @@ where
             if self.is_scoped(&query_id) {
                 continue;
             }
-            let _ = self.shallow.drop_cache(None, Some(&query_id));
-            // Reset the migration status so the next read re-migrates (re-analyzing the
-            // now-RLS-active table as scoped) instead of routing to the dropped shallow cache.
-            self.query_status_cache.invalidate_query(&query_id);
-            self.unregister(&query_id);
+            self.drop_registered(&query_id);
+        }
+    }
+
+    fn on_definition_changed(&self, relid: Oid) {
+        // A view now reads different relations, so neither a plain cache's "no RLS beneath" nor a
+        // scoped cache's keyed inputs can be trusted, and the cached rows come from the old
+        // definition. Drop every cache over it; the next read re-migrates against the reloaded
+        // registry.
+        for query_id in self.query_ids_for_relation(relid) {
+            self.drop_registered(&query_id);
         }
     }
 }

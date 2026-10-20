@@ -210,14 +210,18 @@ impl PolicyRegistry {
         self.flags.pin().insert(relid, flags);
     }
 
-    /// Drop every trace of a relation: its policies, flags, view dependencies,
-    /// and any name-index entry that resolves to it, so a dropped table cannot
-    /// leave stale `relrowsecurity` flags or a name mapping behind.
+    /// Drop a relation's policies, flags, and any name-index entry that resolves
+    /// to it, so a dropped table cannot leave stale `relrowsecurity` flags or a
+    /// name mapping behind. View dependencies are dropped by [`Self::remove_view_deps`].
     pub fn remove_relation(&self, relid: Oid) {
         self.policies.pin().remove(&relid);
         self.flags.pin().remove(&relid);
-        self.view_underlying.pin().remove(&relid);
         self.relations_by_name.pin().retain(|_, &oid| oid != relid);
+    }
+
+    /// Drop a view's dependency list, leaving the view unloaded so the analyzer refuses it.
+    pub fn remove_view_deps(&self, view_oid: Oid) {
+        self.view_underlying.pin().remove(&view_oid);
     }
 
     pub fn set_role(&self, roleid: Oid, attrs: RoleAttrs) {
@@ -328,6 +332,7 @@ mod tests {
         r.set_relation_name("public", "widgets", 100);
 
         r.remove_relation(100);
+        r.remove_view_deps(100);
 
         assert!(r.flags_for(100).is_none());
         assert!(r.policies_for(100).is_none());

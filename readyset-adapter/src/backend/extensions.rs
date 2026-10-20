@@ -31,7 +31,6 @@ use readyset_client_metrics::{
 use readyset_data::{DfType, DfValue};
 use readyset_errors::{ReadySetError, ReadySetResult, internal, internal_err, unsupported};
 use readyset_metrics::metrics_handle;
-use readyset_rls::InvalidationSink;
 use readyset_server::STORAGE_RESET_MARKER;
 use readyset_shallow::CacheInfo;
 use readyset_sql::ast::{
@@ -315,11 +314,15 @@ where
         // a table the registry has not yet observed, so we refuse the
         // cache rather than fall through to a `Plain` backing. With
         // RLS disabled every cache is created Plain.
-        // The relations and RLS analysis to register with the coordinator
-        // after the cache is created. `None` means RLS is disabled (no
-        // registry); the cache is plain and not coordinator-tracked.
-        let mut rls_registration: Option<(Vec<readyset_rls::Oid>, readyset_rls::CacheSessionDeps)> =
-            None;
+        // The query's relations, the relations to register with the
+        // coordinator, and the RLS analysis, for use after the cache is
+        // created. `None` means RLS is disabled (no registry); the cache is
+        // plain and not coordinator-tracked.
+        let mut rls_registration: Option<(
+            Vec<readyset_rls::Oid>,
+            Vec<readyset_rls::Oid>,
+            readyset_rls::CacheSessionDeps,
+        )> = None;
         let rls_catalog = match &state.rls_catalogs {
             Some(rls_catalogs) => Some(rls_catalogs.get(shallow.database.as_deref()).await?),
             None => None,
@@ -347,21 +350,20 @@ where
                 // rather than parsing the human-readable text.
                 return Err(ReadySetError::Internal(reason.structured_display()));
             }
-            // Track every query-referenced relation, not only the
+            // Track every relation the analyzer reached, not only the
             // currently RLS-active ones, so RLS-6 lifecycle catches a
             // Plain cache when relrowsecurity later flips true on a
-            // table the cache references. Also include the analyzer's
-            // expanded RLS tables: for a view query the referenced relation
-            // is the view, but invalidation must key on the underlying base
-            // tables the policies live on, or a base-table policy change
-            // would never invalidate the view's cache.
-            let mut relations: Vec<readyset_rls::Oid> = referenced_relations;
-            for &t in analysis.rls_active_for_tables.iter() {
+            // table the cache references. For a view query that includes
+            // every view beneath it and every base table, so a change to
+            // any of them (a redefined view, a policy, an RLS flag)
+            // reaches the cache.
+            let mut relations: Vec<readyset_rls::Oid> = referenced_relations.clone();
+            for &t in analysis.visited_relations.iter() {
                 if !relations.contains(&t) {
                     relations.push(t);
                 }
             }
-            rls_registration = Some((relations, analysis));
+            rls_registration = Some((referenced_relations, relations, analysis));
         }
 
         state
@@ -393,7 +395,7 @@ where
                 // it when its relation later turns RLS-active.
                 if matches!(res, Ok(()))
                     && let Some(rls_catalog) = &rls_catalog
-                    && let Some((relations, analysis)) = &rls_registration
+                    && let Some((referenced_relations, relations, analysis)) = &rls_registration
                 {
                     let coordinator = rls_catalog.coordinator();
                     if analysis.rls_active_for_tables.is_empty() {
@@ -406,29 +408,36 @@ where
                         );
                     }
 
-                    // Close the analyze->register race: the analyzer captured
-                    // `analysis.snapshot_generation`, but a catalog poll reload
-                    // can bump the generation and run its invalidation pass
-                    // before this cache entered the reverse index, skipping it.
-                    // If the generation advanced, re-apply the missed pass over
-                    // every tracked relation now that the cache is registered,
-                    // mirroring the poller's dispatch: a policy change refreshes
-                    // a scoped descriptor, and a relation that turned RLS-active
-                    // drops a plain cache that would otherwise serve one tenant's
-                    // rows to all. Iterating only `rls_active_for_tables` would
-                    // miss the plain-cache case, whose set is empty.
+                    // Close the analyze->register race: a catalog poll can
+                    // bump the generation and run its invalidation pass before
+                    // this cache entered the reverse index, skipping it. If the
+                    // generation advanced, re-analyze once against the current
+                    // registry now that the cache is registered. A matching
+                    // result means nothing the cache depends on changed,
+                    // whatever else the poll touched. A different one means a
+                    // view beneath it was redefined or a relation's RLS state
+                    // changed: drop the cache, remove its DDL, and fail the
+                    // CREATE CACHE so the caller retries against the new state.
                     let registry = rls_catalog.registry();
-                    if registry.generation() != analysis.snapshot_generation {
-                        for &relid in relations.iter() {
-                            coordinator.on_relation_changed(relid);
-                            let now_rls_active = registry
-                                .flags_for(relid)
-                                .map(|f| f.relrowsecurity)
-                                .unwrap_or(false);
-                            if now_rls_active {
-                                coordinator.on_rls_flag_enabled(relid);
-                            }
-                        }
+                    if registry.generation() != analysis.snapshot_generation
+                        && !readyset_rls::analyze_cache(&registry, referenced_relations)
+                            .same_dependencies(analysis)
+                    {
+                        coordinator.drop_registered(&query_id);
+                        let err = Err(ReadySetError::Internal(
+                            "rls_uncacheable[code=dependencies_changed]".into(),
+                        ));
+                        remove_ddl_on_error(
+                            &err,
+                            &state.authority,
+                            Some(ddl_req),
+                            Some(name),
+                            "shallow",
+                            |auth, req| async move { auth.remove_shallow_cache_ddl_request(req).await },
+                            quiet,
+                        )
+                        .await;
+                        return err;
                     }
                 }
 

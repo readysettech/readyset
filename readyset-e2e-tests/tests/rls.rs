@@ -2524,3 +2524,393 @@ async fn pg_rls_shallow_cache_view_created_after_startup_simple() {
 async fn pg_rls_shallow_cache_view_created_after_startup_extended() {
     run_view_created_after_startup(Protocol::Extended).await;
 }
+
+/// A plain cache over the top of a view hierarchy must be dropped when a view lower in the
+/// hierarchy is redefined to read an RLS-active table. The cache is registered against the view
+/// the query names, not the redefined one, so invalidation has to walk up from the changed view.
+/// Without that, the plain cache keeps serving one result to every tenant. `security_invoker`
+/// requires Postgres 15.
+async fn run_nested_view_leaf_redefined(proto: Protocol) {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    PostgreSQLAdapter::recreate_database(&test_name).await;
+    setup_todos_upstream(&test_name).await;
+
+    // v_top -> v_mid -> v_leaf -> api.docs (no RLS), created before Readyset's snapshot.
+    let mut upstream_cfg = psql_helpers::upstream_config();
+    upstream_cfg.dbname(&test_name);
+    let upstream = psql_helpers::connect(upstream_cfg).await;
+    for stmt in [
+        "CREATE VIEW api.v_leaf WITH (security_invoker = true) AS \
+         SELECT id, owner_id, body FROM api.docs",
+        "CREATE VIEW api.v_mid WITH (security_invoker = true) AS SELECT * FROM api.v_leaf",
+        "CREATE VIEW api.v_top WITH (security_invoker = true) AS SELECT * FROM api.v_mid",
+        "GRANT SELECT ON api.v_leaf, api.v_mid, api.v_top TO PUBLIC",
+    ] {
+        upstream
+            .simple_query(stmt)
+            .await
+            .unwrap_or_else(|e| panic!("upstream `{stmt}` failed: {e}"));
+    }
+
+    let (rs, _handle, shutdown_tx) = connect_rls(&test_name).await;
+    let top = "SELECT * FROM api.v_top";
+    rs.simple_query("SET ROLE authenticated")
+        .await
+        .expect("set role");
+    set_sub_claim(&rs, proto, "bob").await;
+    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {top}"))
+        .await
+        .expect("create cache");
+
+    // Nothing beneath v_top is RLS-active, so the cache is plain and serves every row.
+    assert_owner_ids_cached(&rs, proto, top, &["alice", "bob"], "plain cache before redefine")
+        .await;
+
+    // Redefine the leaf to read the RLS-active api.todos (same column names and types).
+    upstream
+        .simple_query(
+            "CREATE OR REPLACE VIEW api.v_leaf WITH (security_invoker = true) AS \
+             SELECT id, owner_id, title AS body FROM api.todos",
+        )
+        .await
+        .expect("redefine leaf");
+
+    let mut cached = false;
+    for _ in 0..40 {
+        if try_read_owner_ids(&rs, proto, top).await.ok() == Some(vec!["bob".to_string()])
+            && matches!(
+                psql_helpers::last_query_info(&rs).await.destination,
+                QueryDestination::ReadysetShallow(_)
+            )
+        {
+            cached = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    assert!(cached, "bob's scoped read after redefining the leaf never came from the cache");
+
+    assert_owner_ids_cached(&rs, proto, top, &["bob"], "bob after redefine").await;
+
+    // The re-created cache isolates per tenant.
+    set_sub_claim(&rs, proto, "alice").await;
+    assert_owner_ids_cached(&rs, proto, top, &["alice", "alice"], "alice after redefine").await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres, 15)]
+async fn pg_rls_shallow_cache_nested_view_leaf_redefined_simple() {
+    run_nested_view_leaf_redefined(Protocol::Simple).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres, 15)]
+async fn pg_rls_shallow_cache_nested_view_leaf_redefined_extended() {
+    run_nested_view_leaf_redefined(Protocol::Extended).await;
+}
+
+/// A plain cache over a view hierarchy must be dropped when RLS turns on for the plain base table
+/// beneath it. The cache is registered against every relation the analyzer reached, so the
+/// table's RLS-flag change finds it even though the query names only the top view.
+/// `security_invoker` requires Postgres 15.
+async fn run_rls_enabled_beneath_view_hierarchy(proto: Protocol) {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    PostgreSQLAdapter::recreate_database(&test_name).await;
+    setup_todos_upstream(&test_name).await;
+
+    // v_top -> v_mid -> v_leaf -> api.docs (no RLS), created before Readyset's snapshot.
+    let mut upstream_cfg = psql_helpers::upstream_config();
+    upstream_cfg.dbname(&test_name);
+    let upstream = psql_helpers::connect(upstream_cfg).await;
+    for stmt in [
+        "CREATE VIEW api.v_leaf WITH (security_invoker = true) AS \
+         SELECT id, owner_id, body FROM api.docs",
+        "CREATE VIEW api.v_mid WITH (security_invoker = true) AS SELECT * FROM api.v_leaf",
+        "CREATE VIEW api.v_top WITH (security_invoker = true) AS SELECT * FROM api.v_mid",
+        "GRANT SELECT ON api.v_leaf, api.v_mid, api.v_top TO PUBLIC",
+    ] {
+        upstream
+            .simple_query(stmt)
+            .await
+            .unwrap_or_else(|e| panic!("upstream `{stmt}` failed: {e}"));
+    }
+
+    let (rs, _handle, shutdown_tx) = connect_rls(&test_name).await;
+    let top = "SELECT * FROM api.v_top";
+    rs.simple_query("SET ROLE authenticated")
+        .await
+        .expect("set role");
+    set_sub_claim(&rs, proto, "bob").await;
+    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {top}"))
+        .await
+        .expect("create cache");
+    assert_owner_ids_cached(&rs, proto, top, &["alice", "bob"], "plain cache before RLS").await;
+
+    // Enable RLS and add the policy in one transaction, so no poll observes RLS without a policy.
+    upstream
+        .simple_query(
+            "BEGIN; \
+             ALTER TABLE api.docs ENABLE ROW LEVEL SECURITY; \
+             CREATE POLICY docs_owner ON api.docs FOR SELECT TO public USING \
+             (owner_id = ((current_setting('request.jwt.claims'::text, true))::json \
+             ->> 'sub'::text)); \
+             COMMIT",
+        )
+        .await
+        .expect("enable rls");
+
+    let mut cached = false;
+    for _ in 0..40 {
+        if try_read_owner_ids(&rs, proto, top).await.ok() == Some(vec!["bob".to_string()])
+            && matches!(
+                psql_helpers::last_query_info(&rs).await.destination,
+                QueryDestination::ReadysetShallow(_)
+            )
+        {
+            cached = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    assert!(cached, "bob's scoped read after enabling RLS never came from the cache");
+    assert_owner_ids_cached(&rs, proto, top, &["bob"], "bob after RLS").await;
+
+    set_sub_claim(&rs, proto, "alice").await;
+    assert_owner_ids_cached(&rs, proto, top, &["alice"], "alice after RLS").await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres, 15)]
+async fn pg_rls_shallow_cache_rls_enabled_beneath_view_hierarchy_simple() {
+    run_rls_enabled_beneath_view_hierarchy(Protocol::Simple).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres, 15)]
+async fn pg_rls_shallow_cache_rls_enabled_beneath_view_hierarchy_extended() {
+    run_rls_enabled_beneath_view_hierarchy(Protocol::Extended).await;
+}
+
+/// Toggling `security_invoker` on a view over an RLS-active table must be observed. Turning it off
+/// makes the view owner-context, which is not representable per session, so reads must go
+/// upstream; turning it back on must make the view cacheable per tenant again. `security_invoker`
+/// requires Postgres 15.
+async fn run_view_security_invoker_toggled(proto: Protocol) {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    PostgreSQLAdapter::recreate_database(&test_name).await;
+    setup_todos_upstream(&test_name).await;
+
+    let mut upstream_cfg = psql_helpers::upstream_config();
+    upstream_cfg.dbname(&test_name);
+    let upstream = psql_helpers::connect(upstream_cfg).await;
+    for stmt in [
+        "CREATE VIEW api.todos_view WITH (security_invoker = true) AS SELECT * FROM api.todos",
+        "GRANT SELECT ON api.todos_view TO PUBLIC",
+    ] {
+        upstream
+            .simple_query(stmt)
+            .await
+            .unwrap_or_else(|e| panic!("upstream `{stmt}` failed: {e}"));
+    }
+
+    let (rs, _handle, shutdown_tx) = connect_rls(&test_name).await;
+    let view = "SELECT * FROM api.todos_view";
+    rs.simple_query("SET ROLE authenticated")
+        .await
+        .expect("set role");
+    set_sub_claim(&rs, proto, "bob").await;
+    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {view}"))
+        .await
+        .expect("create cache");
+    assert_owner_ids_cached(&rs, proto, view, &["bob"], "scoped before toggle").await;
+
+    // Owner-context is not representable per session, so once the poller observes the change
+    // the analyzer refuses the view and every read goes upstream, never to the cached per-tenant
+    // entry. Wait on the routing rather than the rows: what Postgres returns for an owner-context
+    // view depends on who owns it.
+    upstream
+        .simple_query("ALTER VIEW api.todos_view SET (security_invoker = false)")
+        .await
+        .expect("security_invoker off");
+    let mut refused = false;
+    for _ in 0..40 {
+        read_owner_ids(&rs, proto, view).await;
+        if matches!(
+            psql_helpers::last_query_info(&rs).await.destination,
+            QueryDestination::Upstream
+        ) {
+            refused = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    assert!(refused, "turning security_invoker off was never observed");
+
+    // An upstream read only shows the old cache is gone; the analyzer must also refuse a new one.
+    let err = rs
+        .simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {view}"))
+        .await
+        .expect_err("a cache over an owner-context view must be refused");
+    assert!(
+        err.as_db_error()
+            .is_some_and(|e| e.message().contains("code=view_without_security_invoker")),
+        "unexpected refusal: {err:?}",
+    );
+    read_owner_ids(&rs, proto, view).await;
+    assert_dest(&rs, QueryDestination::Upstream, "owner-context view stays upstream").await;
+
+    // Back to invoker: Postgres scopes the rows at once, and once the poller observes the change
+    // the next read re-creates a per-tenant cache. Wait on the routing, since the rows are already
+    // right while the view is still refused.
+    upstream
+        .simple_query("ALTER VIEW api.todos_view SET (security_invoker = true)")
+        .await
+        .expect("security_invoker on");
+    let mut cached = false;
+    for _ in 0..40 {
+        let rows = read_owner_ids(&rs, proto, view).await;
+        assert_eq!(rows, ["bob"], "bob sees only his row through the invoker view");
+        if matches!(
+            psql_helpers::last_query_info(&rs).await.destination,
+            QueryDestination::ReadysetShallow(_)
+        ) {
+            cached = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    assert!(cached, "turning security_invoker back on was never observed");
+    assert_owner_ids_cached(&rs, proto, view, &["bob"], "bob after toggle back").await;
+    set_sub_claim(&rs, proto, "alice").await;
+    assert_owner_ids_cached(&rs, proto, view, &["alice", "alice"], "alice after toggle back")
+        .await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres, 15)]
+async fn pg_rls_shallow_cache_view_security_invoker_toggled_simple() {
+    run_view_security_invoker_toggled(Protocol::Simple).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres, 15)]
+async fn pg_rls_shallow_cache_view_security_invoker_toggled_extended() {
+    run_view_security_invoker_toggled(Protocol::Extended).await;
+}
+
+/// Renaming views so the name a cached query reads now resolves to a different view must drop the
+/// cache.
+async fn run_view_renamed_swap(proto: Protocol) {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    PostgreSQLAdapter::recreate_database(&test_name).await;
+    setup_todos_upstream(&test_name).await;
+
+    let mut upstream_cfg = psql_helpers::upstream_config();
+    upstream_cfg.dbname(&test_name);
+    let upstream = psql_helpers::connect(upstream_cfg).await;
+    for stmt in [
+        "CREATE VIEW api.plain_v WITH (security_invoker = true) AS \
+         SELECT id, owner_id, body FROM api.docs",
+        "CREATE VIEW api.rls_v WITH (security_invoker = true) AS \
+         SELECT id, owner_id, title AS body FROM api.todos",
+        "GRANT SELECT ON api.plain_v, api.rls_v TO PUBLIC",
+    ] {
+        upstream
+            .simple_query(stmt)
+            .await
+            .unwrap_or_else(|e| panic!("upstream `{stmt}` failed: {e}"));
+    }
+
+    let (rs, _handle, shutdown_tx) = connect_rls(&test_name).await;
+    let query = "SELECT * FROM api.plain_v";
+    rs.simple_query("SET ROLE authenticated")
+        .await
+        .expect("set role");
+    set_sub_claim(&rs, proto, "bob").await;
+    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {query}"))
+        .await
+        .expect("create cache");
+
+    // api.docs has no RLS, so the cache is plain and serves every row.
+    let mut cached = false;
+    for _ in 0..40 {
+        if try_read_owner_ids(&rs, proto, query).await.ok()
+            == Some(vec!["alice".to_string(), "bob".to_string()])
+            && matches!(
+                psql_helpers::last_query_info(&rs).await.destination,
+                QueryDestination::ReadysetShallow(_)
+            )
+        {
+            cached = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    assert!(cached, "read before swapping view names never came from the cache");
+
+    // Swap the names: api.plain_v now reads the RLS-active api.todos.
+    upstream
+        .simple_query(
+            "BEGIN; \
+             ALTER VIEW api.plain_v RENAME TO plain_old; \
+             ALTER VIEW api.rls_v RENAME TO plain_v; \
+             COMMIT",
+        )
+        .await
+        .expect("swap view names");
+
+    // Poll until bob's own row is served from the scoped cache.
+    let mut cached = false;
+    for _ in 0..40 {
+        if try_read_owner_ids(&rs, proto, query).await.ok() == Some(vec!["bob".to_string()])
+            && matches!(
+                psql_helpers::last_query_info(&rs).await.destination,
+                QueryDestination::ReadysetShallow(_)
+            )
+        {
+            cached = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    assert!(cached, "bob's scoped read after swapping view names never came from the cache");
+
+    set_sub_claim(&rs, proto, "alice").await;
+    assert_owner_ids_cached(&rs, proto, query, &["alice", "alice"], "alice after rename").await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres, 15)]
+async fn pg_rls_shallow_cache_view_renamed_swap_simple() {
+    run_view_renamed_swap(Protocol::Simple).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres, 15)]
+async fn pg_rls_shallow_cache_view_renamed_swap_extended() {
+    run_view_renamed_swap(Protocol::Extended).await;
+}

@@ -1,9 +1,10 @@
 //! Catalog poller.
 //!
-//! Periodically fingerprints `pg_policy` / `pg_class` / `pg_roles` (three
-//! independent hashes), diffs each tick against the previous one, and applies
-//! surgical reload events to the [`PolicyRegistry`]: it reloads only the
-//! relations and roles whose fingerprint changed, then routes invalidation
+//! Periodically fingerprints `pg_policy` / `pg_class` / `pg_roles` and each
+//! view's dependencies (independent hashes), diffs each tick against the
+//! previous one, and applies surgical reload events to the [`PolicyRegistry`]:
+//! it reloads only the relations, views, and roles whose fingerprint changed,
+//! then routes invalidation
 //! events into the shallow cache through the [`crate::InvalidationSink`].
 
 use std::collections::HashMap;
@@ -30,7 +31,7 @@ fn recovery_retry_delay(poll_interval: Duration) -> Duration {
     poll_interval.min(RECOVERY_RETRY_INTERVAL)
 }
 
-/// SQL for the three fingerprint queries. The diff helper compares old vs new maps keyed by OID.
+/// SQL for the fingerprint queries. The diff helper compares old vs new maps keyed by OID.
 pub(crate) mod sql {
     /// Per-relation hash over all of `pg_policy`'s columns that affect evaluation. A change in
     /// policy text, role list, command type, or permissive flag bumps the relation's hash.
@@ -53,13 +54,14 @@ pub(crate) mod sql {
         GROUP BY p.polrelid";
 
     /// Per-table RLS-flag hash. A change in relrowsecurity / relforcerowsecurity bumps this
-    /// relation's hash even when no policy text changed.
+    /// relation's hash even when no policy text changed. Views cannot carry RLS and are tracked
+    /// by [`VIEW_DEPS_FINGERPRINT`].
     pub(crate) const RLS_FLAG_FINGERPRINT: &str = "\
         SELECT c.oid, \
                md5(c.relrowsecurity::text || ':' || c.relforcerowsecurity::text) \
                  AS rls_flag_hash \
         FROM   pg_catalog.pg_class c \
-        WHERE  c.relkind IN ('r','p','v','m') \
+        WHERE  c.relkind IN ('r','p') \
           AND  c.relnamespace NOT IN \
                (SELECT oid FROM pg_catalog.pg_namespace \
                 WHERE  nspname IN ('pg_catalog','information_schema','pg_toast'))";
@@ -70,6 +72,28 @@ pub(crate) mod sql {
         SELECT oid, \
                md5(rolsuper::text || ':' || rolbypassrls::text) AS role_hash \
         FROM   pg_catalog.pg_roles";
+
+    /// Per-view hash over the view's qualified name, the relations it reads and its `reloptions`.
+    /// `CREATE OR REPLACE VIEW`, `ALTER VIEW ... RENAME` and `ALTER VIEW ... SET SCHEMA` keep the
+    /// view's OID, and `security_invoker` lives in `reloptions`, so none of them reaches the other
+    /// fingerprints. A redefinition that reads the same relations keeps the hash.
+    pub(crate) const VIEW_DEPS_FINGERPRINT: &str = "\
+        SELECT rw.ev_class AS oid, \
+               md5(n.nspname || '.' || v.relname \
+                   || '|' || coalesce(string_agg(DISTINCT d.refobjid::text, ',' \
+                                                 ORDER BY d.refobjid::text), '') \
+                   || '|' || coalesce(array_to_string(v.reloptions, ','), '')) \
+                 AS view_deps_hash \
+        FROM   pg_catalog.pg_rewrite rw \
+        JOIN   pg_catalog.pg_class   v ON v.oid = rw.ev_class \
+        JOIN   pg_catalog.pg_namespace n ON n.oid = v.relnamespace \
+        LEFT JOIN pg_catalog.pg_depend d \
+               ON  d.classid = 'pg_rewrite'::regclass AND d.objid = rw.oid \
+               AND d.refclassid = 'pg_class'::regclass AND d.refobjid <> rw.ev_class \
+        WHERE  rw.rulename = '_RETURN' \
+          AND  v.relkind IN ('v','m') \
+          AND  n.nspname NOT IN ('pg_catalog','information_schema','pg_toast') \
+        GROUP BY rw.ev_class, n.nspname, v.relname, v.reloptions";
 }
 
 #[derive(Debug, Error)]
@@ -104,6 +128,8 @@ pub enum ChangeEvent {
     RoleChanged(crate::Oid),
     /// A table's RLS-on flag flipped.
     RlsFlagChanged(crate::Oid),
+    /// A view's dependencies or `reloptions` changed, or the view appeared.
+    ViewDepsChanged(crate::Oid),
     /// A row that previously existed has been dropped.
     Removed { kind: ChangeKind, oid: crate::Oid },
 }
@@ -113,28 +139,33 @@ pub enum ChangeKind {
     Policy,
     Role,
     RlsFlag,
+    ViewDeps,
 }
 
-/// A coalesced fingerprint snapshot for a single poll tick. The three maps are independent.
+/// A coalesced fingerprint snapshot for a single poll tick. The maps are independent.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Fingerprints {
     pub policies: HashMap<PgOid, [u8; 16]>,
     pub rls_flags: HashMap<PgOid, [u8; 16]>,
     pub roles: HashMap<PgOid, [u8; 16]>,
+    pub views: HashMap<PgOid, [u8; 16]>,
 }
 
 impl Fingerprints {
-    /// Fetch all three fingerprints in one connection round trip.
+    /// Fetch all fingerprints in one connection round trip.
     pub async fn load(client: &tokio_postgres::Client) -> Result<Self, PollerError> {
         let policies =
             load_hash_map(client, sql::POLICY_FINGERPRINT, "polrelid", "policy_hash").await?;
         let rls_flags =
             load_hash_map(client, sql::RLS_FLAG_FINGERPRINT, "oid", "rls_flag_hash").await?;
         let roles = load_hash_map(client, sql::ROLE_FINGERPRINT, "oid", "role_hash").await?;
+        let views =
+            load_hash_map(client, sql::VIEW_DEPS_FINGERPRINT, "oid", "view_deps_hash").await?;
         Ok(Self {
             policies,
             rls_flags,
             roles,
+            views,
         })
     }
 
@@ -161,6 +192,13 @@ impl Fingerprints {
             &next.roles,
             ChangeEvent::RoleChanged,
             ChangeKind::Role,
+            &mut out,
+        );
+        diff_map(
+            &self.views,
+            &next.views,
+            ChangeEvent::ViewDepsChanged,
+            ChangeKind::ViewDeps,
             &mut out,
         );
         out
@@ -447,6 +485,11 @@ async fn apply_events(
                 kind: ChangeKind::Role,
                 ..
             } => counter!(metric::RLS_POLICY_RELOADS_TOTAL, "kind" => "role").increment(1),
+            ChangeEvent::ViewDepsChanged(_)
+            | ChangeEvent::Removed {
+                kind: ChangeKind::ViewDeps,
+                ..
+            } => counter!(metric::RLS_POLICY_RELOADS_TOTAL, "kind" => "view").increment(1),
         }
         let result = match event {
             ChangeEvent::RelationPolicyChanged(relid)
@@ -466,6 +509,11 @@ async fn apply_events(
                 kind: ChangeKind::Role,
                 oid: roleid,
             } => crate::loader::reload_role(client, registry, *roleid).await,
+            ChangeEvent::ViewDepsChanged(view)
+            | ChangeEvent::Removed {
+                kind: ChangeKind::ViewDeps,
+                oid: view,
+            } => crate::loader::reload_view(client, registry, *view).await,
         };
         if let Err(e) = result {
             warn!(?event, error = %e, "RLS surgical reload failed");
@@ -515,6 +563,13 @@ async fn apply_events(
                     kind: ChangeKind::Role,
                     oid: roleid,
                 } => sink.on_role_changed(*roleid),
+                ChangeEvent::ViewDepsChanged(view)
+                | ChangeEvent::Removed {
+                    kind: ChangeKind::ViewDeps,
+                    oid: view,
+                } => {
+                    sink.on_definition_changed(*view);
+                }
             }
         }
     }

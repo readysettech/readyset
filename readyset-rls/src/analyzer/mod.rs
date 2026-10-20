@@ -48,6 +48,28 @@ pub struct CacheSessionDeps {
     pub snapshot_generation: u64,
     /// Final verdict.
     pub cacheability: Cacheability,
+    /// Every relation the analysis reached: the query's relations, each view at every level, and
+    /// every base table whether or not it is RLS-active. Caches register against all of them so a
+    /// change anywhere beneath invalidates them.
+    pub visited_relations: SmallVec<[Oid; 4]>,
+}
+
+impl CacheSessionDeps {
+    /// Whether `other` reaches the same verdict, the same relations, and the same session inputs,
+    /// ignoring the generation each was produced under. Two analyses of one query that agree here
+    /// cache the same rows under the same partitioning.
+    pub fn same_dependencies(&self, other: &Self) -> bool {
+        fn sorted<T: Ord + Clone>(items: &[T]) -> Vec<T> {
+            let mut items = items.to_vec();
+            items.sort_unstable();
+            items.dedup();
+            items
+        }
+        self.cacheability == other.cacheability
+            && sorted(&self.session_rls_inputs) == sorted(&other.session_rls_inputs)
+            && sorted(&self.rls_active_for_tables) == sorted(&other.rls_active_for_tables)
+            && sorted(&self.visited_relations) == sorted(&other.visited_relations)
+    }
 }
 
 /// Reason a cache was refused. Surfaces in `EXPLAIN CACHE SUPPORT`: each variant has a stable

@@ -3280,11 +3280,11 @@ fn analyze_recovered_cache(
         }
     };
     let deps = readyset_rls::analyze_cache(registry, &referenced_relations);
-    // Include the analyzer's expanded RLS tables so invalidation keys on
-    // a view's underlying base tables, not just the query-referenced
-    // relation (the view itself).
+    // Include every relation the analyzer reached so invalidation keys on
+    // the views and base tables beneath a view, not just the
+    // query-referenced relation (the view itself).
     let mut relations: Vec<readyset_rls::Oid> = referenced_relations;
-    for &t in deps.rls_active_for_tables.iter() {
+    for &t in deps.visited_relations.iter() {
         if !relations.contains(&t) {
             relations.push(t);
         }

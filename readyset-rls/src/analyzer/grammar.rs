@@ -44,6 +44,7 @@ pub fn analyze(
         if !seen.insert(relid) {
             continue;
         }
+        deps.visited_relations.push(relid);
         let flags = registry.flags_for(relid).unwrap_or_default();
 
         // Views and materialized views carry no policies of their own. With `security_invoker`
@@ -73,6 +74,9 @@ pub fn analyze(
                         return deps;
                     }
                 }
+                // Not expanded, but still visited: RLS turning on beneath this view must reach
+                // the caches over it.
+                deps.visited_relations.extend(underlying.iter().copied());
             }
             continue;
         }
@@ -779,5 +783,82 @@ mod tests {
             deps.cacheability,
             Cacheability::Refuse(RefuseReason::PolicyTooDynamic(_))
         ));
+    }
+
+    fn plain_table(r: &Arc<PolicyRegistry>, relid: Oid) {
+        r.set_flags(
+            relid,
+            RelationFlags {
+                relkind: b'r',
+                ..Default::default()
+            },
+        );
+    }
+
+    /// A cache over a view hierarchy must register against every level and the plain base table,
+    /// so redefining any view or enabling RLS on the table reaches it.
+    #[test]
+    fn visited_relations_cover_every_view_level_and_plain_base() {
+        let r = registry();
+        plain_table(&r, 500);
+        view_over(&r, 501, 500, true);
+        view_over(&r, 502, 501, true);
+        let deps = analyze(&r, &[502], r.generation());
+        assert_eq!(deps.cacheability, Cacheability::Cacheable);
+        assert!(deps.rls_active_for_tables.is_empty());
+        for relid in [502, 501, 500] {
+            assert!(deps.visited_relations.contains(&relid), "missing {relid}");
+        }
+    }
+
+    /// Only RLS-active tables decide scoping, but every base table is visited.
+    #[test]
+    fn visited_relations_include_plain_and_rls_bases() {
+        let r = registry();
+        policy_table(&r, 510, "user_id = (SELECT auth.uid())");
+        plain_table(&r, 512);
+        view_over(&r, 511, 510, true);
+        r.set_view_underlying(511, vec![510, 512]);
+        let deps = analyze(&r, &[511], r.generation());
+        assert_eq!(deps.cacheability, Cacheability::Cacheable);
+        assert_eq!(deps.rls_active_for_tables.as_slice(), &[510]);
+        for relid in [511, 510, 512] {
+            assert!(deps.visited_relations.contains(&relid), "missing {relid}");
+        }
+    }
+
+    /// An owner-context view is not expanded, but its base table is still visited so enabling RLS
+    /// on that table reaches the plain cache over the view.
+    #[test]
+    fn visited_relations_include_owner_context_view_base() {
+        let r = registry();
+        plain_table(&r, 520);
+        view_over(&r, 521, 520, false);
+        let deps = analyze(&r, &[521], r.generation());
+        assert_eq!(deps.cacheability, Cacheability::Cacheable);
+        assert!(deps.visited_relations.contains(&521));
+        assert!(deps.visited_relations.contains(&520));
+    }
+
+    /// A catalog change elsewhere leaves a cache's dependencies intact; redefining a view beneath
+    /// it or enabling RLS on its base table does not.
+    #[test]
+    fn same_dependencies_ignores_unrelated_changes() {
+        let r = registry();
+        plain_table(&r, 530);
+        view_over(&r, 531, 530, true);
+        let before = analyze(&r, &[531], r.generation());
+
+        policy_table(&r, 539, "user_id = (SELECT auth.uid())");
+        r.bump_generation();
+        assert!(analyze(&r, &[531], r.generation()).same_dependencies(&before));
+
+        policy_table(&r, 532, "user_id = (SELECT auth.uid())");
+        r.set_view_underlying(531, vec![532]);
+        assert!(!analyze(&r, &[531], r.generation()).same_dependencies(&before));
+
+        r.set_view_underlying(531, vec![530]);
+        policy_table(&r, 530, "user_id = (SELECT auth.uid())");
+        assert!(!analyze(&r, &[531], r.generation()).same_dependencies(&before));
     }
 }

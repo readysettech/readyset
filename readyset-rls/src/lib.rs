@@ -41,6 +41,9 @@ pub trait InvalidationSink: Send + Sync {
     /// RLS was enabled on `relid`: drop the pre-existing plain caches over it so they re-enter and
     /// come back scoped if still cacheable.
     fn on_rls_flag_enabled(&self, relid: Oid);
+    /// A view's definition changed (the relations it reads, or its `security_invoker`): drop
+    /// every cache over `relid`, plain and scoped, so they re-enter against the reloaded registry.
+    fn on_definition_changed(&self, relid: Oid);
 }
 
 use std::sync::Arc;
@@ -97,6 +100,11 @@ impl InvalidationSink for DeferredSink {
     fn on_rls_flag_enabled(&self, relid: Oid) {
         if let Some(sink) = self.inner.get() {
             sink.on_rls_flag_enabled(relid);
+        }
+    }
+    fn on_definition_changed(&self, relid: Oid) {
+        if let Some(sink) = self.inner.get() {
+            sink.on_definition_changed(relid);
         }
     }
 }
