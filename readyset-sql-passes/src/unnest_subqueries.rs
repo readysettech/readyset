@@ -1,5 +1,5 @@
 use crate::derived_tables_rewrite::promote_null_rejecting_outer_joins_where;
-use crate::drop_redundant_join::UniqueColumnsSchema;
+use crate::drop_redundant_join::{UniqueColumnsSchema, UniqueColumnsSchemaImpl};
 use crate::inline_subquery::limit_clause_as_numbers;
 use crate::lateral_join::unnest_lateral_subqueries;
 use crate::rewrite_utils::{
@@ -39,9 +39,9 @@ use readyset_errors::{
 use readyset_sql::analysis::visit_mut::{VisitorMut, walk_expr};
 use readyset_sql::ast::JoinOperator::{InnerJoin, LeftOuterJoin};
 use readyset_sql::ast::{
-    BinaryOperator, Column, ColumnConstraint, Expr, FieldDefinitionExpr, FieldReference,
-    FunctionExpr, InValue, JoinClause, JoinConstraint, JoinOperator, LimitClause, Literal,
-    SelectStatement, SqlIdentifier, TableExpr, UnaryOperator,
+    BinaryOperator, Column, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, InValue,
+    JoinClause, JoinConstraint, JoinOperator, LimitClause, Literal, SelectStatement, SqlIdentifier,
+    TableExpr, UnaryOperator,
 };
 use readyset_sql::ast::{JoinRightSide, Relation, TableExprInner};
 use readyset_sql::{Dialect, DialectDisplay};
@@ -247,69 +247,21 @@ pub(crate) fn unnest_subqueries_main<U: UniqueColumnsSchema>(
     Ok(rewrite_status.combine(rewrite_status_1))
 }
 
-pub(crate) struct NonNullSchemaImpl {
-    nonnull_schema: HashMap<Relation, HashSet<Column>>,
+/// A [`NonNullSchema`] over a catalog, derived for each relation as it is looked up.
+pub(crate) struct NonNullSchemaImpl<C> {
+    ctx: C,
 }
 
-impl<C: BaseSchemasContext> From<C> for NonNullSchemaImpl {
+impl<C: BaseSchemasContext> From<C> for NonNullSchemaImpl<C> {
     fn from(ctx: C) -> Self {
-        let mut schema = NonNullSchemaImpl {
-            nonnull_schema: HashMap::new(),
-        };
-
-        for (rel, body) in ctx.base_schemas() {
-            let mut nonnull_cols = body
-                .fields
-                .iter()
-                .filter_map(|col_spec| {
-                    if col_spec.constraints.contains(&ColumnConstraint::NotNull)
-                        || col_spec.constraints.contains(&ColumnConstraint::PrimaryKey)
-                    {
-                        Some(col_spec.column.clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect::<HashSet<_>>();
-
-            // Table-level PRIMARY KEY implies NOT NULL for every column in
-            // the key.  Unlike table-level UNIQUE (which alone does not
-            // guarantee per-column non-nullness), the SQL standard requires
-            // every member of a PRIMARY KEY — even composite — to be
-            // individually NOT NULL.  Without this walk, schemas using the
-            // `CREATE TABLE t (id INT, PRIMARY KEY(id))` form (column
-            // declarations bare, key declared at the table level) would
-            // miss the NOT NULL fact entirely and downstream nullability
-            // inference in correlated-subquery analysis would
-            // over-conservatively treat `id` as nullable.
-            //
-            // Table-level UNIQUE is intentionally NOT added here: UNIQUE
-            // alone permits multiple NULL rows under the SQL `NULLS
-            // DISTINCT` default, and `NULLS NOT DISTINCT` only limits the
-            // count of NULL rows without making the column non-null in
-            // expression semantics.
-            if let Some(keys) = &body.keys {
-                for key in keys {
-                    if key.is_primary_key() {
-                        for col in key.get_columns() {
-                            nonnull_cols.insert(col.clone());
-                        }
-                    }
-                }
-            }
-
-            if !nonnull_cols.is_empty() {
-                schema.nonnull_schema.insert(rel.clone(), nonnull_cols);
-            }
-        }
-
-        schema
+        NonNullSchemaImpl { ctx }
     }
 }
 
-impl NonNullSchema for NonNullSchemaImpl {
+impl<C: BaseSchemasContext> NonNullSchema for NonNullSchemaImpl<C> {
     fn not_null_columns_of(&self, rel: &Relation) -> HashSet<Column> {
-        self.nonnull_schema.get(rel).cloned().unwrap_or_default()
+        UniqueColumnsSchema::not_null_columns_of(&UniqueColumnsSchemaImpl::from(&self.ctx), rel)
+            .unwrap_or_default()
     }
 }
 
@@ -2941,7 +2893,7 @@ fn count_lateral_aliases(stmt: &SelectStatement, out: &mut HashMap<Relation, usi
 mod nonnull_schema_impl_tests {
     use super::*;
     use readyset_sql::ast::{
-        ColumnSpecification, CreateTableBody, IndexKeyPart, SqlType, TableKey,
+        ColumnConstraint, ColumnSpecification, CreateTableBody, IndexKeyPart, SqlType, TableKey,
     };
 
     /// Build a minimal `CreateTableBody` with the given column names, inline

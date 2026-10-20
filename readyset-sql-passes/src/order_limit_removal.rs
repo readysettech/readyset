@@ -153,6 +153,7 @@ mod tests {
     use readyset_sql_parsing::parse_query;
 
     use super::*;
+    use crate::tests::test_utils::PerRelationBaseSchemas;
 
     impl BaseSchemasContext for HashMap<Relation, CreateTableBody> {
         fn base_schemas(&self) -> Box<dyn Iterator<Item = (&Relation, &CreateTableBody)> + '_> {
@@ -178,7 +179,7 @@ mod tests {
         };
         // c2 is `NOT NULL UNIQUE`: nullable `UNIQUE` does not guarantee
         // at-most-one because nullable-distinct semantics permit multiple
-        // NULL rows (see [`UniqueColumnsSchemaImpl::from`] for the gate).
+        // NULL rows (see [`UniqueColumnsSchemaImpl`] for the gate).
         let col2 = ColumnSpecification {
             column: Column {
                 name: "c2".into(),
@@ -278,6 +279,20 @@ mod tests {
         let mut revised_query = input_query.clone();
         revised_query.order_limit_removal(&base_schemas).unwrap();
         assert_eq!(input_query, revised_query);
+    }
+
+    /// Only the read relation's keys are looked up, so a point lookup's cost does not grow with
+    /// the number of tables in the catalog.
+    #[test]
+    fn looks_up_only_the_read_relation() {
+        let mut q =
+            parse_query(Dialect::MySQL, "SELECT t.c1 FROM t WHERE t.c1 = 1 LIMIT 1").unwrap();
+        q.order_limit_removal(PerRelationBaseSchemas(generate_base_schemas()))
+            .unwrap();
+        let SqlQuery::Select(stmt) = q else {
+            panic!("Invalid query returned: {q:?}")
+        };
+        assert_eq!(stmt.limit_clause, LimitClause::default());
     }
 
     #[test]

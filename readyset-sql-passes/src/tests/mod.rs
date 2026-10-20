@@ -9,4 +9,6 @@ mod normalize_subquery_positions_tests;
 #[cfg(test)]
 mod rewrite_joins_tests;
 #[cfg(test)]
+pub(crate) mod test_utils;
+#[cfg(test)]
 mod unnest_subqueries_tests;

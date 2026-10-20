@@ -68,17 +68,92 @@ pub(crate) trait UniqueColumnsSchema {
     }
 }
 
-pub(crate) struct UniqueColumnsSchemaImpl {
-    unique_keys: HashMap<Relation, HashSet<Vec<Column>>>,
-    not_null_cols: HashMap<Relation, HashSet<Column>>,
+/// A [`UniqueColumnsSchema`] over a catalog, derived for each relation as it is looked up.
+pub(crate) struct UniqueColumnsSchemaImpl<C> {
+    ctx: C,
 }
 
-impl UniqueColumnsSchema for UniqueColumnsSchemaImpl {
+impl<C: BaseSchemasContext> UniqueColumnsSchemaImpl<C> {
+    /// The relation's unique keys and its columns proven `NOT NULL`, or `None` when the catalog
+    /// does not hold it.
+    fn keys_and_not_null_columns(
+        &self,
+        rel: &Relation,
+    ) -> Option<(HashSet<Vec<Column>>, HashSet<Column>)> {
+        let body = self.ctx.base_schema(rel)?;
+        // Single walk over body.fields populates two sets:
+        //   - `single_unique_cols`: columns individually unique-and-non-null via
+        //     inline constraints (NotNull+Unique together, or PrimaryKey).  Each
+        //     such column becomes a 1-element unique key.
+        //   - `not_null_cols`: columns proven non-null by inline NotNull or
+        //     PrimaryKey.  Used below to gate table-level UNIQUE acceptance
+        //     (composite or single).
+        let mut keys: HashSet<Vec<Column>> = HashSet::new();
+        let mut not_null_cols = HashSet::new();
+        for col_spec in &body.fields {
+            let has_not_null = col_spec.constraints.contains(&ColumnConstraint::NotNull);
+            let has_unique = col_spec.constraints.contains(&ColumnConstraint::Unique);
+            let has_pk = col_spec.constraints.contains(&ColumnConstraint::PrimaryKey);
+            if has_not_null || has_pk {
+                not_null_cols.insert(col_spec.column.clone());
+            }
+            if (has_not_null && has_unique) || has_pk {
+                keys.insert(vec![col_spec.column.clone()]);
+            }
+        }
+
+        if let Some(table_keys) = &body.keys {
+            // Table-level PRIMARY KEY (any arity) implies NOT NULL on every
+            // member column by SQL semantics — unconditionally accepted.
+            //
+            // Table-level UNIQUE (any arity) is NOT a superkey unless every
+            // member column is proven `NOT NULL`: SQL permits multiple rows
+            // with NULL in a nullable UNIQUE column (NULLS DISTINCT default),
+            // so the constraint does not uniquely identify rows.
+            // `NULLS NOT DISTINCT` (Postgres 15+) limits the count of NULL
+            // rows but does not change `NULL = NULL` evaluation in join ON
+            // predicates — still UNKNOWN.  Gate table-level UNIQUE on
+            // proven NOT NULL for every member column.
+            for key in table_keys {
+                let cols: Vec<Column> = key.get_columns().iter().map(|c| (*c).clone()).collect();
+                if cols.is_empty() {
+                    continue;
+                }
+                let accepted = if key.is_primary_key() {
+                    true
+                } else if key.is_unique_key() {
+                    cols.iter().all(|c| not_null_cols.contains(c))
+                } else {
+                    false
+                };
+                if accepted {
+                    keys.insert(cols);
+                }
+            }
+        }
+
+        // Table-level PRIMARY KEY members are NOT NULL by SQL semantics —
+        // fold them into `not_null_cols` alongside the inline-derived ones
+        // so single-table queries that declare PKs only at the table level
+        // also expose member nullability info to downstream passes.
+        if let Some(table_keys) = &body.keys {
+            for key in table_keys {
+                if key.is_primary_key() {
+                    for c in key.get_columns() {
+                        not_null_cols.insert((*c).clone());
+                    }
+                }
+            }
+        }
+        Some((keys, not_null_cols))
+    }
+}
+
+impl<C: BaseSchemasContext> UniqueColumnsSchema for UniqueColumnsSchemaImpl<C> {
     fn unique_columns_of(&self, rel: &Relation) -> Option<HashSet<Column>> {
         let single_col: HashSet<Column> = self
-            .unique_keys
-            .get(rel)?
-            .iter()
+            .unique_keys_of(rel)?
+            .into_iter()
             .filter(|key| key.len() == 1)
             .map(|key| key[0].clone())
             .collect();
@@ -90,97 +165,19 @@ impl UniqueColumnsSchema for UniqueColumnsSchemaImpl {
     }
 
     fn unique_keys_of(&self, rel: &Relation) -> Option<HashSet<Vec<Column>>> {
-        self.unique_keys.get(rel).cloned()
+        let (keys, _) = self.keys_and_not_null_columns(rel)?;
+        (!keys.is_empty()).then_some(keys)
     }
 
     fn not_null_columns_of(&self, rel: &Relation) -> Option<HashSet<Column>> {
-        self.not_null_cols.get(rel).cloned()
+        let (_, not_null_cols) = self.keys_and_not_null_columns(rel)?;
+        (!not_null_cols.is_empty()).then_some(not_null_cols)
     }
 }
 
-impl<C: BaseSchemasContext> From<C> for UniqueColumnsSchemaImpl {
+impl<C: BaseSchemasContext> From<C> for UniqueColumnsSchemaImpl<C> {
     fn from(ctx: C) -> Self {
-        let mut unique_keys: HashMap<Relation, HashSet<Vec<Column>>> = HashMap::new();
-        let mut not_null_cols_by_rel: HashMap<Relation, HashSet<Column>> = HashMap::new();
-
-        for (rel, body) in ctx.base_schemas() {
-            // Single walk over body.fields populates two sets:
-            //   - `single_unique_cols`: columns individually unique-and-non-null via
-            //     inline constraints (NotNull+Unique together, or PrimaryKey).  Each
-            //     such column becomes a 1-element unique key.
-            //   - `not_null_cols`: columns proven non-null by inline NotNull or
-            //     PrimaryKey.  Used below to gate table-level UNIQUE acceptance
-            //     (composite or single).
-            let mut keys: HashSet<Vec<Column>> = HashSet::new();
-            let mut not_null_cols = HashSet::new();
-            for col_spec in &body.fields {
-                let has_not_null = col_spec.constraints.contains(&ColumnConstraint::NotNull);
-                let has_unique = col_spec.constraints.contains(&ColumnConstraint::Unique);
-                let has_pk = col_spec.constraints.contains(&ColumnConstraint::PrimaryKey);
-                if has_not_null || has_pk {
-                    not_null_cols.insert(col_spec.column.clone());
-                }
-                if (has_not_null && has_unique) || has_pk {
-                    keys.insert(vec![col_spec.column.clone()]);
-                }
-            }
-
-            if let Some(table_keys) = &body.keys {
-                // Table-level PRIMARY KEY (any arity) implies NOT NULL on every
-                // member column by SQL semantics — unconditionally accepted.
-                //
-                // Table-level UNIQUE (any arity) is NOT a superkey unless every
-                // member column is proven `NOT NULL`: SQL permits multiple rows
-                // with NULL in a nullable UNIQUE column (NULLS DISTINCT default),
-                // so the constraint does not uniquely identify rows.
-                // `NULLS NOT DISTINCT` (Postgres 15+) limits the count of NULL
-                // rows but does not change `NULL = NULL` evaluation in join ON
-                // predicates — still UNKNOWN.  Gate table-level UNIQUE on
-                // proven NOT NULL for every member column.
-                for key in table_keys {
-                    let cols: Vec<Column> =
-                        key.get_columns().iter().map(|c| (*c).clone()).collect();
-                    if cols.is_empty() {
-                        continue;
-                    }
-                    let accepted = if key.is_primary_key() {
-                        true
-                    } else if key.is_unique_key() {
-                        cols.iter().all(|c| not_null_cols.contains(c))
-                    } else {
-                        false
-                    };
-                    if accepted {
-                        keys.insert(cols);
-                    }
-                }
-            }
-
-            if !keys.is_empty() {
-                unique_keys.insert((*rel).clone(), keys);
-            }
-            // Table-level PRIMARY KEY members are NOT NULL by SQL semantics —
-            // fold them into `not_null_cols` alongside the inline-derived ones
-            // so single-table queries that declare PKs only at the table level
-            // also expose member nullability info to downstream passes.
-            if let Some(table_keys) = &body.keys {
-                for key in table_keys {
-                    if key.is_primary_key() {
-                        for c in key.get_columns() {
-                            not_null_cols.insert((*c).clone());
-                        }
-                    }
-                }
-            }
-            if !not_null_cols.is_empty() {
-                not_null_cols_by_rel.insert((*rel).clone(), not_null_cols);
-            }
-        }
-
-        UniqueColumnsSchemaImpl {
-            unique_keys,
-            not_null_cols: not_null_cols_by_rel,
-        }
+        UniqueColumnsSchemaImpl { ctx }
     }
 }
 
@@ -337,7 +334,7 @@ fn lhs_is_subset_of_rhs<U: UniqueColumnsSchema>(
     // extras on nullable columns carry null-rejection semantics that
     // dropping the JOIN would silently lose (INNER: rows where the column
     // is NULL would survive; LEFT: rows would lose RHS null-extension).
-    // Honors the NULLS-DISTINCT gate from `UniqueColumnsSchemaImpl::from`
+    // Honors the NULLS-DISTINCT gate in `UniqueColumnsSchemaImpl`
     // (table-level UNIQUE requires every member NOT NULL; PRIMARY KEY is
     // unconditional).
     let rhs_names: HashSet<SqlIdentifier> = pairs.iter().map(|(_, r)| r.name.clone()).collect();
@@ -629,6 +626,7 @@ fn try_drop_self_join_at<U: UniqueColumnsSchema>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests::test_utils::PerRelationBaseSchemas;
     use readyset_sql::ast::{
         ColumnSpecification, CreateTableBody, IndexKeyPart, SqlType, TableKey,
     };
@@ -663,6 +661,41 @@ mod tests {
             name: name.into(),
             table: Some(Relation::from(table)),
         }
+    }
+
+    /// A lookup reads only the relation it asks about, so its cost does not grow with the
+    /// number of tables in the catalog.
+    #[test]
+    fn lookups_read_only_the_relation_asked_about() {
+        let rel: Relation = "t".into();
+        let body = make_body(
+            &[
+                ("t", "id", vec![ColumnConstraint::PrimaryKey]),
+                ("t", "a", vec![ColumnConstraint::NotNull]),
+                ("t", "b", vec![]),
+            ],
+            vec![],
+        );
+        let schema = UniqueColumnsSchemaImpl::from(PerRelationBaseSchemas(HashMap::from([(
+            rel.clone(),
+            body,
+        )])));
+        let id = mk_col("t", "id");
+        assert_eq!(
+            schema.unique_keys_of(&rel),
+            Some(HashSet::from([vec![id.clone()]]))
+        );
+        assert_eq!(
+            schema.unique_columns_of(&rel),
+            Some(HashSet::from([id.clone()]))
+        );
+        assert_eq!(
+            schema.not_null_columns_of(&rel),
+            Some(HashSet::from([id, mk_col("t", "a")]))
+        );
+        let absent: Relation = "u".into();
+        assert_eq!(schema.unique_keys_of(&absent), None);
+        assert_eq!(schema.not_null_columns_of(&absent), None);
     }
 
     #[test]
