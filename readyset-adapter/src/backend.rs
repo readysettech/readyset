@@ -117,7 +117,7 @@ use readyset_sql::ast::{
     SqlQuery, TrxCachePolicy, UseStatement,
 };
 use readyset_sql::{Dialect, DialectDisplay, TryFromDialect};
-use readyset_sql_parsing::ParsingPreset;
+use readyset_sql_parsing::{ParsingPreset, ReadysetParsingError};
 use readyset_sql_passes::adapter_rewrites::{
     self, AdapterRewriteContext, AdapterRewriteParams, ShallowQueryParameters,
 };
@@ -865,13 +865,13 @@ fn parse_shallow_query(
     settings: &BackendSettings,
     query: &str,
 ) -> (
-    ReadySetResult<ShallowCacheQuery>,
+    Result<ShallowCacheQuery, ReadysetParsingError>,
     Option<ReadysetHintDirective>,
 ) {
     trace!(%query, "Parsing shallow query");
     match readyset_sql_parsing::parse_shallow_query(settings.dialect, query) {
         Ok((q, directive)) => (Ok(q), directive),
-        Err(e) => (Err(e.into()), None),
+        Err(e) => (Err(e), None),
     }
 }
 
@@ -943,7 +943,7 @@ where
     /// Rewrite and wrap a shallow query into a [`ShallowViewRequest`].
     fn rewrite_shallow_query(
         &self,
-        shallow: Result<ShallowCacheQuery, ReadySetError>,
+        shallow: Result<ShallowCacheQuery, ReadysetParsingError>,
     ) -> Option<(ShallowViewRequest, ShallowQueryParameters)> {
         let Ok(mut query) = shallow else {
             return None;
