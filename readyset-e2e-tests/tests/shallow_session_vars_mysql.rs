@@ -307,7 +307,7 @@ async fn block_encryption_mode_partitions_entries() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial)]
-#[upstream(mysql)]
+#[upstream(mysql, modern)]
 async fn windowing_use_high_precision_partitions_entries() {
     // With high precision off, MySQL removes the departing 1e20 from a running sum, which loses
     // the 1 that was absorbed when the 1e20 was added.
