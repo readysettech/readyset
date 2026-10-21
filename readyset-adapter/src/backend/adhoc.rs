@@ -330,24 +330,14 @@ where
                             }
                             UpstreamSetRewrite::Skip => None,
                         };
-                        // Mirror session state only if the upstream accepted the statement.
-                        pending_set_state.apply(&mut connectors.noria);
-                        if let Some(session) = connectors.session.as_ref() {
-                            match &set {
-                                SetStatement::SessionAuthorization(auth) => {
-                                    Self::mirror_session_authorization(
-                                        session,
-                                        state.policy_registry.as_ref(),
-                                        auth,
-                                    );
-                                }
-                                _ => Self::mirror_set_role(
-                                    session,
-                                    state.policy_registry.as_ref(),
-                                    &set,
-                                ),
-                            }
-                        }
+                        Self::apply_set(
+                            pending_set_state,
+                            &mut connectors.noria,
+                            connectors.session.as_deref(),
+                            settings,
+                            state,
+                            &set,
+                        );
                         match result {
                             Some(result) => Ok(QueryResult::Upstream(result, None, None)),
                             None => Ok(QueryResult::Noria(noria_connector::QueryResult::Empty)),
@@ -422,8 +412,15 @@ where
                     // messages are dropped - we do not support transactions in noria standalone.
                     // We return an empty result set instead of an error to support test
                     // applications.
-                    SqlQuery::Set(_) => {
-                        pending_set_state.apply(&mut connectors.noria);
+                    SqlQuery::Set(set) => {
+                        Self::apply_set(
+                            pending_set_state,
+                            &mut connectors.noria,
+                            connectors.session.as_deref(),
+                            settings,
+                            state,
+                            set,
+                        );
                         Ok(noria_connector::QueryResult::Empty)
                     }
                     SqlQuery::StartTransaction(_)
@@ -517,20 +514,6 @@ where
             _ => None,
         };
 
-        // Mirror a simple-protocol `set_config(...)` batch into the session.
-        // The extended protocol recognizes it at prepare and applies it at
-        // execute with the bound parameters; the simple path carries no bound
-        // params, so the literal-valued form is recognized and applied here
-        // (an empty parameter vector resolves the literal sources, and any
-        // stray `$N` source resolves to nothing and fails the batch closed).
-        if let Some(session) = connectors.session.as_ref()
-            && let Some(registry) = state.policy_registry.as_ref()
-            && let Ok(q) = &parsed
-            && let Some(template) = session_mutation::recognize(q)
-        {
-            session_mutation::apply(&template, &[], session, registry);
-        }
-
         if let Some(result) = Self::check_readyset_schema_routing(settings, state, &parsed)? {
             return Ok(result);
         }
@@ -554,6 +537,22 @@ where
                 state.write_tracker.mark_write()
             }
             _ => {}
+        }
+
+        // A simple-protocol `set_config(...)` batch goes upstream and updates the SessionContext
+        // once upstream accepts it. The simple path has no bound parameters, so an empty parameter
+        // vector resolves the literal sources, and a stray `$N` source resolves to nothing and
+        // fails the batch closed.
+        if let (Some(session), Some(registry), Ok(q)) =
+            (&connectors.session, &state.policy_registry, &parsed)
+            && let Some(template) = session_mutation::recognize(q)
+        {
+            let result =
+                Self::query_fallback(connectors.upstream.as_mut(), query, event, None).await;
+            if result.is_ok() {
+                session_mutation::apply(&template, &[], session, registry);
+            }
+            return result;
         }
 
         let result = match parsed {

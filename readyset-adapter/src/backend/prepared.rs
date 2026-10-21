@@ -38,10 +38,11 @@ use super::routing::{
     ProxyState, ReadKind, SelectRouter, has_topk_literal_limit, record_skip_cache,
     rewrite_for_cache,
 };
+use super::set_handler::PendingSetState;
 use super::{
-    Backend, MigrationMode, PrepareResult, PrepareResultInner, QueryInfo, QueryResult, StatementId,
-    acl_decline_reason, convert_or_parse_query, log_query, no_upstream_err, parse_query,
-    parse_shallow_query, shallow_warnings,
+    Backend, BackendSettings, BackendState, MigrationMode, PrepareResult, PrepareResultInner,
+    QueryInfo, QueryResult, StatementId, acl_decline_reason, convert_or_parse_query, log_query,
+    no_upstream_err, parse_query, parse_shallow_query, shallow_warnings,
 };
 use crate::query_handler::UpstreamSetRewrite;
 use crate::query_status_cache::{
@@ -71,8 +72,13 @@ enum PrepareMeta {
     ShallowSelect(PrepareShallowSelectMeta),
     /// A transaction boundary (Start, Commit, Rollback)
     Transaction { stmt: SqlQuery },
-    /// A set command
-    Set { stmt: SetStatement },
+    /// A set command, with what to send upstream and the changes it makes to Readyset's copy of the
+    /// session state
+    Set {
+        stmt: SetStatement,
+        upstream_rewrite: UpstreamSetRewrite,
+        set_state: PendingSetState,
+    },
     /// A `DISCARD` / `RESET ALL` full-session reset
     Discard { stmt: DiscardStatement },
 }
@@ -130,6 +136,9 @@ where
     execution_info: Option<ExecutionInfo>,
     /// If query was successfully parsed, will store the parsed query
     parsed_query: Option<Arc<SqlQuery>>,
+    /// For a `SET`, the changes each execute makes to Readyset's copy of the session state once
+    /// upstream accepts it
+    set_state: Option<PendingSetState>,
     /// If was able to hash the query, will store the generated hash
     query_id: Option<QueryId>,
     /// If statement was successfully rewritten, will store all information necessary to install
@@ -571,28 +580,17 @@ where
         }
     }
 
-    /// Ensure we are allowed to handle the SET statement.
+    /// Prepare a SET statement that [`Self::handle_set`] allowed.
     async fn prepare_set(
         &mut self,
         stmt: &SetStatement,
+        upstream_set_rewrite: &UpstreamSetRewrite,
         query: &str,
         data: DB::PrepareData<'_>,
         statement_type: PreparedStatementType,
-        event: &mut QueryExecutionEvent,
     ) -> Result<PrepareResultInner<DB>, DB::Error> {
         Self::check_routing(&self.connectors, &mut self.state).await?;
 
-        // if `handle_set()` returns an error, we aren't supposed to process
-        // the SET anyway, so propagating the error is expected.
-        // Then we need to determine if we're actually going to proxy to the upstream.
-        let (upstream_set_rewrite, pending_set_state) = Self::handle_set(
-            &mut self.connectors,
-            &self.settings,
-            &mut self.state,
-            query,
-            stmt,
-            event,
-        )?;
         // A SET must always reach the upstream connection to take effect there,
         // matching the simple-protocol path which proxies SET regardless of
         // proxy state. `should_proxy()` governs ordinary reads, not session-
@@ -615,8 +613,6 @@ where
                 })
             }
         };
-        // Mirror session state only if the upstream accepted the statement.
-        pending_set_state.apply(&mut self.connectors.noria);
 
         Ok(res)
     }
@@ -855,7 +851,21 @@ where
                 | query @ SqlQuery::Commit(_)
                 | query @ SqlQuery::Rollback(_),
             ) => PrepareMeta::Transaction { stmt: query },
-            Ok(SqlQuery::Set(s)) => PrepareMeta::Set { stmt: s },
+            Ok(SqlQuery::Set(stmt)) => {
+                let (upstream_rewrite, set_state) = Self::handle_set(
+                    &self.connectors,
+                    &self.settings,
+                    &mut self.state,
+                    query,
+                    &stmt,
+                    event,
+                )?;
+                PrepareMeta::Set {
+                    stmt,
+                    upstream_rewrite,
+                    set_state,
+                }
+            }
             Ok(SqlQuery::Discard(d)) => PrepareMeta::Discard { stmt: d },
             Ok(pq) => {
                 debug!(
@@ -908,8 +918,12 @@ where
                 self.prepare_write(query, stmt, data, statement_type, event)
                     .await
             }
-            PrepareMeta::Set { stmt } => {
-                self.prepare_set(stmt, query, data, statement_type, event)
+            PrepareMeta::Set {
+                stmt,
+                upstream_rewrite,
+                ..
+            } => {
+                self.prepare_set(stmt, upstream_rewrite, query, data, statement_type)
                     .await
             }
             PrepareMeta::Discard { .. } => self.prepare_discard(query, data, statement_type).await,
@@ -962,6 +976,7 @@ where
                 migration_state: MigrationState::Successful(CacheType::Deep),
                 execution_info: None,
                 parsed_query: Some(Arc::new(stmt)),
+                set_state: None,
                 view_request: None,
                 shallow: None,
                 trx_cache_policy: TrxCachePolicy::Never,
@@ -971,12 +986,15 @@ where
                 inline_literal_caches_generation: 0,
                 prepare_proxy_reason,
             },
-            PrepareMeta::Set { stmt } => PreparedStatement {
+            PrepareMeta::Set {
+                stmt, set_state, ..
+            } => PreparedStatement {
                 query_id: None,
                 prep: PrepareResult::new(statement_id, prep),
                 migration_state: MigrationState::Successful(CacheType::Deep),
                 execution_info: None,
                 parsed_query: Some(Arc::new(SqlQuery::Set(stmt))),
+                set_state: Some(set_state),
                 view_request: None,
                 shallow: None,
                 trx_cache_policy: TrxCachePolicy::Never,
@@ -992,6 +1010,7 @@ where
                 migration_state: MigrationState::Successful(CacheType::Deep),
                 execution_info: None,
                 parsed_query: Some(Arc::new(SqlQuery::Discard(stmt))),
+                set_state: None,
                 view_request: None,
                 shallow: None,
                 trx_cache_policy: TrxCachePolicy::Never,
@@ -1016,6 +1035,7 @@ where
                 migration_state,
                 execution_info: None,
                 parsed_query: Some(Arc::new(SqlQuery::Select(stmt))),
+                set_state: None,
                 view_request: Some(view_request),
                 shallow: None,
                 trx_cache_policy,
@@ -1036,6 +1056,7 @@ where
                 migration_state: MigrationState::Successful(CacheType::Shallow),
                 execution_info: None,
                 parsed_query: None,
+                set_state: None,
                 view_request: None,
                 shallow: Some(stmt),
                 trx_cache_policy,
@@ -1054,6 +1075,7 @@ where
                 migration_state: MigrationState::Successful(CacheType::Deep),
                 execution_info: None,
                 parsed_query: None,
+                set_state: None,
                 view_request: None,
                 shallow: None,
                 trx_cache_policy: TrxCachePolicy::Never,
@@ -1391,6 +1413,14 @@ where
         Self::check_routing(&self.connectors, &mut self.state).await?;
         self.state.last_query = None;
         self.state.pending_proxy_reason = None;
+        if self
+            .state
+            .prepared
+            .get(id)
+            .is_some_and(|s| s.set_state.is_some())
+        {
+            return self.execute_set(id, params, exec_meta).await;
+        }
         let schema_search_path = self.connectors.noria.schema_search_path().to_vec();
         // Taken before the statement is borrowed, since that borrow spans the dispatch below and
         // the template is only applied afterwards. `None` for everything but the recognised
@@ -1786,29 +1816,6 @@ where
             session_mutation::apply(template, params, session, registry);
         }
 
-        // Mirror a prepared `SET [LOCAL] SESSION AUTHORIZATION` once upstream
-        // has applied it, matching `query_adhoc_non_select` on the simple
-        // path. Without this the extended protocol changes the upstream
-        // identity while the mirror keeps the old one, and later scoped
-        // lookups would key against a stale partition.
-        if result.is_ok()
-            && let Some(session) = self.connectors.session.as_ref()
-            && let Some(SqlQuery::Set(SetStatement::SessionAuthorization(auth))) =
-                cached_statement.parsed_query.as_deref()
-        {
-            Self::mirror_session_authorization(session, self.state.policy_registry.as_ref(), auth);
-        }
-
-        // Mirror a prepared `SET [LOCAL] ROLE` once upstream has applied it, matching the simple
-        // path. Role membership is an authorization boundary, so a `SET ROLE` upstream rejects must
-        // not advance the mirror; gating on `result.is_ok()` (the execute outcome) enforces that.
-        if result.is_ok()
-            && let Some(session) = self.connectors.session.as_ref()
-            && let Some(SqlQuery::Set(set)) = cached_statement.parsed_query.as_deref()
-        {
-            Self::mirror_set_role(session, self.state.policy_registry.as_ref(), set);
-        }
-
         if result.is_ok()
             && let Some(session) = self.connectors.session.as_ref()
             && let Some(SqlQuery::Discard(d)) = cached_statement.parsed_query.as_deref()
@@ -1845,12 +1852,97 @@ where
             }
         };
 
-        let staged = self
+        let prepare_proxy_reason = cached_statement.prepare_proxy_reason;
+        Self::finish_execute(
+            &mut self.state,
+            &self.settings,
+            event,
+            &result,
+            prepare_proxy_reason,
+        );
+
+        let proxy_state = self.state.proxy_state;
+        result.map(|r| (r, proxy_state))
+    }
+
+    /// Execute a prepared `SET`, and apply its changes to Readyset's copy of the session state
+    /// once upstream accepts it.
+    async fn execute_set<'a>(
+        &'a mut self,
+        id: StatementId,
+        params: &[DfValue],
+        exec_meta: &'a DB::ExecMeta,
+    ) -> Result<(QueryResult<'a, DB>, ProxyState), DB::Error> {
+        let mut event = QueryExecutionEvent::new(EventType::Execute);
+        event.recording = self.event_recording();
+        let cached_statement = self
             .state
-            .pending_proxy_reason
-            .take()
-            .or(cached_statement.prepare_proxy_reason);
-        self.state.last_query = if self.state.query_log_sender.is_some() {
+            .prepared
+            .get(id)
+            .ok_or(PreparedStatementMissing { statement_id: id })?;
+        if event.recording {
+            event.query.clone_from(&cached_statement.parsed_query);
+        }
+
+        let result = match &cached_statement.prep.inner {
+            PrepareResultInner::Upstream(prep) => {
+                Self::execute_upstream(
+                    Self::upstream_mut(&mut self.connectors.upstream)?,
+                    prep,
+                    params,
+                    exec_meta,
+                    None,
+                    &mut event,
+                    false,
+                    None,
+                )
+                .await
+            }
+            _ => {
+                event.destination = Some(QueryDestination::Readyset(None));
+                Ok(QueryResult::Noria(noria_connector::QueryResult::Empty))
+            }
+        };
+
+        let parsed_query = cached_statement.parsed_query.clone();
+        let set_state = cached_statement.set_state.clone();
+        let prepare_proxy_reason = cached_statement.prepare_proxy_reason;
+        if result.is_ok()
+            && let Some(set_state) = set_state
+            && let Some(SqlQuery::Set(set)) = parsed_query.as_deref()
+        {
+            Self::apply_set(
+                set_state,
+                &mut self.connectors.noria,
+                self.connectors.session.as_deref(),
+                &self.settings,
+                &mut self.state,
+                set,
+            );
+        }
+
+        Self::finish_execute(
+            &mut self.state,
+            &self.settings,
+            event,
+            &result,
+            prepare_proxy_reason,
+        );
+
+        let proxy_state = self.state.proxy_state;
+        result.map(|r| (r, proxy_state))
+    }
+
+    /// Record a finished execute as the session's last statement, and log it.
+    fn finish_execute(
+        state: &mut BackendState<DB>,
+        settings: &BackendSettings,
+        mut event: QueryExecutionEvent,
+        result: &Result<QueryResult<'_, DB>, DB::Error>,
+        prepare_proxy_reason: Option<&'static str>,
+    ) {
+        let staged = state.pending_proxy_reason.take().or(prepare_proxy_reason);
+        state.last_query = if state.query_log_sender.is_some() {
             QueryInfo::from_event(&event)
         } else {
             // The event's next stop, `log_query`, only reads the timings: destination and
@@ -1858,16 +1950,13 @@ where
             QueryInfo::take_from_event(&mut event)
         }
         .map(|i| i.or_reason(staged));
-        self.state.last_warnings = shallow_warnings(&result);
+        state.last_warnings = shallow_warnings(result);
         log_query(
-            self.state.query_log_sender.as_ref(),
+            state.query_log_sender.as_ref(),
             event,
-            self.settings.slowlog,
-            self.settings.dialect,
+            settings.slowlog,
+            settings.dialect,
         );
-
-        let proxy_state = self.state.proxy_state;
-        result.map(|r| (r, proxy_state))
     }
 
     pub async fn remove_statement(&mut self, deallocate_id: DeallocateId) -> Result<(), DB::Error> {

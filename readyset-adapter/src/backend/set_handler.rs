@@ -1,5 +1,5 @@
-//! `SET` handling: deciding what a session-level `SET` means for Readyset, and mirroring the
-//! ones that change identity into the session context.
+//! `SET` handling: deciding what a session-level `SET` means for Readyset, and recording the
+//! changes in Readyset's copy of the session state once the upstream accepts them.
 //!
 //! Both protocols route here. A `SET` the adapter accepts is forwarded upstream so the session
 //! there stays authoritative; what varies is whether Readyset can model the change, and whether
@@ -11,10 +11,11 @@ use std::sync::Arc;
 use metrics::counter;
 use readyset_client_metrics::QueryExecutionEvent;
 use readyset_data::encoding::Encoding;
-use readyset_errors::ReadySetError;
+use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_sql::DialectDisplay;
 use readyset_sql::ast::{
-    Literal, SessionAuthorizationValue, SetSessionAuthorization, SetStatement,
+    Literal, PostgresParameterScope, SessionAuthorizationValue, SetSessionAuthorization,
+    SetStatement, SqlIdentifier,
 };
 use readyset_util::SizeOf;
 use tracing::{debug, error, trace, warn};
@@ -22,14 +23,17 @@ use tracing::{debug, error, trace, warn};
 use super::noria_connector::NoriaConnector;
 use super::routing::ProxyState;
 use super::{Backend, BackendConnectors, BackendSettings, BackendState, UnsupportedSetMode};
-use crate::query_handler::{SetBehavior, UpstreamSetRewrite};
-use crate::session_context::SessionContext;
+use crate::query_handler::{SessionTimezone, SetBehavior, UpstreamSetRewrite};
+use crate::session_context::{SessionContext, SetSessionEffect};
 use crate::{QueryHandler, UpstreamDatabase};
 
-/// Readyset-side session state from a `SET` that mirrors state the upstream session owns, so
-/// it must be applied only once the upstream accepts the statement.
-#[derive(Debug, Default)]
+/// Changes a `SET` makes to Readyset's copy of the upstream session's state. Apply them only after
+/// the upstream accepts the statement.
+#[derive(Debug, Default, Clone)]
 pub(super) struct PendingSetState {
+    autocommit: Option<bool>,
+    search_path: Option<Vec<SqlIdentifier>>,
+    timezone: Option<SessionTimezone>,
     results_collation: Option<u16>,
     results_encoding: Option<Encoding>,
     client_encoding: Option<Encoding>,
@@ -37,7 +41,41 @@ pub(super) struct PendingSetState {
 }
 
 impl PendingSetState {
-    pub(super) fn apply(self, noria: &mut NoriaConnector) {
+    fn new(behavior: SetBehavior) -> Self {
+        let SetBehavior {
+            unsupported,
+            set_autocommit,
+            set_search_path,
+            set_results_collation,
+            set_results_encoding,
+            set_client_encoding,
+            set_session_vars,
+            set_timezone,
+            ..
+        } = behavior;
+        Self {
+            autocommit: set_autocommit,
+            search_path: set_search_path,
+            // The handler records `set_timezone` even for non-UTC values so a future eval-side fix
+            // can read it unchanged. Only a UTC-equivalent zone is applied. Cached results are
+            // UTC wall-clock times, so another zone would silently localize them.
+            timezone: set_timezone.filter(|_| !unsupported),
+            results_collation: set_results_collation,
+            results_encoding: set_results_encoding,
+            client_encoding: set_client_encoding,
+            session_vars: set_session_vars,
+        }
+    }
+
+    fn apply(self, noria: &mut NoriaConnector) {
+        if let Some(search_path) = self.search_path {
+            trace!(?search_path, "Setting search_path");
+            noria.set_schema_search_path(search_path);
+        }
+        if let Some(tz) = self.timezone {
+            trace!(?tz, "Setting timezone");
+            noria.set_timezone(tz);
+        }
         if let Some(collation) = self.results_collation {
             trace!(collation, "Setting results_collation");
             noria.set_results_collation(collation);
@@ -63,40 +101,17 @@ where
     DB::CacheEntry: SizeOf,
     Handler: 'static + QueryHandler,
 {
-    /// Handles a parsed set statement by deferring to `Handler::handle_set_statement` and
-    /// respecting `BackendSettings::unsupported_set_mode`. When the search path is changed
-    /// (SetBehavior::SetSearchPath) or other sets need to be handled (certain variables being
-    /// changed), the `noria` instance gets updated accordingly.
-    ///
-    /// - If upstream exists, valid set statements are forwarded to it.
-    /// - If no upstream is present, statements are typically ignored.
-    /// - Disallowed set statements always produce an error.
-    ///
-    /// The returned [`PendingSetState`] is applied by the caller after the statement succeeds.
-    pub(super) fn handle_set(
-        connectors: &mut BackendConnectors<DB>,
-        settings: &BackendSettings,
-        state: &mut BackendState<DB>,
-        query: &str,
+    /// Return the effect of `set` on Readyset, with variables set to their default resolved to the
+    /// upstream's default values.
+    fn set_behavior(
+        connectors: &BackendConnectors<DB>,
+        state: &BackendState<DB>,
         set: &SetStatement,
-        event: &mut QueryExecutionEvent,
-    ) -> Result<(UpstreamSetRewrite, PendingSetState), DB::Error> {
-        let SetBehavior {
-            unsupported,
-            proxy: _, // Basically ignored, caller will proxy unless we return an error
-            set_autocommit,
-            set_search_path,
-            set_results_collation,
-            set_results_encoding,
-            set_client_encoding,
-            mut set_session_vars,
-            upstream_rewrite,
-            set_timezone,
-        } = Handler::handle_set_statement(set);
-
+    ) -> SetBehavior {
+        let mut behavior = Handler::handle_set_statement(set);
         // A variable set to its default takes the upstream's default value for the session.
         let mut defaults = None;
-        for (name, value) in &mut set_session_vars {
+        for (name, value) in &mut behavior.set_session_vars {
             if value.is_none() {
                 *value = defaults
                     .get_or_insert_with(|| Self::session_defaults(connectors, state))
@@ -104,16 +119,38 @@ where
                     .cloned();
             }
         }
-        let set_values = set_session_vars
+        let set_values = behavior
+            .set_session_vars
             .iter()
             .filter_map(|(name, value)| Some((name.clone(), value.clone()?)))
             .collect();
-        let unsupported = unsupported || Handler::unsupported_session_vars(&set_values);
+        behavior.unsupported |= Handler::unsupported_session_vars(&set_values);
+        behavior
+    }
 
-        // NOTE: The unsupported check runs before autocommit processing intentionally.
-        // A compound SET like `SET autocommit=0, unknown_var=1` is rejected atomically
-        // in Error mode — the autocommit state change is not applied. This matches
-        // MySQL's all-or-nothing SET semantics.
+    /// Handles a parsed set statement by deferring to `Handler::handle_set_statement` and
+    /// respecting `BackendSettings::unsupported_set_mode`.
+    ///
+    /// - If upstream exists, valid set statements are forwarded to it.
+    /// - If no upstream is present, statements are typically ignored.
+    /// - Disallowed set statements always produce an error.
+    ///
+    /// The caller passes the returned [`PendingSetState`] to [`Self::apply_set`] after the
+    /// statement succeeds.
+    pub(super) fn handle_set(
+        connectors: &BackendConnectors<DB>,
+        settings: &BackendSettings,
+        state: &mut BackendState<DB>,
+        query: &str,
+        set: &SetStatement,
+        event: &mut QueryExecutionEvent,
+    ) -> ReadySetResult<(UpstreamSetRewrite, PendingSetState)> {
+        let mut behavior = Self::set_behavior(connectors, state, set);
+        let unsupported = behavior.unsupported;
+
+        // A compound SET like `SET autocommit=0, unknown_var=1` is rejected as a whole in Error
+        // mode, so its autocommit change is never applied. This matches MySQL's all-or-nothing SET
+        // semantics.
         if unsupported {
             match settings.unsupported_set_mode {
                 UnsupportedSetMode::Error => {
@@ -127,7 +164,7 @@ where
                         set = %set.display(settings.dialect),
                         "received unsupported SET statement."
                     );
-                    return Err(e.into());
+                    return Err(e);
                 }
                 UnsupportedSetMode::Proxy => {
                     warn!(
@@ -139,7 +176,22 @@ where
                 UnsupportedSetMode::Allow => {}
             }
         }
-        if let Some(enabled) = set_autocommit {
+        let upstream_rewrite = std::mem::take(&mut behavior.upstream_rewrite);
+        Ok((upstream_rewrite, PendingSetState::new(behavior)))
+    }
+
+    /// Apply a `SET` that the upstream accepted to Readyset's copy of the session state. The
+    /// SessionContext gets the settings, role and session authorization the RLS shallow cache keys
+    /// on.
+    pub(super) fn apply_set(
+        pending: PendingSetState,
+        noria: &mut NoriaConnector,
+        session: Option<&SessionContext>,
+        settings: &BackendSettings,
+        state: &mut BackendState<DB>,
+        set: &SetStatement,
+    ) {
+        if let Some(enabled) = pending.autocommit {
             let prev = state.proxy_state;
             state.proxy_state.set_autocommit(enabled);
             if state.proxy_state != prev {
@@ -164,54 +216,24 @@ where
                 }
             }
         }
-        if let Some(search_path) = set_search_path {
-            trace!(?search_path, "Setting search_path");
-            connectors.noria.set_schema_search_path(search_path);
-        }
-        // The handler records `set_timezone` even for non-UTC values so a
-        // future eval-side fix can read it unchanged; only apply it here when
-        // the SET resolved to a UTC-equivalent zone — otherwise cached
-        // results (UTC-wallclock today) would be silently localized.
-        if let Some(tz) = set_timezone
-            && !unsupported
-        {
-            trace!(?tz, "Setting timezone");
-            connectors.noria.set_timezone(tz);
-        }
-
-        // Mirror the SET into the per-connection SessionContext so the RLS shallow cache can hash
-        // by the relevant subset of session state. GUC sets and `RESET ROLE` are applied now; they
-        // cannot be rejected as an authorization decision. `SET ROLE` (the `RoleSet` effect) is
-        // deliberately not applied here -- role membership is an authorization boundary, so it is
-        // mirrored only after upstream accepts it (`mirror_set_role`), matching
-        // `SET SESSION AUTHORIZATION`. `apply_set_statement` does not mutate for `RoleSet`, so
-        // discarding its result leaves the effective role untouched.
-        if let Some(session) = connectors.session.as_ref() {
-            let _ = session.apply_set_statement(set);
-        }
-
-        Ok((
-            upstream_rewrite,
-            PendingSetState {
-                results_collation: set_results_collation,
-                results_encoding: set_results_encoding,
-                client_encoding: set_client_encoding,
-                session_vars: set_session_vars,
-            },
-        ))
-    }
-
-    /// Mirror `SET [LOCAL] ROLE <role>` into the session context, called only after upstream
-    /// accepted the statement. Resolves `bypass_rls` against the policy registry. Non-`SET ROLE`
-    /// statements (and `RESET ROLE`, already applied by `handle_set`) are ignored.
-    pub(super) fn mirror_set_role(
-        session: &SessionContext,
-        policy_registry: Option<&Arc<readyset_rls::PolicyRegistry>>,
-        set: &SetStatement,
-    ) {
-        if let Some((role, local)) = SessionContext::pending_set_role(set) {
-            let bypass = policy_registry.is_some_and(|reg| reg.bypass_rls_for_role(role.as_str()));
-            session.set_effective_role_scoped(role, bypass, local);
+        pending.apply(noria);
+        let Some(session) = session else {
+            return;
+        };
+        let policy_registry = state.policy_registry.as_ref();
+        match set {
+            SetStatement::SessionAuthorization(auth) => {
+                Self::mirror_session_authorization(session, policy_registry, auth)
+            }
+            _ => {
+                if let SetSessionEffect::RoleSet { role, scope } = session.apply_set_statement(set)
+                {
+                    let bypass =
+                        policy_registry.is_some_and(|reg| reg.bypass_rls_for_role(role.as_str()));
+                    let local = matches!(scope, Some(PostgresParameterScope::Local));
+                    session.set_effective_role_scoped(role, bypass, local);
+                }
+            }
         }
     }
 

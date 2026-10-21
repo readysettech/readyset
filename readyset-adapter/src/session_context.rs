@@ -91,7 +91,7 @@ pub enum SetSessionEffect {
     /// Nothing role-affecting happened; the GUC update (if any) is already applied.
     None,
     /// `SET ROLE` (or `SET LOCAL ROLE`). The caller must look up `bypass_rls` for `role` and call
-    /// [`SessionContext::set_effective_role`].
+    /// [`SessionContext::set_effective_role_scoped`].
     RoleSet {
         role: SqlIdentifier,
         scope: Option<PostgresParameterScope>,
@@ -399,30 +399,6 @@ impl SessionContext {
     /// symmetric to [`Self::set_session_authorization`].
     pub fn apply_session_authorization(&self, role: SqlIdentifier, bypass: bool) {
         self.set_session_authorization(role, bypass);
-    }
-
-    /// If `set` is `SET [LOCAL] ROLE <role>` for a concrete role, return the role and whether the
-    /// change is transaction-local. This is the one `SET` form whose mirroring must wait for
-    /// upstream to accept it: role membership is an authorization boundary, so a rejected
-    /// `SET ROLE` must not advance `effective_role`. `RESET ROLE` / `SET ROLE DEFAULT`, GUC sets,
-    /// and `SET SESSION AUTHORIZATION` return `None` -- the first two are applied eagerly by
-    /// [`Self::apply_set_statement`] (they cannot be rejected as an authorization decision) and the
-    /// last has its own post-acceptance mirror.
-    pub fn pending_set_role(set: &SetStatement) -> Option<(SqlIdentifier, bool)> {
-        let SetStatement::PostgresParameter(SetPostgresParameter { scope, name, value }) = set
-        else {
-            return None;
-        };
-        if !name.as_str().eq_ignore_ascii_case("role") {
-            return None;
-        }
-        match value {
-            SetPostgresParameterValue::Value(v) => {
-                let role = identifier_value(v)?;
-                Some((role, matches!(scope, Some(PostgresParameterScope::Local))))
-            }
-            SetPostgresParameterValue::Default => None,
-        }
     }
 
     /// Resolve this session's values for a cache's keyed input set, or `None` when the session

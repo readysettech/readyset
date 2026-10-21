@@ -1034,6 +1034,77 @@ async fn pg_rls_shallow_cache_discard_all_in_transaction_extended() {
     run_discard_all_in_transaction(Protocol::Extended).await;
 }
 
+/// Bring up an adapter with alice's and then bob's partitions filled, leaving the session scoped
+/// to bob. A read keyed to alice's partition returns her rows from the cache.
+async fn connect_as_bob_after_alice() -> (Client, Handle, TestShutdownSender<PostgreSQLAdapter>) {
+    let test_name = derive_test_name();
+    PostgreSQLAdapter::recreate_database(&test_name).await;
+    setup_todos_upstream(&test_name).await;
+    let (rs, handle, shutdown_tx) = connect_rls(&test_name).await;
+
+    rs.simple_query("SET ROLE authenticated")
+        .await
+        .expect("set role");
+    rs.simple_query("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM SELECT * FROM api.todos")
+        .await
+        .expect("create cache");
+    set_sub_claim(&rs, Protocol::Simple, "alice").await;
+    assert_served_from_cache(&rs, Protocol::Simple, &["alice", "alice"], "alice scoped").await;
+    set_sub_claim(&rs, Protocol::Simple, "bob").await;
+    assert_served_from_cache(&rs, Protocol::Simple, &["bob"], "bob scoped").await;
+    (rs, handle, shutdown_tx)
+}
+
+/// A `set_config` batch that upstream rejects leaves the session's claims in place, and one it
+/// accepts changes them.
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_rejected_set_config() {
+    init_test_logging();
+    let (rs, _handle, shutdown_tx) = connect_as_bob_after_alice().await;
+
+    rs.simple_query(
+        r#"SELECT set_config('request.jwt.claims', '{"sub":"alice"}', false),
+                  set_config('statement_timeout', 'not a duration', false)"#,
+    )
+    .await
+    .expect_err("upstream rejects an invalid statement_timeout");
+    assert_served_from_cache(&rs, Protocol::Simple, &["bob"], "bob scoped after rejected batch")
+        .await;
+    rs.simple_query(r#"SELECT set_config('request.jwt.claims', '{"sub":"alice"}', false)"#)
+        .await
+        .expect("set_config batch");
+    assert_served_from_cache(&rs, Protocol::Simple, &["alice", "alice"], "alice after batch")
+        .await;
+
+    shutdown_tx.shutdown().await;
+}
+
+/// A prepared `SET` changes the session's claims only when it is executed.
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_prepared_set_applies_at_execute() {
+    init_test_logging();
+    let (rs, _handle, shutdown_tx) = connect_as_bob_after_alice().await;
+
+    let set_alice = rs
+        .prepare(r#"SET request.jwt.claims = '{"sub":"alice"}'"#)
+        .await
+        .expect("prepare SET");
+    assert_served_from_cache(&rs, Protocol::Simple, &["bob"], "bob scoped after prepare").await;
+    rs.execute(&set_alice, &[]).await.expect("execute SET");
+    assert_served_from_cache(&rs, Protocol::Simple, &["alice", "alice"], "alice after execute")
+        .await;
+    set_sub_claim(&rs, Protocol::Simple, "bob").await;
+    rs.execute(&set_alice, &[]).await.expect("execute SET again");
+    assert_served_from_cache(&rs, Protocol::Simple, &["alice", "alice"], "alice after re-execute")
+        .await;
+
+    shutdown_tx.shutdown().await;
+}
+
 /// `RESET request.jwt.claims` clears the keyed claim while the role stays
 /// `authenticated`, so the policy resolves the claim to NULL and scopes the read
 /// to zero rows -- a distinct partition that does not serve the prior tenant's

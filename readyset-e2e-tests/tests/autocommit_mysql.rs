@@ -244,6 +244,75 @@ async fn autocommit_on_during_transaction() {
     shutdown_tx.shutdown().await;
 }
 
+/// Run `query` and return where Readyset sent it.
+async fn query_destination(conn: &mut Conn, query: &str) -> QueryDestination {
+    conn.query_drop(query).await.unwrap();
+    sleep().await;
+    let info: QueryInfo = conn
+        .query_first("EXPLAIN LAST STATEMENT")
+        .await
+        .unwrap()
+        .unwrap();
+    info.destination
+}
+
+// Verify that SET autocommit=0 changes query routing only after upstream accepts it. A prepared
+// one takes effect when it is executed, and one that upstream rejects has no effect.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn autocommit_off_applies_after_upstream_accepts() {
+    let query_status_cache: &'static _ = Box::leak(Box::new(QueryStatusCache::new()));
+    let (opts, _handle, shutdown_tx) = setup_with_cache(
+        query_status_cache,
+        true,
+        MigrationMode::OutOfBand,
+        UnsupportedSetMode::Allow,
+    )
+    .await;
+    let mut conn = mysql_async::Conn::new(opts).await.unwrap();
+    conn.query_drop("CREATE TABLE t_ac_apply (x int)")
+        .await
+        .unwrap();
+    sleep().await;
+    conn.query_drop("INSERT INTO t_ac_apply (x) VALUES (1)")
+        .await
+        .unwrap();
+    sleep().await;
+    conn.query_drop("CREATE CACHE FROM SELECT * FROM t_ac_apply")
+        .await
+        .unwrap();
+    sleep().await;
+
+    let select = "SELECT * FROM t_ac_apply";
+    assert_matches!(
+        query_destination(&mut conn, select).await,
+        QueryDestination::Readyset(_)
+    );
+
+    conn.query_drop("SET autocommit=0, @@session.readyset_no_such_variable=1")
+        .await
+        .expect_err("upstream rejects an unknown variable");
+    assert_matches!(
+        query_destination(&mut conn, select).await,
+        QueryDestination::Readyset(_)
+    );
+
+    let set_off = conn.prep("SET autocommit=0").await.unwrap();
+    assert_matches!(
+        query_destination(&mut conn, select).await,
+        QueryDestination::Readyset(_)
+    );
+
+    conn.exec_drop(&set_off, ()).await.unwrap();
+    assert_eq!(
+        query_destination(&mut conn, select).await,
+        QueryDestination::Upstream
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
 /// Regression test for the MonicaCRM-style hanging query bug (REA-4853).
 ///
 /// `mysql-async` (used by ReadySet as a client to upstream MySQL) can incorrectly parse
