@@ -905,6 +905,18 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         ))
     }
 
+    fn commit_rolled_back(result: &Self::QueryResult<'_>) -> bool {
+        // Postgres answers a COMMIT of a failed transaction with the tag `ROLLBACK`.
+        match result {
+            QueryResult::Command { tag } => tag == "ROLLBACK",
+            QueryResult::SimpleQuery(messages) => messages.iter().any(|message| {
+                matches!(message, SimpleQueryMessage::CommandComplete(complete)
+                    if complete.tag.starts_with(b"ROLLBACK"))
+            }),
+            _ => false,
+        }
+    }
+
     async fn schema_search_path(&mut self) -> Result<Vec<SqlIdentifier>, Self::Error> {
         let raw_search_path = self
             .client

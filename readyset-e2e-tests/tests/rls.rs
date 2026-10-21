@@ -153,6 +153,15 @@ async fn run_stmt(client: &Client, proto: Protocol, sql: &str) {
     }
 }
 
+/// Run `sql` on `proto` and check that upstream rejects it.
+async fn run_failing_stmt(client: &Client, proto: Protocol, sql: &str) {
+    let result = match proto {
+        Protocol::Simple => client.simple_query(sql).await.map(drop),
+        Protocol::Extended => client.execute(sql, &[]).await.map(drop),
+    };
+    result.expect_err(&format!("`{sql}` should fail"));
+}
+
 /// Like [`read_owner_ids`] but returns the upstream error instead of panicking,
 /// for polling a cache into a ready/observed state.
 async fn try_read_owner_ids(
@@ -1009,11 +1018,7 @@ async fn run_discard_all_in_transaction(proto: Protocol) {
     assert_served_from_cache(&rs, proto, &["bob"], "bob scoped before DISCARD ALL").await;
 
     run_stmt(&rs, proto, "BEGIN").await;
-    let discard = match proto {
-        Protocol::Simple => rs.simple_query("DISCARD ALL").await.map(drop),
-        Protocol::Extended => rs.execute("DISCARD ALL", &[]).await.map(drop),
-    };
-    discard.expect_err("upstream rejects DISCARD ALL inside a transaction");
+    run_failing_stmt(&rs, proto, "DISCARD ALL").await;
     run_stmt(&rs, proto, "ROLLBACK").await;
     assert_served_from_cache(&rs, proto, &["bob"], "bob scoped after rejected DISCARD ALL").await;
 
@@ -1223,11 +1228,7 @@ async fn run_failed_rollback_to_savepoint(proto: Protocol) {
 
     run_stmt(&rs, proto, "BEGIN").await;
     set_sub_claim(&rs, proto, "alice").await;
-    let rollback_to = match proto {
-        Protocol::Simple => rs.simple_query("ROLLBACK TO SAVEPOINT missing").await.map(drop),
-        Protocol::Extended => rs.execute("ROLLBACK TO SAVEPOINT missing", &[]).await.map(drop),
-    };
-    rollback_to.expect_err("upstream rejects ROLLBACK TO a missing savepoint");
+    run_failing_stmt(&rs, proto, "ROLLBACK TO SAVEPOINT missing").await;
     run_stmt(&rs, proto, "ROLLBACK").await;
     assert_served_from_cache(&rs, proto, &["bob"], "bob after ROLLBACK").await;
 
@@ -1246,6 +1247,75 @@ async fn pg_rls_shallow_cache_failed_rollback_to_savepoint_simple() {
 #[upstream(postgres)]
 async fn pg_rls_shallow_cache_failed_rollback_to_savepoint_extended() {
     run_failed_rollback_to_savepoint(Protocol::Extended).await;
+}
+
+/// A COMMIT of a transaction where a statement failed rolls the transaction back, reverting its
+/// claims change.
+async fn run_commit_of_failed_transaction(proto: Protocol) {
+    init_test_logging();
+    let (rs, _handle, shutdown_tx) = connect_as_bob_after_alice(proto).await;
+
+    run_stmt(&rs, proto, "BEGIN").await;
+    set_sub_claim(&rs, proto, "alice").await;
+    run_failing_stmt(&rs, proto, "SELECT 1 / 0").await;
+    run_stmt(&rs, proto, "COMMIT").await;
+    assert_served_from_cache(&rs, proto, &["bob"], "bob after COMMIT").await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_commit_of_failed_transaction_simple() {
+    run_commit_of_failed_transaction(Protocol::Simple).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_commit_of_failed_transaction_extended() {
+    run_commit_of_failed_transaction(Protocol::Extended).await;
+}
+
+/// A COMMIT that fails on a deferred constraint rolls the transaction back, reverting its claims
+/// change.
+async fn run_failed_commit(proto: Protocol) {
+    init_test_logging();
+    let (rs, _handle, shutdown_tx) = connect_as_bob_after_alice(proto).await;
+
+    rs.simple_query("RESET ROLE").await.expect("reset role");
+    rs.simple_query(
+        "CREATE TABLE api.deferred (id int, UNIQUE (id) DEFERRABLE INITIALLY DEFERRED); \
+         GRANT INSERT ON api.deferred TO authenticated",
+    )
+    .await
+    .expect("create table");
+    rs.simple_query("SET ROLE authenticated")
+        .await
+        .expect("set role");
+
+    run_stmt(&rs, proto, "BEGIN").await;
+    set_sub_claim(&rs, proto, "alice").await;
+    run_stmt(&rs, proto, "INSERT INTO api.deferred VALUES (1), (1)").await;
+    run_failing_stmt(&rs, proto, "COMMIT").await;
+    assert_served_from_cache(&rs, proto, &["bob"], "bob after failed COMMIT").await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_failed_commit_simple() {
+    run_failed_commit(Protocol::Simple).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_failed_commit_extended() {
+    run_failed_commit(Protocol::Extended).await;
 }
 
 /// A `SET ROLE` inside a transaction reverts at ROLLBACK. The bypass partition is filled first, so

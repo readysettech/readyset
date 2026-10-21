@@ -1836,7 +1836,7 @@ where
                 &mut self.state.transaction_settings,
                 self.connectors.session.as_ref(),
                 q.as_ref(),
-                result.is_ok(),
+                &result,
             );
         }
 

@@ -314,6 +314,13 @@ pub trait UpstreamDatabase: Sized + Send {
     /// Handle rolling back the ongoing transaction for this connection to the upstream db.
     async fn rollback<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Self::Error>;
 
+    /// Return whether `result`, the result of a COMMIT, shows that the upstream rolled the
+    /// transaction back instead. The default implementation returns false, for upstreams that
+    /// never do that.
+    fn commit_rolled_back(_result: &Self::QueryResult<'_>) -> bool {
+        false
+    }
+
     /// Return `SET` statements that give each setting in `names` the value it has on this
     /// connection. The default implementation returns none, for upstreams whose `SET` is not
     /// transactional.

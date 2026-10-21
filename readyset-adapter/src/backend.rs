@@ -2395,15 +2395,15 @@ where
     /// machine and clears the [`SessionWriteTracker`] timestamp. COMMIT ends the transaction and
     /// refreshes the timestamp if it is set. A ROLLBACK that ends the transaction clears the
     /// timestamp. When the transaction ends, the session drops its transaction-local settings and
-    /// role. A ROLLBACK, or a ROLLBACK TO SAVEPOINT that `succeeded`, makes Readyset read back the
-    /// settings the transaction changed.
+    /// role. A ROLLBACK, a COMMIT whose `result` shows it failed or rolled back, or a ROLLBACK TO
+    /// SAVEPOINT that succeeded makes Readyset read back the settings the transaction changed.
     fn update_transaction_boundaries(
         proxy_state: &mut ProxyState,
         write_tracker: &mut SessionWriteTracker,
         transaction_settings: &mut TransactionSettings,
         session: Option<&Arc<SessionContext>>,
         query: &SqlQuery,
-        succeeded: bool,
+        result: &Result<QueryResult<'_, DB>, DB::Error>,
     ) {
         match query {
             SqlQuery::StartTransaction(_) => {
@@ -2413,7 +2413,13 @@ where
             SqlQuery::Commit(_) => {
                 proxy_state.end_transaction();
                 write_tracker.on_commit();
-                transaction_settings.commit();
+                match result {
+                    Ok(QueryResult::Upstream(result, ..)) if DB::commit_rolled_back(result) => {
+                        transaction_settings.rollback()
+                    }
+                    Ok(_) => transaction_settings.commit(),
+                    Err(_) => transaction_settings.rollback(),
+                }
                 if let Some(session) = session {
                     session.on_trx_end();
                 }
@@ -2426,7 +2432,7 @@ where
                     session.on_trx_end();
                 }
             }
-            SqlQuery::Rollback(_) if succeeded => transaction_settings.rollback_to_savepoint(),
+            SqlQuery::Rollback(_) if result.is_ok() => transaction_settings.rollback_to_savepoint(),
             _ => (),
         }
     }
@@ -2456,11 +2462,15 @@ where
                 Ok(result)
             }
             SqlQuery::Commit(_) => {
-                let result = QueryResult::Upstream(upstream.commit().await?, None, None);
+                // A COMMIT ends the transaction even when it fails.
+                let result = upstream.commit().await;
+                match &result {
+                    Ok(result) if !DB::commit_rolled_back(result) => transaction_settings.commit(),
+                    _ => transaction_settings.rollback(),
+                }
                 proxy_state.end_transaction();
                 write_tracker.on_commit();
-                transaction_settings.commit();
-                Ok(result)
+                Ok(QueryResult::Upstream(result?, None, None))
             }
             SqlQuery::Rollback(rollback_stmt) => {
                 if rollback_stmt.ends_transaction() {
