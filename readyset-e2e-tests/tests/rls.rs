@@ -1034,9 +1034,12 @@ async fn pg_rls_shallow_cache_discard_all_in_transaction_extended() {
     run_discard_all_in_transaction(Protocol::Extended).await;
 }
 
-/// Bring up an adapter with alice's and then bob's partitions filled, leaving the session scoped
-/// to bob. A read keyed to alice's partition returns her rows from the cache.
-async fn connect_as_bob_after_alice() -> (Client, Handle, TestShutdownSender<PostgreSQLAdapter>) {
+/// Bring up an adapter with alice's and then bob's partitions filled on `proto`, leaving the
+/// session scoped to bob. A read on `proto` keyed to alice's partition returns her rows from the
+/// cache.
+async fn connect_as_bob_after_alice(
+    proto: Protocol,
+) -> (Client, Handle, TestShutdownSender<PostgreSQLAdapter>) {
     let test_name = derive_test_name();
     PostgreSQLAdapter::recreate_database(&test_name).await;
     setup_todos_upstream(&test_name).await;
@@ -1048,10 +1051,10 @@ async fn connect_as_bob_after_alice() -> (Client, Handle, TestShutdownSender<Pos
     rs.simple_query("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM SELECT * FROM api.todos")
         .await
         .expect("create cache");
-    set_sub_claim(&rs, Protocol::Simple, "alice").await;
-    assert_served_from_cache(&rs, Protocol::Simple, &["alice", "alice"], "alice scoped").await;
-    set_sub_claim(&rs, Protocol::Simple, "bob").await;
-    assert_served_from_cache(&rs, Protocol::Simple, &["bob"], "bob scoped").await;
+    set_sub_claim(&rs, proto, "alice").await;
+    assert_served_from_cache(&rs, proto, &["alice", "alice"], "alice scoped").await;
+    set_sub_claim(&rs, proto, "bob").await;
+    assert_served_from_cache(&rs, proto, &["bob"], "bob scoped").await;
     (rs, handle, shutdown_tx)
 }
 
@@ -1062,7 +1065,7 @@ async fn connect_as_bob_after_alice() -> (Client, Handle, TestShutdownSender<Pos
 #[upstream(postgres)]
 async fn pg_rls_shallow_cache_rejected_set_config() {
     init_test_logging();
-    let (rs, _handle, shutdown_tx) = connect_as_bob_after_alice().await;
+    let (rs, _handle, shutdown_tx) = connect_as_bob_after_alice(Protocol::Simple).await;
 
     rs.simple_query(
         r#"SELECT set_config('request.jwt.claims', '{"sub":"alice"}', false),
@@ -1084,7 +1087,7 @@ async fn pg_rls_shallow_cache_rejected_set_config() {
 /// A session-scope claims change made inside a transaction applies after COMMIT.
 async fn run_set_in_committed_transaction(proto: Protocol) {
     init_test_logging();
-    let (rs, _handle, shutdown_tx) = connect_as_bob_after_alice().await;
+    let (rs, _handle, shutdown_tx) = connect_as_bob_after_alice(proto).await;
 
     run_stmt(&rs, proto, "BEGIN").await;
     set_sub_claim(&rs, proto, "alice").await;
@@ -1108,13 +1111,148 @@ async fn pg_rls_shallow_cache_set_in_committed_transaction_extended() {
     run_set_in_committed_transaction(Protocol::Extended).await;
 }
 
+/// A session-scope claims change made inside a transaction reverts at ROLLBACK.
+async fn run_set_in_rolled_back_transaction(proto: Protocol) {
+    init_test_logging();
+    let (rs, _handle, shutdown_tx) = connect_as_bob_after_alice(proto).await;
+
+    run_stmt(&rs, proto, "BEGIN").await;
+    set_sub_claim(&rs, proto, "alice").await;
+    run_stmt(&rs, proto, "ROLLBACK").await;
+    assert_served_from_cache(&rs, proto, &["bob"], "bob after ROLLBACK").await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_set_in_rolled_back_transaction_simple() {
+    run_set_in_rolled_back_transaction(Protocol::Simple).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_set_in_rolled_back_transaction_extended() {
+    run_set_in_rolled_back_transaction(Protocol::Extended).await;
+}
+
+/// A `SET LOCAL` after a session-scope `SET` of the same setting lasts until the transaction ends.
+/// After `end`, the claims are those for `expected`.
+async fn run_set_then_set_local(proto: Protocol, end: &str, expected: &[&str]) {
+    init_test_logging();
+    let (rs, _handle, shutdown_tx) = connect_as_bob_after_alice(proto).await;
+
+    run_stmt(&rs, proto, "BEGIN").await;
+    set_sub_claim(&rs, proto, "alice").await;
+    run_stmt(&rs, proto, r#"SET LOCAL request.jwt.claims = '{"sub":"carol"}'"#).await;
+    run_stmt(&rs, proto, end).await;
+    assert_served_from_cache(&rs, proto, expected, &format!("claims after {end}")).await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_set_then_set_local_commit_simple() {
+    run_set_then_set_local(Protocol::Simple, "COMMIT", &["alice", "alice"]).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_set_then_set_local_commit_extended() {
+    run_set_then_set_local(Protocol::Extended, "COMMIT", &["alice", "alice"]).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_set_then_set_local_rollback_simple() {
+    run_set_then_set_local(Protocol::Simple, "ROLLBACK", &["bob"]).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_set_then_set_local_rollback_extended() {
+    run_set_then_set_local(Protocol::Extended, "ROLLBACK", &["bob"]).await;
+}
+
+/// A `SET ROLE` inside a transaction reverts at ROLLBACK. The bypass partition is filled first, so
+/// a read keyed to it returns alice's rows.
+async fn run_set_role_in_rolled_back_transaction(proto: Protocol) {
+    init_test_logging();
+    let (rs, _handle, shutdown_tx) = connect_as_bob_after_alice(proto).await;
+
+    run_stmt(&rs, proto, "SET ROLE service_role").await;
+    assert_served_from_cache(&rs, proto, &["alice", "alice", "bob"], "bypass partition").await;
+    run_stmt(&rs, proto, "SET ROLE authenticated").await;
+
+    run_stmt(&rs, proto, "BEGIN").await;
+    run_stmt(&rs, proto, "SET ROLE service_role").await;
+    run_stmt(&rs, proto, "ROLLBACK").await;
+    assert_served_from_cache(&rs, proto, &["bob"], "bob after ROLLBACK").await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_set_role_in_rolled_back_transaction_simple() {
+    run_set_role_in_rolled_back_transaction(Protocol::Simple).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_set_role_in_rolled_back_transaction_extended() {
+    run_set_role_in_rolled_back_transaction(Protocol::Extended).await;
+}
+
+/// A `SET SESSION AUTHORIZATION` inside a transaction reverts at ROLLBACK, leaving the session user
+/// and the role it had. The login partition is filled first, so a read keyed to it returns alice's
+/// rows.
+async fn run_session_authorization_in_rolled_back_transaction(proto: Protocol) {
+    init_test_logging();
+    let (rs, _handle, shutdown_tx) = connect_as_bob_after_alice(proto).await;
+
+    run_stmt(&rs, proto, "SET SESSION AUTHORIZATION DEFAULT").await;
+    assert_served_from_cache(&rs, proto, &["alice", "alice", "bob"], "login partition").await;
+    run_stmt(&rs, proto, "SET ROLE authenticated").await;
+
+    run_stmt(&rs, proto, "BEGIN").await;
+    run_stmt(&rs, proto, "SET SESSION AUTHORIZATION DEFAULT").await;
+    run_stmt(&rs, proto, "ROLLBACK").await;
+    assert_served_from_cache(&rs, proto, &["bob"], "bob after ROLLBACK").await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_session_authorization_in_rolled_back_transaction_simple() {
+    run_session_authorization_in_rolled_back_transaction(Protocol::Simple).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_session_authorization_in_rolled_back_transaction_extended() {
+    run_session_authorization_in_rolled_back_transaction(Protocol::Extended).await;
+}
+
 /// A prepared `SET` changes the session's claims only when it is executed.
 #[test]
 #[tags(serial)]
 #[upstream(postgres)]
 async fn pg_rls_shallow_cache_prepared_set_applies_at_execute() {
     init_test_logging();
-    let (rs, _handle, shutdown_tx) = connect_as_bob_after_alice().await;
+    let (rs, _handle, shutdown_tx) = connect_as_bob_after_alice(Protocol::Simple).await;
 
     let set_alice = rs
         .prepare(r#"SET request.jwt.claims = '{"sub":"alice"}'"#)
@@ -1932,6 +2070,53 @@ async fn pg_rls_shallow_cache_search_path_resolution_simple() {
 #[upstream(postgres)]
 async fn pg_rls_shallow_cache_search_path_resolution_extended() {
     run_search_path_resolution(Protocol::Extended).await;
+}
+
+/// A `SET search_path` inside a transaction reverts at ROLLBACK, so `documents` still resolves to
+/// the RLS-active `private.documents` and each tenant reads its own partition.
+async fn run_search_path_in_rolled_back_transaction(proto: Protocol) {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    PostgreSQLAdapter::recreate_database(&test_name).await;
+    setup_todos_upstream(&test_name).await;
+    let (rs, _handle, shutdown_tx) = connect_rls(&test_name).await;
+
+    rs.simple_query("SET search_path = private, public")
+        .await
+        .expect("set search_path");
+    rs.simple_query("SET ROLE authenticated")
+        .await
+        .expect("set role");
+    let docs = "SELECT * FROM documents";
+    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {docs}"))
+        .await
+        .expect("create cache");
+
+    run_stmt(&rs, proto, "BEGIN").await;
+    run_stmt(&rs, proto, "SET search_path = public").await;
+    run_stmt(&rs, proto, "ROLLBACK").await;
+
+    set_sub_claim(&rs, proto, "bob").await;
+    assert_owner_ids_cached(&rs, proto, docs, &["bob"], "bob after ROLLBACK").await;
+    set_sub_claim(&rs, proto, "alice").await;
+    assert_owner_ids_cached(&rs, proto, docs, &["alice", "alice"], "alice after ROLLBACK").await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_search_path_in_rolled_back_transaction_simple() {
+    run_search_path_in_rolled_back_transaction(Protocol::Simple).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_search_path_in_rolled_back_transaction_extended() {
+    run_search_path_in_rolled_back_transaction(Protocol::Extended).await;
 }
 
 #[test]

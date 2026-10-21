@@ -315,6 +315,13 @@ pub trait QueryHandler: Sized + Send {
     /// See the documentation of [`SetStatement`] for more information.
     fn handle_set_statement(stmt: &SetStatement) -> SetBehavior;
 
+    /// Return the name of the session setting that `stmt` changes, if a transaction rollback
+    /// should revert the change. The default implementation returns `None`, for upstreams whose
+    /// `SET` is not transactional.
+    fn setting_reverted_by_rollback(_stmt: &SetStatement) -> Option<String> {
+        None
+    }
+
     /// Return a query whose rows are the names and global values of the session variables that
     /// affect cached results, or `None` for upstreams that have no such query.
     fn session_defaults_query() -> Option<String> {

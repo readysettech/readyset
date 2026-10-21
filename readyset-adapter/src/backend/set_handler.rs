@@ -6,6 +6,7 @@
 //! the adapter has to remember it for cache keying. A `SET` it does not support is rejected or
 //! ignored per `unsupported_set_mode`, and never reaches the upstream at all.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use metrics::counter;
@@ -25,6 +26,7 @@ use super::routing::ProxyState;
 use super::{Backend, BackendConnectors, BackendSettings, BackendState, UnsupportedSetMode};
 use crate::query_handler::{SessionTimezone, SetBehavior, UpstreamSetRewrite};
 use crate::session_context::{SessionContext, SetSessionEffect};
+use crate::session_mutation::SessionMutationTemplate;
 use crate::{QueryHandler, UpstreamDatabase};
 
 /// Changes a `SET` makes to Readyset's copy of the upstream session's state. Apply them only after
@@ -92,6 +94,54 @@ impl PendingSetState {
             trace!(%name, ?value, "Setting session variable");
             noria.set_session_var(&name, value);
         }
+    }
+}
+
+/// Names of the session settings a transaction changed. A rollback reverts them upstream, so
+/// Readyset reads them back before the next statement.
+#[derive(Debug, Default)]
+pub(super) struct TransactionSettings {
+    /// Settings the open transaction changed.
+    changed: BTreeSet<String>,
+    /// Settings to read back from upstream before the next statement.
+    reread: BTreeSet<String>,
+}
+
+impl TransactionSettings {
+    /// Note that an open transaction changed the setting `set` changes.
+    pub(super) fn record<H>(&mut self, proxy_state: ProxyState, set: &SetStatement)
+    where
+        H: QueryHandler,
+    {
+        if proxy_state.in_transaction()
+            && let Some(name) = H::setting_reverted_by_rollback(set)
+        {
+            self.changed.insert(name);
+        }
+    }
+
+    /// Note that an open transaction changed the settings a `set_config(...)` batch sets.
+    pub(super) fn record_set_config(
+        &mut self,
+        proxy_state: ProxyState,
+        template: &SessionMutationTemplate,
+    ) {
+        if proxy_state.in_transaction() {
+            let SessionMutationTemplate::SetConfig(calls) = template;
+            self.changed
+                .extend(calls.iter().map(|call| call.guc_name.to_ascii_lowercase()));
+        }
+    }
+
+    /// The open transaction committed and keeps the settings it changed.
+    pub(super) fn commit(&mut self) {
+        self.changed.clear();
+    }
+
+    /// The open transaction rolled back, so the settings it changed should be read back from
+    /// upstream.
+    pub(super) fn rollback(&mut self) {
+        self.reread.append(&mut self.changed);
     }
 }
 
@@ -237,6 +287,45 @@ where
                     let local = matches!(scope, Some(PostgresParameterScope::Local));
                     session.set_effective_role_scoped(role, bypass, local);
                 }
+            }
+        }
+    }
+
+    /// Read back from upstream the settings a rolled-back transaction reverted, and apply them to
+    /// Readyset's copy of the session state. If that fails, the copy can't be trusted, so RLS reads
+    /// go upstream and the session proxies all queries.
+    pub(super) async fn reread_settings(
+        connectors: &mut BackendConnectors<DB>,
+        settings: &BackendSettings,
+        state: &mut BackendState<DB>,
+    ) {
+        if state.transaction_settings.reread.is_empty() {
+            return;
+        }
+        let names = std::mem::take(&mut state.transaction_settings.reread);
+        let Some(upstream) = connectors.upstream.as_mut() else {
+            return;
+        };
+        match upstream.current_settings(names).await {
+            Ok(sets) => {
+                for set in sets {
+                    let pending = PendingSetState::new(Self::set_behavior(connectors, state, &set));
+                    Self::apply_set(
+                        pending,
+                        &mut connectors.noria,
+                        connectors.session.as_deref(),
+                        settings,
+                        state,
+                        &set,
+                    );
+                }
+            }
+            Err(error) => {
+                debug!(%error, "Failed to read session settings back after a rollback");
+                if let Some(session) = connectors.session.as_ref() {
+                    session.mark_session_untrusted();
+                }
+                state.proxy_state = ProxyState::ProxyAlways;
             }
         }
     }

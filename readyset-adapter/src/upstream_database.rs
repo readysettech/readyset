@@ -12,7 +12,7 @@ use readyset_data::encoding::Encoding;
 use readyset_data::upstream_system_props::UpstreamCollation;
 use readyset_errors::ReadySetError;
 use readyset_shallow::{CacheInsertGuard, ContentHash, Warning};
-use readyset_sql::ast::{Literal, Relation, SqlIdentifier};
+use readyset_sql::ast::{Literal, Relation, SetStatement, SqlIdentifier};
 use readyset_util::SizeOf;
 
 use crate::shallow_key::ShallowKey;
@@ -313,6 +313,16 @@ pub trait UpstreamDatabase: Sized + Send {
 
     /// Handle rolling back the ongoing transaction for this connection to the upstream db.
     async fn rollback<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Self::Error>;
+
+    /// Return `SET` statements that give each setting in `names` the value it has on this
+    /// connection. The default implementation returns none, for upstreams whose `SET` is not
+    /// transactional.
+    async fn current_settings<I>(&mut self, _names: I) -> Result<Vec<SetStatement>, Self::Error>
+    where
+        I: IntoIterator<Item = String> + Send,
+    {
+        Ok(Vec::new())
+    }
 
     /// Query the upstream database for the currently configured schema search path.
     ///

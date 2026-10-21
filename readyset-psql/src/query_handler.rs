@@ -514,6 +514,20 @@ impl QueryHandler for PostgreSqlQueryHandler {
         }
     }
 
+    fn setting_reverted_by_rollback(stmt: &SetStatement) -> Option<String> {
+        match stmt {
+            SetStatement::PostgresParameter(SetPostgresParameter { scope, name, .. })
+                if *scope != Some(PostgresParameterScope::Local) =>
+            {
+                Some(name.to_ascii_lowercase())
+            }
+            SetStatement::SessionAuthorization(auth) if !auth.local => {
+                Some("session_authorization".to_owned())
+            }
+            _ => None,
+        }
+    }
+
     fn session_defaults(raw: &BTreeMap<String, String>) -> BTreeMap<String, Literal> {
         raw.iter()
             .map(|(name, value)| (name.clone(), Literal::from(value.as_str())))

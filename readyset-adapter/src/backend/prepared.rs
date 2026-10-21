@@ -1162,6 +1162,7 @@ where
         statement_type: PreparedStatementType,
     ) -> Result<&PrepareResult<DB>, DB::Error> {
         Self::check_routing(&self.connectors, &mut self.state).await?;
+        Self::reread_settings(&mut self.connectors, &self.settings, &mut self.state).await;
 
         let mut query_shallow = None;
         let mut event = QueryExecutionEvent::new(EventType::Prepare);
@@ -1411,6 +1412,7 @@ where
         exec_meta: &'a DB::ExecMeta,
     ) -> Result<(QueryResult<'a, DB>, ProxyState), DB::Error> {
         Self::check_routing(&self.connectors, &mut self.state).await?;
+        Self::reread_settings(&mut self.connectors, &self.settings, &mut self.state).await;
         self.state.last_query = None;
         self.state.pending_proxy_reason = None;
         if self
@@ -1814,6 +1816,9 @@ where
             && let Some(template) = session_mutation.as_ref()
         {
             session_mutation::apply(template, params, session, registry);
+            self.state
+                .transaction_settings
+                .record_set_config(self.state.proxy_state, template);
         }
 
         if result.is_ok()
@@ -1828,6 +1833,7 @@ where
             Self::update_transaction_boundaries(
                 &mut self.state.proxy_state,
                 &mut self.state.write_tracker,
+                &mut self.state.transaction_settings,
                 self.connectors.session.as_ref(),
                 q.as_ref(),
             );
@@ -1919,6 +1925,9 @@ where
                 &mut self.state,
                 set,
             );
+            self.state
+                .transaction_settings
+                .record::<Handler>(self.state.proxy_state, set);
         }
 
         Self::finish_execute(

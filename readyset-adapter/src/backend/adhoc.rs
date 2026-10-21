@@ -338,6 +338,9 @@ where
                             state,
                             &set,
                         );
+                        state
+                            .transaction_settings
+                            .record::<Handler>(state.proxy_state, &set);
                         match result {
                             Some(result) => Ok(QueryResult::Upstream(result, None, None)),
                             None => Ok(QueryResult::Noria(noria_connector::QueryResult::Empty)),
@@ -359,6 +362,7 @@ where
                             Some(upstream),
                             &mut state.proxy_state,
                             &mut state.write_tracker,
+                            &mut state.transaction_settings,
                             &query,
                             raw_query,
                         )
@@ -551,6 +555,9 @@ where
                 Self::query_fallback(connectors.upstream.as_mut(), query, event, None).await;
             if result.is_ok() {
                 session_mutation::apply(&template, &[], session, registry);
+                state
+                    .transaction_settings
+                    .record_set_config(state.proxy_state, &template);
             }
             return result;
         }
@@ -769,6 +776,7 @@ where
         query: &'a str,
     ) -> Result<(QueryResult<'a, DB>, ProxyState), DB::Error> {
         Self::check_routing(&self.connectors, &mut self.state).await?;
+        Self::reread_settings(&mut self.connectors, &self.settings, &mut self.state).await;
 
         let mut query_shallow = None;
         let mut event = QueryExecutionEvent::new(EventType::Query);

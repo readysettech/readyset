@@ -137,6 +137,27 @@ async fn sql_select_limit_partitions_entries() {
     shutdown_tx.shutdown().await;
 }
 
+/// MySQL does not roll back a `SET`, so a value set inside a rolled-back transaction stays.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn sql_select_limit_survives_rollback() {
+    const QUERY: &str = "SELECT id FROM t ORDER BY id";
+    let (mut a, _upstream, _opts, _handle, shutdown_tx) = setup(QUERY, "").await;
+
+    a.query_drop("BEGIN").await.unwrap();
+    a.query_drop("SET sql_select_limit = 1").await.unwrap();
+    a.query_drop("ROLLBACK").await.unwrap();
+    let ids: Vec<i64> = a.query(QUERY).await.unwrap();
+    assert_eq!(ids, vec![1]);
+    assert_filled(&mut a).await;
+    let ids: Vec<i64> = a.query(QUERY).await.unwrap();
+    assert_eq!(ids, vec![1]);
+    assert_hit(&mut a).await;
+
+    shutdown_tx.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
 #[upstream(mysql)]

@@ -35,7 +35,11 @@ use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_data::DfValue;
 use readyset_errors::{ReadySetError, ReadySetResult, internal_err, invariant_eq, unsupported};
 use readyset_shallow::{CacheInsertGuard, ContentHash, QueryMetadata};
-use readyset_sql::ast::{Literal, Relation, SqlIdentifier};
+use readyset_sql::ast::{
+    Literal, PostgresParameterValue, PostgresParameterValueInner, Relation,
+    SessionAuthorizationValue, SetPostgresParameter, SetPostgresParameterValue,
+    SetSessionAuthorization, SetStatement, SqlIdentifier,
+};
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_util::SizeOf;
 use readyset_util::hash::hash;
@@ -369,6 +373,22 @@ fn convert_params_for_upstream(params: &[DfValue], types: &[Type]) -> ReadySetRe
             }
 
             Ok(v)
+        })
+        .collect()
+}
+
+/// Parse a `search_path` value as the upstream reports it, replacing `$user` with `user`.
+fn parse_search_path(raw_search_path: &str, user: Option<&str>) -> Vec<SqlIdentifier> {
+    // FIXME This parser is clearly quite primitive.
+    raw_search_path
+        .split(", ")
+        .map(|schema| schema.trim_matches('"'))
+        .filter_map(|schema| {
+            if schema == "$user" {
+                user.map(Into::into)
+            } else {
+                Some(schema.into())
+            }
         })
         .collect()
 }
@@ -892,18 +912,89 @@ impl UpstreamDatabase for PostgreSqlUpstream {
             .await?
             .get::<_, String>("search_path");
         debug!(%raw_search_path, "Loaded search path from upstream");
+        Ok(parse_search_path(&raw_search_path, self.user.as_deref()))
+    }
 
-        // FIXME This parser is clearly quite primitive.
-        Ok(raw_search_path
-            .split(", ")
-            .map(|schema| schema.trim_matches('"'))
-            .filter_map(|schema| {
-                if schema == "$user" {
-                    self.user.clone().map(Into::into)
-                } else {
-                    Some(schema.into())
-                }
+    async fn current_settings<I>(&mut self, names: I) -> Result<Vec<SetStatement>, Self::Error>
+    where
+        I: IntoIterator<Item = String> + Send,
+    {
+        let mut names: Vec<String> = names.into_iter().collect();
+        // The effective role is determined by both the session authorization and the role.
+        for (name, other) in [
+            ("role", "session_authorization"),
+            ("session_authorization", "role"),
+        ] {
+            if names.iter().any(|n| n == name) && !names.iter().any(|n| n == other) {
+                names.push(other.to_owned());
+            }
+        }
+        let rows = self
+            .client
+            .query(
+                "SELECT name, current_setting(name, true) FROM unnest($1::text[]) AS name",
+                &[&names],
+            )
+            .await?;
+
+        let parameter = |name: &str, value| {
+            SetStatement::PostgresParameter(SetPostgresParameter {
+                scope: None,
+                name: name.into(),
+                value,
             })
+        };
+        let mut session_authorization = None;
+        let mut role = None;
+        let mut sets = Vec::with_capacity(rows.len());
+        for row in rows {
+            let name: String = row.get(0);
+            let value: Option<String> = row.get(1);
+            match (name.as_str(), value) {
+                ("session_authorization", Some(user)) => {
+                    session_authorization = Some(SetStatement::SessionAuthorization(
+                        SetSessionAuthorization {
+                            local: false,
+                            value: SessionAuthorizationValue::User(user.into()),
+                        },
+                    ))
+                }
+                ("role", value) => role = value,
+                ("search_path", Some(path)) => {
+                    let schemas = parse_search_path(&path, self.user.as_deref())
+                        .into_iter()
+                        .map(PostgresParameterValueInner::Identifier)
+                        .collect();
+                    sets.push(parameter(
+                        &name,
+                        SetPostgresParameterValue::Value(PostgresParameterValue::List(schemas)),
+                    ));
+                }
+                (_, Some(value)) => sets.push(parameter(
+                    &name,
+                    SetPostgresParameterValue::Value(PostgresParameterValue::Single(
+                        PostgresParameterValueInner::Literal(Literal::String(value)),
+                    )),
+                )),
+                (_, None) => sets.push(parameter(&name, SetPostgresParameterValue::Default)),
+            }
+        }
+        // A role of `none` leaves the effective role at the session authorization.
+        let role = role.filter(|role| role != "none").map(|role| {
+            parameter(
+                "role",
+                SetPostgresParameterValue::Value(PostgresParameterValue::Single(
+                    PostgresParameterValueInner::Identifier(role.into()),
+                )),
+            )
+        });
+        // The effective role is the role if one is set, and the session user otherwise. `SET SESSION
+        // AUTHORIZATION` makes the session user the effective role, so it must come before `SET
+        // ROLE`.
+        Ok(session_authorization
+            .into_iter()
+            .chain(role)
+            .chain(sets)
             .collect())
     }
 

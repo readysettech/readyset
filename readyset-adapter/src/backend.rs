@@ -156,6 +156,7 @@ pub use self::noria_connector::NoriaConnector;
 use self::prepared::PreparedStatements;
 pub use self::routing::ProxyState;
 use self::routing::SessionWriteTracker;
+use self::set_handler::TransactionSettings;
 
 /// Reserved program/application name used by ReadySet components to identify internal connections
 pub const READYSET_QUERY_SAMPLER: &str = "READYSET_QUERY_SAMPLER";
@@ -569,6 +570,7 @@ impl BackendBuilder {
                 write_tracker: SessionWriteTracker::new(
                     self.opportunistic_ryw_ms.map(Duration::from_millis),
                 ),
+                transaction_settings: TransactionSettings::default(),
                 last_query: None,
                 pending_proxy_reason: None,
                 preserve_last_query: false,
@@ -1024,6 +1026,9 @@ where
     /// Tracks when the last write on this session happened, driving
     /// [`TrxCachePolicy::UntilWrite`] (in-txn) and read-your-own-writes (cross-txn).
     write_tracker: SessionWriteTracker,
+    /// Session settings the open transaction changed, and the ones to read back from upstream
+    /// after a rollback.
+    transaction_settings: TransactionSettings,
     /// Information regarding the last query sent over this connection. If None, then no queries
     /// have been handled using this connection (Backend) yet.
     last_query: Option<QueryInfo>,
@@ -2388,10 +2393,11 @@ where
     /// machine and clears the [`SessionWriteTracker`] timestamp. COMMIT ends the transaction and
     /// refreshes the timestamp if it is set. A ROLLBACK that ends the transaction clears the
     /// timestamp. When the transaction ends, the session drops its transaction-local settings and
-    /// role.
+    /// role, and a ROLLBACK makes Readyset read back the settings the transaction changed.
     fn update_transaction_boundaries(
         proxy_state: &mut ProxyState,
         write_tracker: &mut SessionWriteTracker,
+        transaction_settings: &mut TransactionSettings,
         session: Option<&Arc<SessionContext>>,
         query: &SqlQuery,
     ) {
@@ -2403,6 +2409,7 @@ where
             SqlQuery::Commit(_) => {
                 proxy_state.end_transaction();
                 write_tracker.on_commit();
+                transaction_settings.commit();
                 if let Some(session) = session {
                     session.on_trx_end();
                 }
@@ -2410,6 +2417,7 @@ where
             SqlQuery::Rollback(rollback_stmt) if rollback_stmt.ends_transaction() => {
                 proxy_state.end_transaction();
                 write_tracker.on_rollback();
+                transaction_settings.rollback();
                 if let Some(session) = session {
                     session.on_trx_end();
                 }
@@ -2419,12 +2427,14 @@ where
     }
 
     /// Should only be called with a SqlQuery that is of type StartTransaction, Commit, or
-    /// Rollback. Used to handle transaction boundary queries. Updates both the
-    /// `ProxyState` machine and the [`SessionWriteTracker`] timestamp lifecycle.
+    /// Rollback. Used to handle transaction boundary queries. Updates the `ProxyState` machine,
+    /// the [`SessionWriteTracker`] timestamp lifecycle, and the settings to read back after a
+    /// ROLLBACK.
     async fn handle_transaction_boundaries<'a>(
         upstream: Option<&'a mut DB>,
         proxy_state: &mut ProxyState,
         write_tracker: &mut SessionWriteTracker,
+        transaction_settings: &mut TransactionSettings,
         query: &SqlQuery,
         raw_query: &'a str,
     ) -> Result<QueryResult<'a, DB>, DB::Error> {
@@ -2444,6 +2454,7 @@ where
                 let result = QueryResult::Upstream(upstream.commit().await?, None, None);
                 proxy_state.end_transaction();
                 write_tracker.on_commit();
+                transaction_settings.commit();
                 Ok(result)
             }
             SqlQuery::Rollback(rollback_stmt) => {
@@ -2451,6 +2462,7 @@ where
                     let result = QueryResult::Upstream(upstream.rollback().await?, None, None);
                     proxy_state.end_transaction();
                     write_tracker.on_rollback();
+                    transaction_settings.rollback();
                     Ok(result)
                 } else {
                     // ROLLBACK TO SAVEPOINT does NOT end the transaction - it only rolls back
