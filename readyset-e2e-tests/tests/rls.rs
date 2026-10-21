@@ -1048,9 +1048,12 @@ async fn connect_as_bob_after_alice(
     rs.simple_query("SET ROLE authenticated")
         .await
         .expect("set role");
-    rs.simple_query("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM SELECT * FROM api.todos")
-        .await
-        .expect("create cache");
+    rs.simple_query(
+        "CREATE SHALLOW CACHE WITH (POLICY TTL 300 SECONDS, UNTIL WRITE) \
+         FROM SELECT * FROM api.todos",
+    )
+    .await
+    .expect("create cache");
     set_sub_claim(&rs, proto, "alice").await;
     assert_served_from_cache(&rs, proto, &["alice", "alice"], "alice scoped").await;
     set_sub_claim(&rs, proto, "bob").await;
@@ -1179,6 +1182,72 @@ async fn pg_rls_shallow_cache_set_then_set_local_rollback_simple() {
 #[upstream(postgres)]
 async fn pg_rls_shallow_cache_set_then_set_local_rollback_extended() {
     run_set_then_set_local(Protocol::Extended, "ROLLBACK", &["bob"]).await;
+}
+
+/// A claims change made after a savepoint reverts at ROLLBACK TO SAVEPOINT, and stays reverted
+/// after COMMIT.
+async fn run_set_after_savepoint_rolled_back(proto: Protocol) {
+    init_test_logging();
+    let (rs, _handle, shutdown_tx) = connect_as_bob_after_alice(proto).await;
+
+    run_stmt(&rs, proto, "BEGIN").await;
+    run_stmt(&rs, proto, "SAVEPOINT s").await;
+    set_sub_claim(&rs, proto, "alice").await;
+    run_stmt(&rs, proto, "ROLLBACK TO SAVEPOINT s").await;
+    assert_served_from_cache(&rs, proto, &["bob"], "bob after ROLLBACK TO SAVEPOINT").await;
+    run_stmt(&rs, proto, "COMMIT").await;
+    assert_served_from_cache(&rs, proto, &["bob"], "bob after COMMIT").await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+#[ignore = "SAVEPOINT does not parse, so the simple protocol counts it as a write and an \
+            UNTIL WRITE cache stops serving reads for the rest of the transaction"]
+async fn pg_rls_shallow_cache_set_after_savepoint_rolled_back_simple() {
+    run_set_after_savepoint_rolled_back(Protocol::Simple).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_set_after_savepoint_rolled_back_extended() {
+    run_set_after_savepoint_rolled_back(Protocol::Extended).await;
+}
+
+/// After a ROLLBACK TO SAVEPOINT that upstream rejects, the ROLLBACK that follows reverts the
+/// claims change.
+async fn run_failed_rollback_to_savepoint(proto: Protocol) {
+    init_test_logging();
+    let (rs, _handle, shutdown_tx) = connect_as_bob_after_alice(proto).await;
+
+    run_stmt(&rs, proto, "BEGIN").await;
+    set_sub_claim(&rs, proto, "alice").await;
+    let rollback_to = match proto {
+        Protocol::Simple => rs.simple_query("ROLLBACK TO SAVEPOINT missing").await.map(drop),
+        Protocol::Extended => rs.execute("ROLLBACK TO SAVEPOINT missing", &[]).await.map(drop),
+    };
+    rollback_to.expect_err("upstream rejects ROLLBACK TO a missing savepoint");
+    run_stmt(&rs, proto, "ROLLBACK").await;
+    assert_served_from_cache(&rs, proto, &["bob"], "bob after ROLLBACK").await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_failed_rollback_to_savepoint_simple() {
+    run_failed_rollback_to_savepoint(Protocol::Simple).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_failed_rollback_to_savepoint_extended() {
+    run_failed_rollback_to_savepoint(Protocol::Extended).await;
 }
 
 /// A `SET ROLE` inside a transaction reverts at ROLLBACK. The bypass partition is filled first, so

@@ -143,6 +143,12 @@ impl TransactionSettings {
     pub(super) fn rollback(&mut self) {
         self.reread.append(&mut self.changed);
     }
+
+    /// The open transaction rolled back to a savepoint, so the settings it changed should be read
+    /// back from upstream. They stay recorded, since the transaction can still roll back.
+    pub(super) fn rollback_to_savepoint(&mut self) {
+        self.reread.extend(self.changed.iter().cloned());
+    }
 }
 
 impl<DB, Handler> Backend<DB, Handler>

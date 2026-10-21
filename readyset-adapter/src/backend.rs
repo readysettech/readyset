@@ -2393,13 +2393,15 @@ where
     /// machine and clears the [`SessionWriteTracker`] timestamp. COMMIT ends the transaction and
     /// refreshes the timestamp if it is set. A ROLLBACK that ends the transaction clears the
     /// timestamp. When the transaction ends, the session drops its transaction-local settings and
-    /// role, and a ROLLBACK makes Readyset read back the settings the transaction changed.
+    /// role. A ROLLBACK, or a ROLLBACK TO SAVEPOINT that `succeeded`, makes Readyset read back the
+    /// settings the transaction changed.
     fn update_transaction_boundaries(
         proxy_state: &mut ProxyState,
         write_tracker: &mut SessionWriteTracker,
         transaction_settings: &mut TransactionSettings,
         session: Option<&Arc<SessionContext>>,
         query: &SqlQuery,
+        succeeded: bool,
     ) {
         match query {
             SqlQuery::StartTransaction(_) => {
@@ -2422,6 +2424,7 @@ where
                     session.on_trx_end();
                 }
             }
+            SqlQuery::Rollback(_) if succeeded => transaction_settings.rollback_to_savepoint(),
             _ => (),
         }
     }
@@ -2469,6 +2472,7 @@ where
                     // to the savepoint. We must use query() to preserve the savepoint name.
                     let result =
                         QueryResult::Upstream(upstream.query(raw_query).await?, None, None);
+                    transaction_settings.rollback_to_savepoint();
                     Ok(result)
                 }
             }
