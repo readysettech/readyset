@@ -312,3 +312,40 @@ async fn autocommit_off_carries_had_write() {
 
     shutdown_tx.shutdown().await;
 }
+
+/// A write in autocommit mode does not count as a write in the implicit transaction that
+/// `SET autocommit=0` starts.
+#[test]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn autocommit_off_ignores_prior_autocommit_write() {
+    init_test_logging();
+    let test_name = derive_test_name();
+    let (mut conn, _handle, shutdown_tx) = setup_shallow_adapter(&test_name).await;
+
+    // Warm the auto-cache.
+    conn.query_drop("SELECT a FROM foo WHERE a = 1")
+        .await
+        .unwrap();
+    conn.query_drop("SELECT a FROM foo WHERE a = 1")
+        .await
+        .unwrap();
+    assert_matches!(
+        last_query_info(&mut conn).await.destination,
+        QueryDestination::ReadysetShallow(_),
+    );
+
+    conn.query_drop("INSERT INTO foo VALUES (8)").await.unwrap();
+    conn.query_drop("SET autocommit = 0").await.unwrap();
+
+    conn.query_drop("SELECT a FROM foo WHERE a = 1")
+        .await
+        .unwrap();
+    assert_matches!(
+        last_query_info(&mut conn).await.destination,
+        QueryDestination::ReadysetShallow(_),
+        "write before SET autocommit=0 must not count in the implicit transaction"
+    );
+
+    shutdown_tx.shutdown().await;
+}

@@ -1081,6 +1081,33 @@ async fn pg_rls_shallow_cache_rejected_set_config() {
     shutdown_tx.shutdown().await;
 }
 
+/// A session-scope claims change made inside a transaction applies after COMMIT.
+async fn run_set_in_committed_transaction(proto: Protocol) {
+    init_test_logging();
+    let (rs, _handle, shutdown_tx) = connect_as_bob_after_alice().await;
+
+    run_stmt(&rs, proto, "BEGIN").await;
+    set_sub_claim(&rs, proto, "alice").await;
+    run_stmt(&rs, proto, "COMMIT").await;
+    assert_served_from_cache(&rs, proto, &["alice", "alice"], "alice after COMMIT").await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_set_in_committed_transaction_simple() {
+    run_set_in_committed_transaction(Protocol::Simple).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_set_in_committed_transaction_extended() {
+    run_set_in_committed_transaction(Protocol::Extended).await;
+}
+
 /// A prepared `SET` changes the session's claims only when it is executed.
 #[test]
 #[tags(serial)]

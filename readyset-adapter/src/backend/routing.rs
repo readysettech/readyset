@@ -253,8 +253,8 @@ impl ProxyState {
 ///     COMMIT leaves both fields `None`.
 ///   - `on_rollback()` always clears both fields. Rolled-back writes never landed.
 ///
-/// `had_write_in_txn(state)` is a presence check on `last_write_at` while in a
-/// transaction. `opportunistic_ryw_active()` checks the precomputed deadline (with
+/// `had_write_in_txn(state)` checks whether the session wrote since the last BEGIN, COMMIT or
+/// ROLLBACK. `opportunistic_ryw_active()` checks the precomputed deadline (with
 /// lazy-clear when stale), giving the read path a near-zero check once the window has
 /// elapsed.
 #[derive(Debug, Default, Clone, Copy)]
@@ -269,6 +269,8 @@ pub(super) struct SessionWriteTracker {
     /// read path does a single `Instant::now()` comparison and lazy-clears once stale.
     /// `None` either means there is no recent write or the configured window is `None`.
     opportunistic_ryw_deadline: Option<Instant>,
+    /// Whether the session wrote since the last BEGIN, COMMIT or ROLLBACK.
+    wrote_in_txn: bool,
 }
 
 impl SessionWriteTracker {
@@ -279,6 +281,7 @@ impl SessionWriteTracker {
             opportunistic_ryw_window,
             last_write_at: None,
             opportunistic_ryw_deadline: None,
+            wrote_in_txn: false,
         }
     }
 
@@ -286,11 +289,13 @@ impl SessionWriteTracker {
         let now = Instant::now();
         self.last_write_at = Some(now);
         self.opportunistic_ryw_deadline = self.opportunistic_ryw_window.map(|w| now + w);
+        self.wrote_in_txn = true;
     }
 
     pub(super) fn on_start_transaction(&mut self) {
         self.last_write_at = None;
         self.opportunistic_ryw_deadline = None;
+        self.wrote_in_txn = false;
     }
 
     pub(super) fn on_commit(&mut self) {
@@ -299,17 +304,19 @@ impl SessionWriteTracker {
             self.last_write_at = Some(now);
             self.opportunistic_ryw_deadline = self.opportunistic_ryw_window.map(|w| now + w);
         }
+        self.wrote_in_txn = false;
     }
 
     pub(super) fn on_rollback(&mut self) {
         self.last_write_at = None;
         self.opportunistic_ryw_deadline = None;
+        self.wrote_in_txn = false;
     }
 
     /// Returns `true` when a write has been observed since the current transaction began.
     /// Always `false` outside any transaction.
     pub(super) fn had_write_in_txn(&self, proxy_state: ProxyState) -> bool {
-        proxy_state.in_transaction_or_implicit() && self.last_write_at.is_some()
+        proxy_state.in_transaction_or_implicit() && self.wrote_in_txn
     }
 
     /// Returns `true` when the opportunistic read-your-writes window is currently active
@@ -808,14 +815,17 @@ mod tests {
     }
 
     #[test]
-    fn had_write_in_txn_reflects_field_presence() {
-        // Inside a txn, had_write_in_txn() returns true iff last_write_at is Some.
-        // (The state machine guarantees the field was None at txn start.)
+    fn had_write_in_txn_reflects_writes_since_boundary() {
+        // Inside a txn, had_write_in_txn() returns true iff the session wrote since BEGIN.
         let mut tracker = SessionWriteTracker::default();
         tracker.on_start_transaction();
         assert!(!tracker.had_write_in_txn(ProxyState::InTransaction));
         tracker.mark_write();
         assert!(tracker.had_write_in_txn(ProxyState::InTransaction));
+
+        // With autocommit off, COMMIT starts a new transaction with no write.
+        tracker.on_commit();
+        assert!(!tracker.had_write_in_txn(ProxyState::AutocommitOff));
 
         // Outside a txn, never true regardless of last_write_at.
         let mut tracker = SessionWriteTracker::default();

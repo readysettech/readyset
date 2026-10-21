@@ -115,6 +115,54 @@ async fn non_utc_timezone_flips_session_to_proxy_always() {
     shutdown_tx.shutdown().await;
 }
 
+/// A non-UTC `SET TimeZone` inside a transaction flips the session to `ProxyAlways` just as one
+/// outside a transaction does.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(postgres)]
+async fn non_utc_timezone_in_transaction_flips_session_to_proxy_always() {
+    let (opts, _handle, shutdown_tx) = setup_with(
+        BackendBuilder::new()
+            .require_authentication(false)
+            .unsupported_set_mode(UnsupportedSetMode::Proxy),
+    )
+    .await;
+    let conn = psql_helpers::connect(opts).await;
+
+    conn.simple_query("CREATE TABLE t (x int)").await.unwrap();
+    conn.simple_query("INSERT INTO t (x) VALUES (1)")
+        .await
+        .unwrap();
+
+    eventually! {
+        conn.simple_query("CREATE CACHE FROM SELECT x FROM t")
+            .await
+            .is_ok()
+    };
+
+    conn.simple_query("SELECT x FROM t").await.unwrap();
+    assert_matches!(
+        last_query_info(&conn).await.destination,
+        QueryDestination::Readyset(_),
+        "cached query should be served by Readyset before the SET"
+    );
+
+    conn.simple_query("BEGIN").await.unwrap();
+    conn.simple_query("SET TimeZone = 'America/New_York'")
+        .await
+        .unwrap();
+    conn.simple_query("COMMIT").await.unwrap();
+
+    conn.simple_query("SELECT x FROM t").await.unwrap();
+    assert_matches!(
+        last_query_info(&conn).await.destination,
+        QueryDestination::Upstream,
+        "non-UTC SET inside a transaction must flip the session to ProxyAlways"
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
 /// Under `UnsupportedSetMode::Allow` a non-UTC `SET TimeZone` must keep the
 /// session on Readyset *and* must not localize cached TIMESTAMPTZ values:
 /// the follow-up read returns the same UTC wallclock as the baseline.

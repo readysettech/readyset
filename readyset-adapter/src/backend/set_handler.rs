@@ -202,6 +202,10 @@ where
                     state.write_tracker.on_commit();
                 }
                 if matches!(state.proxy_state, ProxyState::AutocommitOff) {
+                    // Leaving autocommit mode starts an implicit transaction, as BEGIN does.
+                    if !prev.in_transaction_or_implicit() {
+                        state.write_tracker.on_start_transaction();
+                    }
                     debug!(
                         set = %set.display(settings.dialect),
                         "Autocommit disabled; all queries will be proxied upstream"

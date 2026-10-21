@@ -19,8 +19,8 @@ use readyset_client_metrics::{
 };
 use readyset_errors::{ReadySetError, internal_err, invalid_query_err, unsupported};
 use readyset_sql::ast::{
-    CacheType, DeallocateStatement, DiscardObject, ReadysetHintDirective, SetStatement,
-    ShowStatement, SqlQuery, StatementIdentifier, TrxCachePolicy, UseStatement,
+    CacheType, DeallocateStatement, DiscardObject, ReadysetHintDirective, ShowStatement, SqlQuery,
+    StatementIdentifier, TrxCachePolicy, UseStatement,
 };
 use readyset_sql_passes::adapter_rewrites::{self, DfQueryParameters, QueryParameters};
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent};
@@ -636,26 +636,9 @@ where
                     .map(Into::into)
                     .map_err(Into::into)
             }
-            // SET autocommit=1 needs to be handled explicitly or it will end up getting proxied in
-            // most cases.
-            Ok(SqlQuery::Set(s))
-                if Handler::handle_set_statement(&s).set_autocommit == Some(true) =>
-            {
-                Self::query_adhoc_non_select(
-                    connectors,
-                    settings,
-                    state,
-                    query,
-                    event,
-                    SqlQuery::Set(s),
-                )
-                .await
-            }
-            // SET [LOCAL] SESSION AUTHORIZATION must reach `query_adhoc_non_select`
-            // even inside a transaction (where the proxy path would otherwise
-            // forward it without mirroring), so the identity is mirrored into the
-            // session after upstream accepts it.
-            Ok(SqlQuery::Set(s @ SetStatement::SessionAuthorization(_))) => {
+            // A SET is checked and applied to Readyset's copy of the session state in every proxy
+            // state, including inside a transaction.
+            Ok(SqlQuery::Set(s)) => {
                 Self::query_adhoc_non_select(
                     connectors,
                     settings,
