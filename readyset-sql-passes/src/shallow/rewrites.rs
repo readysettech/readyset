@@ -10,7 +10,6 @@
 //! rather than the Readyset AST and the parameterization pass replaces all literals.
 
 use std::convert::Infallible;
-use std::mem;
 use std::ops::ControlFlow;
 
 use readyset_data::{DfValue, PassThroughFormat};
@@ -202,7 +201,6 @@ fn reorder_numbered_placeholders(query: &Query) -> Option<Vec<usize>> {
 ///
 /// IN/NOT IN lists are treated as single array parameters:
 /// - Collapses IN/NOT IN lists to single placeholders (`WHERE x IN (1,2,3)` → `WHERE x IN (?)`)
-/// - Sorts IN list values for consistent normalization
 /// - Tracks `InArrayParam` for each collapsed IN clause
 #[allow(clippy::type_complexity)]
 fn fully_parameterize_query(
@@ -243,8 +241,6 @@ impl Visitor for ReorderNumberedPlaceholdersVisitor {
 
 /// Replaces all literals with placeholders, collapsing IN lists to single placeholders, and
 /// numbers every placeholder in visit order.
-///
-/// Mirrors `autoparameterize::FullyParameterizeVisitor` for the Readyset AST.
 #[derive(Default)]
 struct FullyParameterizeVisitor {
     param_idx: usize,
@@ -252,10 +248,6 @@ struct FullyParameterizeVisitor {
     numbered: u32,
     out: Vec<(usize, Literal)>,
     in_array_params: Vec<InArrayParam>,
-    /// Number of placeholders we auto-inserted that haven't been visited yet.
-    /// When post_visit_expr sees a placeholder, if this is > 0, we skip incrementing
-    /// param_idx since we already accounted for it in pre_visit_expr.
-    pending_auto_placeholders: usize,
     /// Whether the query arrived with placeholders, which only a bind can fill.
     has_user_placeholders: bool,
 }
@@ -271,82 +263,27 @@ impl FullyParameterizeVisitor {
 impl VisitorMut for FullyParameterizeVisitor {
     type Break = ReadySetError;
 
-    fn pre_visit_expr(&mut self, expr: &mut Expr) -> ControlFlow<Self::Break> {
-        // Handle IN/NOT IN specially - collapse to single placeholder
-        if let Expr::InList { list, .. } = expr {
-            // Check if all items are Value nodes (literals or placeholders)
-            let collapse = list.iter().all(|e| matches!(e, Expr::Value(_)));
-
-            if collapse && !list.is_empty() {
-                let start_index = self.param_idx;
-                let value_count = list.len();
-
-                let owned_list = mem::take(list);
-
-                // Extract only literal (non-placeholder) items as auto_parameters.
-                // Placeholders represent user-provided values at execute time and are
-                // NOT extracted — they will be supplied via make_keys at execute time.
-                let mut literals: Vec<(usize, Literal)> = Vec::new();
-                for (i, e) in owned_list.into_iter().enumerate() {
-                    if let Expr::Value(ValueWithSpan { value, .. }) = e {
-                        if matches!(value, Value::Placeholder(_)) {
-                            // User-provided placeholder — don't extract as auto_param
-                            self.has_user_placeholders = true;
-                            continue;
-                        }
-                        match sqlparser_value_to_literal(value) {
-                            Ok(lit) => literals.push((start_index + i, lit)),
-                            Err(e) => break_err!(e),
-                        }
-                    }
-                }
-
-                // Sort literal values for consistent normalization (only when all items
-                // are literals; for mixed cases, positions are fixed by auto_param indices)
-                if literals.len() == value_count {
-                    // All items were literals — sort values and assign sequential positions
-                    literals.sort_by(|a, b| a.1.cmp(&b.1));
-                    for (seq, (_, lit)) in literals.drain(..).enumerate() {
-                        self.out.push((start_index + seq, lit));
-                    }
-                } else {
-                    // Mixed or all-placeholder — keep positional indices as-is
-                    for (idx, lit) in literals {
-                        self.out.push((idx, lit));
-                    }
-                }
-
-                self.param_idx += value_count;
-
-                // Replace with single placeholder
-                *list = vec![Expr::Value(ValueWithSpan {
-                    value: Value::Placeholder("?".into()),
-                    span: Span::empty(),
-                })];
-
-                self.in_array_params.push(InArrayParam {
-                    param_index: start_index,
-                    value_count,
-                });
-
-                // Track that we inserted a placeholder so post_visit_expr doesn't double-count
-                self.pending_auto_placeholders += 1;
-
-                // Note: returning Continue still allows visitor to traverse children,
-                // but we've already handled them by replacing the list.
-                return ControlFlow::Continue(());
-            }
-        }
-        ControlFlow::Continue(())
-    }
-
     fn post_visit_expr(&mut self, expr: &mut Expr) -> ControlFlow<Self::Break> {
+        // Collapse an IN list of values into one placeholder
+        if let Expr::InList { list, .. } = expr
+            && !list.is_empty()
+            && list.iter().all(|e| matches!(e, Expr::Value(_)))
+        {
+            // The `Expr::Value` branch below just numbered the list values
+            let value_count = list.len();
+            self.in_array_params.push(InArrayParam {
+                param_index: self.param_idx - value_count,
+                value_count,
+            });
+            list.truncate(1);
+            self.numbered -= (value_count - 1) as u32;
+            return ControlFlow::Continue(());
+        }
+
         let Expr::Value(ValueWithSpan { value, .. }) = expr else {
             return ControlFlow::Continue(());
         };
 
-        // Handle placeholders: either auto-inserted ones (don't count) or user-provided ones
-        // (count)
         if let Value::Placeholder(placeholder) = value {
             match ItemPlaceholder::try_from(&*placeholder) {
                 Err(e) => break_err!(internal_err!("Invalid placeholder: {:?}", e)),
@@ -355,15 +292,8 @@ impl VisitorMut for FullyParameterizeVisitor {
                 )),
                 Ok(ItemPlaceholder::QuestionMark | ItemPlaceholder::DollarNumber(_)) => {}
             }
-            if self.pending_auto_placeholders > 0 {
-                // This is a placeholder we inserted in pre_visit_expr - don't increment param_idx
-                // since we already accounted for it when processing the IN list
-                self.pending_auto_placeholders -= 1;
-            } else {
-                // User-provided placeholder - count it for correct indexing
-                self.param_idx += 1;
-                self.has_user_placeholders = true;
-            }
+            self.param_idx += 1;
+            self.has_user_placeholders = true;
             *placeholder = self.next_placeholder();
             return ControlFlow::Continue(());
         }
@@ -516,11 +446,6 @@ impl VisitorMut for LiteralizeVisitor<'_> {
 }
 
 /// Single-pass visitor that expands collapsed IN arrays and literalizes all placeholders.
-///
-/// After `rewrite_shallow`, IN lists are collapsed to single placeholders. This visitor
-/// reverses that collapse and substitutes all placeholders with literal values in a single
-/// AST traversal, combining the work that previously required three separate passes
-/// (expand, renumber, literalize).
 struct ExpandAndLiteralizeVisitor<'a> {
     merged_params: &'a [DfValue],
     in_array_params: &'a [InArrayParam],
@@ -531,21 +456,15 @@ struct ExpandAndLiteralizeVisitor<'a> {
 impl VisitorMut for ExpandAndLiteralizeVisitor<'_> {
     type Break = ReadySetError;
 
-    fn pre_visit_expr(&mut self, expr: &mut Expr) -> ControlFlow<Self::Break> {
-        // Detect collapsed IN lists (single placeholder) and expand + literalize in one step
+    fn post_visit_expr(&mut self, expr: &mut Expr) -> ControlFlow<Self::Break> {
+        // Expand a collapsed IN list, whose placeholder the `Expr::Value` branch below just filled
         if let Expr::InList { list, .. } = expr
             && list.len() == 1
-            && matches!(
-                &list[0],
-                Expr::Value(ValueWithSpan {
-                    value: Value::Placeholder(_),
-                    ..
-                })
-            )
+            && matches!(&list[0], Expr::Value(_))
             && let Some(in_param) = self.in_array_params.get(self.next_in_param)
         {
             self.next_in_param += 1;
-            let start = self.next_param_idx;
+            let start = in_param.param_index;
             let end = start + in_param.value_count;
             if end > self.merged_params.len() {
                 break_err!(internal_err!(
@@ -568,11 +487,9 @@ impl VisitorMut for ExpandAndLiteralizeVisitor<'_> {
             }
             *list = new_list;
             self.next_param_idx = end;
+            return ControlFlow::Continue(());
         }
-        ControlFlow::Continue(())
-    }
 
-    fn post_visit_expr(&mut self, expr: &mut Expr) -> ControlFlow<Self::Break> {
         let Expr::Value(ValueWithSpan { value, .. }) = expr else {
             return ControlFlow::Continue(());
         };
@@ -1423,6 +1340,99 @@ mod tests {
             assert!(
                 sql.contains("c IN (30, 40, 50)"),
                 "should expand second IN array: {sql}"
+            );
+        }
+
+        #[test]
+        fn literalize_binds_around_in_list() {
+            let int = |n: i32| DfValue::from(n);
+            for (dialect, sql, binds, expected) in [
+                (
+                    Dialect::MySQL,
+                    "SELECT a FROM t WHERE COALESCE(b, ?) IN (?, ?)",
+                    vec![int(1), int(2), int(3)],
+                    "SELECT a FROM t WHERE COALESCE(b, 1) IN (2, 3)",
+                ),
+                (
+                    Dialect::MySQL,
+                    "SELECT a FROM t WHERE IFNULL(?, 'x') IN ('a', 'b')",
+                    vec![DfValue::from("q")],
+                    "SELECT a FROM t WHERE IFNULL('q', 'x') IN ('a', 'b')",
+                ),
+                (
+                    Dialect::MySQL,
+                    "SELECT a FROM t WHERE c = ? AND ? IN (1, ?) AND d = ?",
+                    vec![int(7), int(5), int(6), int(8)],
+                    "SELECT a FROM t WHERE c = 7 AND 5 IN (1, 6) AND d = 8",
+                ),
+                (
+                    Dialect::MySQL,
+                    "SELECT a FROM t WHERE (b IN (?, 1)) IN (?)",
+                    vec![int(7), int(0)],
+                    "SELECT a FROM t WHERE (b IN (7, 1)) IN (0)",
+                ),
+                (
+                    Dialect::MySQL,
+                    "SELECT a FROM t WHERE (a, b) IN ((1, ?)) AND COALESCE(b, ?) IN (?, 4)",
+                    vec![int(5), int(6), int(7)],
+                    "SELECT a FROM t WHERE (a, b) IN ((1, 5)) AND COALESCE(b, 6) IN (7, 4)",
+                ),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT a FROM t WHERE COALESCE(b, $1) IN ($2, $3)",
+                    vec![int(1), int(2), int(3)],
+                    "SELECT a FROM t WHERE COALESCE(b, 1) IN (2, 3)",
+                ),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT a FROM t WHERE $3 IN ($1, $2)",
+                    vec![int(1), int(2), int(3)],
+                    "SELECT a FROM t WHERE 3 IN (1, 2)",
+                ),
+            ] {
+                let mut query = parse_query(dialect, sql);
+                let params =
+                    rewrite_shallow(&mut query, AdapterRewriteParams::new(dialect)).unwrap();
+                let literalized = params.literalize_for_execute(&query, &binds).unwrap();
+                assert_eq!(literalized, expected, "{sql}");
+            }
+        }
+
+        #[test]
+        fn binds_around_in_list_key_layout() {
+            let list = |values: [i32; 2]| DfValue::from(values.map(DfValue::from).to_vec());
+            for (dialect, sql) in [
+                (
+                    Dialect::MySQL,
+                    "SELECT a FROM t WHERE COALESCE(b, ?) IN (?, ?)",
+                ),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT a FROM t WHERE COALESCE(b, $1) IN ($2, $3)",
+                ),
+            ] {
+                let mut query = parse_query(dialect, sql);
+                let params =
+                    rewrite_shallow(&mut query, AdapterRewriteParams::new(dialect)).unwrap();
+                let keys = |binds: [i32; 3]| params.make_keys(&binds.map(DfValue::from)).unwrap();
+                assert_eq!(keys([1, 2, 3]), [DfValue::from(1), list([2, 3])], "{sql}");
+                assert_eq!(keys([2, 1, 3]), [DfValue::from(2), list([1, 3])], "{sql}");
+            }
+        }
+
+        #[test]
+        fn extracted_literals_and_binds_share_a_key() {
+            let dialect = Dialect::MySQL;
+            let keys = |sql: &str, binds: &[i32]| {
+                let mut query = parse_query(dialect, sql);
+                let params =
+                    rewrite_shallow(&mut query, AdapterRewriteParams::new(dialect)).unwrap();
+                let binds: Vec<DfValue> = binds.iter().copied().map(DfValue::from).collect();
+                (format!("{query}"), params.make_keys(&binds).unwrap())
+            };
+            assert_eq!(
+                keys("SELECT a FROM t WHERE COALESCE(b, ?) IN (2, 3)", &[1]),
+                keys("SELECT a FROM t WHERE COALESCE(b, 1) IN (?, ?)", &[2, 3]),
             );
         }
     }
