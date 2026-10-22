@@ -149,6 +149,12 @@ pub const SHALLOW_REFRESH_POOL_IDLE_WORKERS: &str =
 /// requests are sent and workers finish. The pool is shared across all shallow caches.
 pub const SHALLOW_REFRESH_POOL_QUEUED: &str = "readyset_shallow.shallow_refresh_pool_queued";
 
+/// Counter: Number of times a shallow refresh pool worker reconnected to the upstream because a
+/// request used a different upstream database than its connection. The pool is shared across all
+/// shallow caches.
+pub const SHALLOW_REFRESH_POOL_DATABASE_SWITCHES: &str =
+    "readyset_shallow.shallow_refresh_pool_database_switches";
+
 /// Gauge: Number of QueryIds the in-request-path shallow-cache eligibility filter has rejected and
 /// remembered, so subsequent requests for the same query short-circuit without re-walking the AST.
 pub const SHALLOW_AUTO_CREATE_SKIP_SET_SIZE: &str =

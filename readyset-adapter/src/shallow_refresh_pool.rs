@@ -5,8 +5,9 @@ use std::time::{Duration, Instant};
 
 use database_utils::{SharedUpstreamRegistry, UpstreamConfig};
 use metric::{
-    SHALLOW_REFRESH_POOL_IDLE_WORKERS, SHALLOW_REFRESH_POOL_QUEUED, SHALLOW_REFRESH_POOL_WORKERS,
-    SHALLOW_REFRESH_QUERY_TIME, SHALLOW_REFRESH_QUEUE_EXCEEDED,
+    SHALLOW_REFRESH_POOL_DATABASE_SWITCHES, SHALLOW_REFRESH_POOL_IDLE_WORKERS,
+    SHALLOW_REFRESH_POOL_QUEUED, SHALLOW_REFRESH_POOL_WORKERS, SHALLOW_REFRESH_QUERY_TIME,
+    SHALLOW_REFRESH_QUEUE_EXCEEDED,
 };
 use metrics::{Gauge, counter, gauge, histogram};
 use readyset_client::query::QueryId;
@@ -47,9 +48,11 @@ where
 ///
 /// Workers are spawned lazily up to `worker_limit`. Each worker maintains its own upstream
 /// database connection. When idle for `WORKER_TIMEOUT`, a worker shuts down and its connection is
-/// dropped. When sending a request, idle workers are preferred (LIFO, most recently active
-/// first). If no idle workers are available and the limit is reached, requests are
-/// round-robined among busy workers' channels. If all channels are full, the request is dropped.
+/// dropped. A request goes to the most recently active idle worker connected to the request's
+/// upstream database, then to a new worker while under the limit, then to any idle worker. Once
+/// the limit is reached and no worker is idle, requests are round-robined among busy workers'
+/// channels, those on the request's database first. If all channels are full, the request is
+/// dropped.
 pub struct ShallowRefreshPool<DB: UpstreamDatabase> {
     inner: Mutex<PoolInner<WorkerRequest<DB>>>,
     upstream_config: Arc<RwLock<UpstreamConfig>>,
@@ -66,9 +69,16 @@ type WorkerRequest<DB> = ShallowRefreshRequest<
     <DB as UpstreamDatabase>::ShallowExecMeta,
 >;
 
+struct Worker<R> {
+    tx: Sender<R>,
+    /// The upstream database of the last request sent to the worker, which its connection uses
+    /// once it reaches that request.
+    database: Option<SqlIdentifier>,
+}
+
 struct PoolInner<R> {
-    /// All worker senders, indexed by worker id. `None` means the slot is free.
-    workers: Vec<Option<Sender<R>>>,
+    /// All workers, indexed by worker id. `None` means the slot is free.
+    workers: Vec<Option<Worker<R>>>,
     /// LIFO stack of idle worker indices, most recently active on top.
     idle_stack: Vec<usize>,
     /// Round-robin index for fallback when no workers are idle.
@@ -87,30 +97,49 @@ enum Dispatch<R> {
 }
 
 impl<R> PoolInner<R> {
-    /// Send `req` to a worker. Return [`Dispatch::Spawn`] when a new worker should take it, which
-    /// happens while under `limit` if no worker is idle.
-    fn dispatch(&mut self, req: R, limit: usize) -> Dispatch<R> {
-        let Some(req) = self.try_send_idle(req) else {
+    /// Send `req` for `database` to a worker. Return [`Dispatch::Spawn`] when a new worker should
+    /// take it, which happens while under `limit` if no idle worker is on `database`.
+    fn dispatch(&mut self, req: R, database: &Option<SqlIdentifier>, limit: usize) -> Dispatch<R> {
+        let Some(req) = self.try_send_idle(req, database, false) else {
             return Dispatch::Sent;
         };
         if self.workers.iter().flatten().count() < limit {
             return Dispatch::Spawn(None, req);
         }
-        self.try_send_round_robin(req)
+        let Some(req) = self.try_send_idle(req, database, true) else {
+            return Dispatch::Sent;
+        };
+        match self.try_send_round_robin(req, database, false) {
+            Dispatch::Full(req) => self.try_send_round_robin(req, database, true),
+            dispatch => dispatch,
+        }
     }
 
-    /// Round-robin among all active workers. A closed channel frees its slot for a new worker to
-    /// take the request.
-    fn try_send_round_robin(&mut self, mut req: R) -> Dispatch<R> {
+    /// Round-robin among all active workers, or only those on `database` unless `any` is set.
+    /// A closed channel frees its slot for a new worker to take the request.
+    fn try_send_round_robin(
+        &mut self,
+        mut req: R,
+        database: &Option<SqlIdentifier>,
+        any: bool,
+    ) -> Dispatch<R> {
         let len = self.workers.len();
         for _ in 0..len {
             let idx = self.next_rr % len;
             self.next_rr = self.next_rr.wrapping_add(1);
-            let Some(sender) = &self.workers[idx] else {
+            let Some(worker) = &mut self.workers[idx] else {
                 continue;
             };
-            req = match sender.try_send(req) {
-                Ok(()) => return Dispatch::Sent,
+            if !any && worker.database != *database {
+                continue;
+            }
+            req = match worker.tx.try_send(req) {
+                Ok(()) => {
+                    if worker.database != *database {
+                        worker.database = database.clone();
+                    }
+                    return Dispatch::Sent;
+                }
                 Err(mpsc::error::TrySendError::Closed(req)) => {
                     self.workers[idx] = None;
                     return Dispatch::Spawn(Some(idx), req);
@@ -121,24 +150,39 @@ impl<R> PoolInner<R> {
         Dispatch::Full(req)
     }
 
-    fn insert_worker(&mut self, tx: Sender<R>) -> usize {
+    fn insert_worker(&mut self, worker: Worker<R>) -> usize {
         if let Some(free) = self.workers.iter().position(|w| w.is_none()) {
-            self.workers[free] = Some(tx);
+            self.workers[free] = Some(worker);
             free
         } else {
             let idx = self.workers.len();
-            self.workers.push(Some(tx));
+            self.workers.push(Some(worker));
             idx
         }
     }
 
-    /// Try sending to an idle worker from the LIFO stack. Returns the request back if no idle
-    /// worker accepted it.
-    fn try_send_idle(&mut self, mut req: R) -> Option<R> {
-        while let Some(idx) = self.idle_stack.pop() {
-            if let Some(sender) = &self.workers[idx] {
-                req = match sender.try_send(req) {
-                    Ok(()) => return None,
+    /// Try sending to an idle worker from the LIFO stack, considering only workers on `database`
+    /// unless `any` is set. Returns the request back if no idle worker accepted it.
+    fn try_send_idle(
+        &mut self,
+        mut req: R,
+        database: &Option<SqlIdentifier>,
+        any: bool,
+    ) -> Option<R> {
+        while let Some(pos) = self.idle_stack.iter().rposition(|&idx| {
+            any || self.workers[idx]
+                .as_ref()
+                .is_some_and(|w| w.database == *database)
+        }) {
+            let idx = self.idle_stack.remove(pos);
+            if let Some(worker) = &mut self.workers[idx] {
+                req = match worker.tx.try_send(req) {
+                    Ok(()) => {
+                        if worker.database != *database {
+                            worker.database = database.clone();
+                        }
+                        return None;
+                    }
                     Err(mpsc::error::TrySendError::Closed(req)) => {
                         self.workers[idx] = None;
                         req
@@ -181,8 +225,8 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
             .workers
             .iter()
             .flatten()
-            .fold((0usize, 0usize), |(live, queued), tx| {
-                (live + 1, queued + (tx.max_capacity() - tx.capacity()))
+            .fold((0usize, 0usize), |(live, queued), w| {
+                (live + 1, queued + (w.tx.max_capacity() - w.tx.capacity()))
             });
         self.workers_gauge.set(live as f64);
         self.idle_gauge.set(inner.idle_stack.len() as f64);
@@ -198,15 +242,17 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
         req: ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>,
     ) {
         let (tx, rx) = mpsc::channel(CHANNEL_CAPACITY);
+        let database = req.database.clone();
         let Ok(()) = tx.try_send(req) else {
             unreachable!("fresh channel with capacity {CHANNEL_CAPACITY}");
         };
+        let worker = Worker { tx, database };
         let idx = match slot {
             Some(idx) => {
-                inner.workers[idx] = Some(tx);
+                inner.workers[idx] = Some(worker);
                 idx
             }
-            None => inner.insert_worker(tx),
+            None => inner.insert_worker(worker),
         };
         self.rt.spawn(Self::worker(Arc::clone(self), rx, idx));
     }
@@ -217,7 +263,8 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
         req: ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>,
     ) {
         let mut inner = self.inner.lock().await;
-        match inner.dispatch(req, self.worker_limit) {
+        let database = req.database.clone();
+        match inner.dispatch(req, &database, self.worker_limit) {
             Dispatch::Sent => {}
             Dispatch::Spawn(slot, req) => self.spawn_worker_with_request(&mut inner, slot, req),
             Dispatch::Full(_req) => {
@@ -301,6 +348,9 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
             }
 
             if upstream.is_none() || reconnect || request.database != database {
+                if upstream.is_some() && !reconnect {
+                    counter!(SHALLOW_REFRESH_POOL_DATABASE_SWITCHES).increment(1);
+                }
                 reconnect = false;
                 let mut connect_config = config.clone();
                 connect_config.program_name = Some(READYSET_SHALLOW_REFRESHER.to_string());
@@ -498,5 +548,101 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
         }
 
         Self::remove_worker(&pool, idx).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::assert_matches;
+
+    use super::*;
+
+    fn empty_pool() -> PoolInner<u32> {
+        PoolInner {
+            workers: Vec::new(),
+            idle_stack: Vec::new(),
+            next_rr: 0,
+        }
+    }
+
+    /// Add a worker on `database` to `inner`, idle if `idle` is set, and return its receiver.
+    fn add_worker(inner: &mut PoolInner<u32>, database: Option<&str>, idle: bool) -> Receiver<u32> {
+        let (tx, rx) = mpsc::channel(CHANNEL_CAPACITY);
+        let database = database.map(SqlIdentifier::from);
+        let idx = inner.insert_worker(Worker { tx, database });
+        if idle {
+            inner.idle_stack.push(idx);
+        }
+        rx
+    }
+
+    fn db(name: &str) -> Option<SqlIdentifier> {
+        Some(name.into())
+    }
+
+    #[test]
+    fn idle_worker_on_database_preferred() {
+        let mut inner = empty_pool();
+        let mut rx_a = add_worker(&mut inner, Some("a"), true);
+        let mut rx_b = add_worker(&mut inner, Some("b"), true);
+
+        assert_matches!(inner.dispatch(1, &db("a"), 2), Dispatch::Sent);
+        assert_eq!(rx_a.try_recv(), Ok(1));
+        assert!(rx_b.try_recv().is_err());
+        assert_eq!(inner.idle_stack, [1]);
+    }
+
+    #[test]
+    fn spawns_before_switching_database() {
+        let mut inner = empty_pool();
+        let mut rx_a = add_worker(&mut inner, Some("a"), true);
+
+        assert_matches!(inner.dispatch(1, &db("b"), 2), Dispatch::Spawn(None, 1));
+        assert!(rx_a.try_recv().is_err());
+        assert_eq!(inner.idle_stack, [0]);
+    }
+
+    #[test]
+    fn switches_idle_worker_at_limit() {
+        let mut inner = empty_pool();
+        let mut rx_a = add_worker(&mut inner, Some("a"), true);
+
+        assert_matches!(inner.dispatch(1, &db("b"), 1), Dispatch::Sent);
+        assert_eq!(rx_a.try_recv(), Ok(1));
+        let worker = inner.workers[0].as_ref().expect("worker");
+        assert_eq!(worker.database, db("b"));
+    }
+
+    #[test]
+    fn default_database_uses_lifo_order() {
+        let mut inner = empty_pool();
+        let mut rx_first = add_worker(&mut inner, None, true);
+        let mut rx_second = add_worker(&mut inner, None, true);
+
+        assert_matches!(inner.dispatch(1, &None, 2), Dispatch::Sent);
+        assert_eq!(rx_second.try_recv(), Ok(1));
+        assert!(rx_first.try_recv().is_err());
+    }
+
+    #[test]
+    fn round_robin_prefers_database() {
+        let mut inner = empty_pool();
+        let mut rx_a = add_worker(&mut inner, Some("a"), false);
+        let mut rx_b = add_worker(&mut inner, Some("b"), false);
+
+        assert_matches!(inner.dispatch(1, &db("b"), 2), Dispatch::Sent);
+        assert_eq!(rx_b.try_recv(), Ok(1));
+        assert!(rx_a.try_recv().is_err());
+    }
+
+    #[test]
+    fn round_robin_falls_back_to_any_database() {
+        let mut inner = empty_pool();
+        let mut rx_a = add_worker(&mut inner, Some("a"), false);
+
+        assert_matches!(inner.dispatch(1, &db("b"), 1), Dispatch::Sent);
+        assert_eq!(rx_a.try_recv(), Ok(1));
+        let worker = inner.workers[0].as_ref().expect("worker");
+        assert_eq!(worker.database, db("b"));
     }
 }
