@@ -51,7 +51,7 @@ where
 /// first). If no idle workers are available and the limit is reached, requests are
 /// round-robined among busy workers' channels. If all channels are full, the request is dropped.
 pub struct ShallowRefreshPool<DB: UpstreamDatabase> {
-    inner: Mutex<PoolInner<DB>>,
+    inner: Mutex<PoolInner<WorkerRequest<DB>>>,
     upstream_config: Arc<RwLock<UpstreamConfig>>,
     upstream_registry: Arc<SharedUpstreamRegistry>,
     rt: tokio::runtime::Handle,
@@ -61,20 +61,94 @@ pub struct ShallowRefreshPool<DB: UpstreamDatabase> {
     queued_gauge: Gauge,
 }
 
-type WorkerSender<DB> = Sender<
-    ShallowRefreshRequest<
-        <DB as UpstreamDatabase>::CacheEntry,
-        <DB as UpstreamDatabase>::ShallowExecMeta,
-    >,
+type WorkerRequest<DB> = ShallowRefreshRequest<
+    <DB as UpstreamDatabase>::CacheEntry,
+    <DB as UpstreamDatabase>::ShallowExecMeta,
 >;
 
-struct PoolInner<DB: UpstreamDatabase> {
+struct PoolInner<R> {
     /// All worker senders, indexed by worker id. `None` means the slot is free.
-    workers: Vec<Option<WorkerSender<DB>>>,
+    workers: Vec<Option<Sender<R>>>,
     /// LIFO stack of idle worker indices, most recently active on top.
     idle_stack: Vec<usize>,
     /// Round-robin index for fallback when no workers are idle.
     next_rr: usize,
+}
+
+/// How [`PoolInner::dispatch`] handled a request.
+#[derive(Debug)]
+enum Dispatch<R> {
+    /// A worker's channel accepted the request.
+    Sent,
+    /// A new worker should take the request, in the given free slot or a new one.
+    Spawn(Option<usize>, R),
+    /// All channels are full.
+    Full(R),
+}
+
+impl<R> PoolInner<R> {
+    /// Send `req` to a worker. Return [`Dispatch::Spawn`] when a new worker should take it, which
+    /// happens while under `limit` if no worker is idle.
+    fn dispatch(&mut self, req: R, limit: usize) -> Dispatch<R> {
+        let Some(req) = self.try_send_idle(req) else {
+            return Dispatch::Sent;
+        };
+        if self.workers.iter().flatten().count() < limit {
+            return Dispatch::Spawn(None, req);
+        }
+        self.try_send_round_robin(req)
+    }
+
+    /// Round-robin among all active workers. A closed channel frees its slot for a new worker to
+    /// take the request.
+    fn try_send_round_robin(&mut self, mut req: R) -> Dispatch<R> {
+        let len = self.workers.len();
+        for _ in 0..len {
+            let idx = self.next_rr % len;
+            self.next_rr = self.next_rr.wrapping_add(1);
+            let Some(sender) = &self.workers[idx] else {
+                continue;
+            };
+            req = match sender.try_send(req) {
+                Ok(()) => return Dispatch::Sent,
+                Err(mpsc::error::TrySendError::Closed(req)) => {
+                    self.workers[idx] = None;
+                    return Dispatch::Spawn(Some(idx), req);
+                }
+                Err(mpsc::error::TrySendError::Full(req)) => req,
+            };
+        }
+        Dispatch::Full(req)
+    }
+
+    fn insert_worker(&mut self, tx: Sender<R>) -> usize {
+        if let Some(free) = self.workers.iter().position(|w| w.is_none()) {
+            self.workers[free] = Some(tx);
+            free
+        } else {
+            let idx = self.workers.len();
+            self.workers.push(Some(tx));
+            idx
+        }
+    }
+
+    /// Try sending to an idle worker from the LIFO stack. Returns the request back if no idle
+    /// worker accepted it.
+    fn try_send_idle(&mut self, mut req: R) -> Option<R> {
+        while let Some(idx) = self.idle_stack.pop() {
+            if let Some(sender) = &self.workers[idx] {
+                req = match sender.try_send(req) {
+                    Ok(()) => return None,
+                    Err(mpsc::error::TrySendError::Closed(req)) => {
+                        self.workers[idx] = None;
+                        req
+                    }
+                    Err(mpsc::error::TrySendError::Full(req)) => req,
+                };
+            }
+        }
+        Some(req)
+    }
 }
 
 impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
@@ -102,7 +176,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
     }
 
     /// Refresh the pool gauges from the locked pool state.
-    fn update_gauges(&self, inner: &PoolInner<DB>) {
+    fn update_gauges(&self, inner: &PoolInner<WorkerRequest<DB>>) {
         let (live, queued) = inner
             .workers
             .iter()
@@ -115,50 +189,11 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
         self.queued_gauge.set(queued as f64);
     }
 
-    /// Round-robin among all active workers. Returns the request back if all channels are full.
-    fn try_send_round_robin(
-        self: &Arc<Self>,
-        inner: &mut PoolInner<DB>,
-        mut req: ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>,
-    ) -> Option<ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>> {
-        let len = inner.workers.len();
-        for _ in 0..len {
-            let idx = inner.next_rr % len;
-            inner.next_rr = inner.next_rr.wrapping_add(1);
-            if let Some(sender) = &inner.workers[idx] {
-                req = match sender.try_send(req) {
-                    Ok(()) => return None,
-                    Err(mpsc::error::TrySendError::Closed(req)) => {
-                        inner.workers[idx] = None;
-                        self.spawn_worker_with_request(inner, Some(idx), req);
-                        return None;
-                    }
-                    Err(mpsc::error::TrySendError::Full(req)) => req,
-                };
-            }
-        }
-        Some(req)
-    }
-
-    fn insert_worker(
-        inner: &mut PoolInner<DB>,
-        tx: Sender<ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>>,
-    ) -> usize {
-        if let Some(free) = inner.workers.iter().position(|w| w.is_none()) {
-            inner.workers[free] = Some(tx);
-            free
-        } else {
-            let idx = inner.workers.len();
-            inner.workers.push(Some(tx));
-            idx
-        }
-    }
-
     /// Spawn a new worker at the given slot (or allocate a new slot), sending `req` as its first
     /// message.
     fn spawn_worker_with_request(
         self: &Arc<Self>,
-        inner: &mut PoolInner<DB>,
+        inner: &mut PoolInner<WorkerRequest<DB>>,
         slot: Option<usize>,
         req: ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>,
     ) {
@@ -171,45 +206,9 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                 inner.workers[idx] = Some(tx);
                 idx
             }
-            None => Self::insert_worker(inner, tx),
+            None => inner.insert_worker(tx),
         };
         self.rt.spawn(Self::worker(Arc::clone(self), rx, idx));
-    }
-
-    /// Try spawning a new worker if under the limit. Returns the request back if at the limit.
-    fn try_spawn_worker(
-        self: &Arc<Self>,
-        inner: &mut PoolInner<DB>,
-        req: ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>,
-    ) -> Option<ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>> {
-        let active = inner.workers.iter().filter(|w| w.is_some()).count();
-        if active < self.worker_limit {
-            self.spawn_worker_with_request(inner, None, req);
-            return None;
-        }
-        Some(req)
-    }
-
-    /// Try sending to an idle worker from the LIFO stack. Returns the request back if no idle
-    /// worker accepted it.
-    fn try_send_idle(
-        self: &Arc<Self>,
-        inner: &mut PoolInner<DB>,
-        mut req: ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>,
-    ) -> Option<ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>> {
-        while let Some(idx) = inner.idle_stack.pop() {
-            if let Some(sender) = &inner.workers[idx] {
-                req = match sender.try_send(req) {
-                    Ok(()) => return None,
-                    Err(mpsc::error::TrySendError::Closed(req)) => {
-                        inner.workers[idx] = None;
-                        req
-                    }
-                    Err(mpsc::error::TrySendError::Full(req)) => req,
-                };
-            }
-        }
-        Some(req)
     }
 
     /// Send a refresh request to a worker.
@@ -218,21 +217,14 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
         req: ShallowRefreshRequest<DB::CacheEntry, DB::ShallowExecMeta>,
     ) {
         let mut inner = self.inner.lock().await;
-
-        // Try idle stack (LIFO, recently used connections first)
-        if let Some(req) = self.try_send_idle(&mut inner, req) {
-            // Spawn new worker if under limit
-            if let Some(req) = self.try_spawn_worker(&mut inner, req) {
-                // Round-robin among all active workers
-                if let Some(_req) = self.try_send_round_robin(&mut inner, req) {
-                    // All channels full, drop request
-                    self.update_gauges(&inner);
-                    counter!(SHALLOW_REFRESH_QUEUE_EXCEEDED).increment(1);
-                    rate_limit(true, ADAPTER_SHALLOW_REFRESH_SEND_REQUEST, || {
-                        warn!("All shallow refresh workers busy, dropping request");
-                    });
-                    return;
-                }
+        match inner.dispatch(req, self.worker_limit) {
+            Dispatch::Sent => {}
+            Dispatch::Spawn(slot, req) => self.spawn_worker_with_request(&mut inner, slot, req),
+            Dispatch::Full(_req) => {
+                counter!(SHALLOW_REFRESH_QUEUE_EXCEEDED).increment(1);
+                rate_limit(true, ADAPTER_SHALLOW_REFRESH_SEND_REQUEST, || {
+                    warn!("All shallow refresh workers busy, dropping request");
+                });
             }
         }
         self.update_gauges(&inner);
