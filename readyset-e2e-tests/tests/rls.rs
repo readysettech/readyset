@@ -1288,6 +1288,41 @@ async fn pg_rls_shallow_cache_failed_commit_extended() {
     run_failed_commit(Protocol::Extended).await;
 }
 
+/// A `RESET ALL` inside a transaction reverts at ROLLBACK, restoring the claims. The
+/// partition for the login role with no claims is filled first, so a read keyed to it returns
+/// alice's rows.
+async fn run_reset_all_in_rolled_back_transaction(proto: Protocol) {
+    init_test_logging();
+    let (rs, _handle, shutdown_tx) = connect_as_bob_after_alice(proto).await;
+
+    run_stmt(&rs, proto, "RESET ROLE").await;
+    run_stmt(&rs, proto, "RESET request.jwt.claims").await;
+    assert_served_from_cache(&rs, proto, &["alice", "alice", "bob"], "login partition").await;
+    run_stmt(&rs, proto, "SET ROLE authenticated").await;
+    set_sub_claim(&rs, proto, "bob").await;
+
+    run_stmt(&rs, proto, "BEGIN").await;
+    run_stmt(&rs, proto, "RESET ALL").await;
+    run_stmt(&rs, proto, "ROLLBACK").await;
+    assert_served_from_cache(&rs, proto, &["bob"], "bob after ROLLBACK").await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_reset_all_in_rolled_back_transaction_simple() {
+    run_reset_all_in_rolled_back_transaction(Protocol::Simple).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_reset_all_in_rolled_back_transaction_extended() {
+    run_reset_all_in_rolled_back_transaction(Protocol::Extended).await;
+}
+
 /// A `SET ROLE` inside a transaction reverts at ROLLBACK. The bypass partition is filled first, so
 /// a read keyed to it returns alice's rows.
 async fn run_set_role_in_rolled_back_transaction(proto: Protocol) {

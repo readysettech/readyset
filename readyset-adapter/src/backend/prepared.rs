@@ -1819,6 +1819,9 @@ where
             && let Some(session) = self.connectors.session.as_ref()
             && let Some(SqlQuery::ResetAll) = cached_statement.parsed_query.as_deref()
         {
+            self.state
+                .transaction_settings
+                .record_reset_all(self.state.proxy_state, session);
             session.reset_all();
         }
 

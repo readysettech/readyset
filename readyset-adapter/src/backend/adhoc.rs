@@ -780,6 +780,9 @@ where
         if result.is_ok()
             && let Some(session) = reset_all_session
         {
+            state
+                .transaction_settings
+                .record_reset_all(state.proxy_state, &session);
             session.reset_all();
         }
         result

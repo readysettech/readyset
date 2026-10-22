@@ -7,6 +7,7 @@
 //! ignored per `unsupported_set_mode`, and never reaches the upstream at all.
 
 use std::collections::BTreeSet;
+use std::mem;
 use std::sync::Arc;
 
 use metrics::counter;
@@ -133,6 +134,14 @@ impl TransactionSettings {
         }
     }
 
+    /// Note that an open transaction ran `RESET ALL`, which changes the settings `session` holds.
+    /// Call this before `session` is reset.
+    pub(super) fn record_reset_all(&mut self, proxy_state: ProxyState, session: &SessionContext) {
+        if proxy_state.in_transaction() {
+            self.changed.extend(session.setting_names());
+        }
+    }
+
     /// The open transaction committed and keeps the settings it changed.
     pub(super) fn commit(&mut self) {
         self.changed.clear();
@@ -232,7 +241,7 @@ where
                 UnsupportedSetMode::Allow => {}
             }
         }
-        let upstream_rewrite = std::mem::take(&mut behavior.upstream_rewrite);
+        let upstream_rewrite = mem::take(&mut behavior.upstream_rewrite);
         Ok((upstream_rewrite, PendingSetState::new(behavior)))
     }
 
@@ -308,7 +317,7 @@ where
         if state.transaction_settings.reread.is_empty() {
             return;
         }
-        let names = std::mem::take(&mut state.transaction_settings.reread);
+        let names = mem::take(&mut state.transaction_settings.reread);
         let Some(upstream) = connectors.upstream.as_mut() else {
             return;
         };
@@ -361,5 +370,47 @@ where
         };
         let bypass = policy_registry.is_some_and(|reg| reg.bypass_rls_for_role(role.as_str()));
         session.apply_session_authorization(role, bypass);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Reset an untrusted session that has claims set inside a transaction, as `RESET ALL` does.
+    fn reset_all_untrusted_session() -> (TransactionSettings, Arc<SessionContext>) {
+        let session = SessionContext::new("alice".into());
+        session.set_session_guc("request.jwt.claims", r#"{"sub":"bob"}"#);
+        session.mark_session_untrusted();
+        let mut settings = TransactionSettings::default();
+        settings.record_reset_all(ProxyState::InTransaction, &session);
+        session.reset_all();
+        assert!(session.is_session_untrusted());
+        (settings, session)
+    }
+
+    #[test]
+    fn rolled_back_reset_all_rereads_settings() {
+        let (mut settings, session) = reset_all_untrusted_session();
+        settings.rollback();
+        assert!(settings.reread.contains("request.jwt.claims"));
+        assert!(session.is_session_untrusted());
+    }
+
+    #[test]
+    fn reset_all_rolled_back_to_savepoint_rereads_settings() {
+        let (mut settings, session) = reset_all_untrusted_session();
+        settings.rollback_to_savepoint();
+        assert!(settings.reread.contains("request.jwt.claims"));
+        assert!(session.is_session_untrusted());
+    }
+
+    #[test]
+    fn committed_reset_all_rereads_nothing() {
+        let (mut settings, session) = reset_all_untrusted_session();
+        settings.commit();
+        settings.rollback();
+        assert!(settings.reread.is_empty());
+        assert!(session.is_session_untrusted());
     }
 }

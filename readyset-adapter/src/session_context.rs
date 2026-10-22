@@ -198,6 +198,16 @@ impl SessionContext {
         inner.trx_untrusted || inner.session_untrusted
     }
 
+    /// `true` when the session-scoped trust gap is set.
+    pub fn is_session_untrusted(&self) -> bool {
+        self.inner.read().session_untrusted
+    }
+
+    /// Return the names of the session-scope GUCs this context holds.
+    pub fn setting_names(&self) -> Vec<String> {
+        self.inner.read().session_gucs.keys().cloned().collect()
+    }
+
     /// The identity the cache ACL judges this session by: the effective role (the login user, or
     /// the role assumed via `SET ROLE`), read together with the trust flags under one guard.
     /// `None` when a trust gap is set -- the caller must fail closed and route off-cache.
