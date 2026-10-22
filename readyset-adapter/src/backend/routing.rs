@@ -6,14 +6,13 @@
 //! connector's rewrite parameters -- so the routing rules stay independent of the upstream
 //! database type.
 
-use std::mem;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use metrics::counter;
 use readyset_client::ViewCreateRequest;
 use readyset_client::query::{MigrationState, QueryId, QueryStatus};
-use readyset_errors::ReadySetError;
+use readyset_errors::{ReadySetError, ReadySetResult};
 use readyset_sql::ast::{CacheType, SelectStatement, TrxCachePolicy};
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_passes::adapter_rewrites::{
@@ -397,25 +396,10 @@ impl<'session> SelectRouter<'session> {
         }
     }
 
-    /// Checks if noria should try to execute a given select and in the process mutates the
-    /// supplied select statement by rewriting it.
+    /// Checks if noria should try to execute a given select, rewriting it into the form whose
+    /// cache serves it as [`rewrite_for_cache`] picks it.
     ///
-    /// For TopK-eligible queries (a literal LIMIT), this function implements dual cache
-    /// lookup based on which cache was actually created:
-    /// 1. First checks if a TopK cache exists (created with literal LIMIT, e.g., CREATE CACHE
-    ///    ... LIMIT 10)
-    /// 2. If TopK cache exists, uses it (preferred as it's more efficient than letting the adapter
-    ///    fetch all records then apply the limit)
-    /// 3. Otherwise checks if parameterized cache exists (parameterized LIMITs are removed by the
-    ///    adapter, since the server can't handle parameterized LIMITs).
-    /// 4. If parameterized cache exists, uses it.
-    /// 5. If neither cache exists, processes normally (go upstream if possible, else fail).
-    ///
-    /// All other query rewrites (autoparameterization, IN conditions, etc.) are applied
-    /// consistently regardless of which path is taken.
-    ///
-    /// Returns whether noria should try the select, along with the query status if it was obtained
-    /// during processing.
+    /// Returns whether noria should try the select, along with that form's query status.
     pub(super) fn route(
         &mut self,
         q: &mut ViewCreateRequest,
@@ -423,73 +407,52 @@ impl<'session> SelectRouter<'session> {
         schema_generation: SchemaGeneration,
         is_skip_cache: bool,
     ) -> ShouldTrySelect {
-        let mut rewrite_params = self.rewrite_params;
-
-        let is_topk_candidate =
-            rewrite_params.server_supports_topk && has_topk_literal_limit(&q.statement);
-
-        if is_topk_candidate {
-            let mut original = q.clone();
-
-            match self.lookup_topk_cache(
-                q,
-                rewrite_params,
-                params.clone(),
-                schema_generation,
-                is_skip_cache,
-            ) {
-                yes @ ShouldTrySelect::Yes { .. } => return yes,
-                ShouldTrySelect::No { .. } => {
-                    trace!("No TopK cache for query, trying parameterized cache");
-                    // We will try the query again, but this time without the LIMIT, to try and hit
-                    // a cache that was created with a paramterized LIMIT (LIMIT ?)
-                    rewrite_params.server_supports_topk = false;
-                    mem::swap(q, &mut original);
-                }
+        let (status, params) = match rewrite_for_cache(
+            q,
+            self.rewrite_params,
+            params,
+            self.query_status_cache,
+            schema_generation,
+            ReadKind::AdHoc,
+        ) {
+            Ok(form) => form,
+            Err(error) => {
+                warn!(
+                    statement = %Sensitive(&q.statement.display(self.dialect)),
+                    %error,
+                    "This statement could not be rewritten by Readyset",
+                );
+                return ShouldTrySelect::No { error: Some(error) };
             }
-        }
-
-        match self.process_and_check(q, rewrite_params, params, schema_generation, is_skip_cache) {
-            ShouldTrySelect::Yes { status, params, .. } => ShouldTrySelect::Yes {
-                status,
-                params,
-                schema_generation,
-            },
-            no @ ShouldTrySelect::No { .. } => no,
-        }
-    }
-
-    /// For TopK-eligible queries, attempts to use a cache that preserves the literal LIMIT.
-    ///
-    /// Returns [`ShouldTrySelect::Yes`] if a cache exists that can handle the query with TopK
-    /// processing, [`ShouldTrySelect::No`] if no such cache exists and normal processing should be
-    /// attempted.
-    fn lookup_topk_cache(
-        &mut self,
-        q: &mut ViewCreateRequest,
-        rewrite_params: AdapterRewriteParams,
-        params: QueryParameters,
-        schema_generation: SchemaGeneration,
-        is_skip_cache: bool,
-    ) -> ShouldTrySelect {
-        // if the cache is not yet created, it's probably better
-        // to let the adapter try the other path.
-        match self.process_and_check(q, rewrite_params, params, schema_generation, is_skip_cache) {
+        };
+        let has_deep_cache = matches!(
+            status.migration_state,
+            MigrationState::Successful(CacheType::Deep)
+        );
+        let should_try = if is_skip_cache {
+            if has_deep_cache {
+                record_skip_cache(QueryId::from(&*q).to_string(), "deep", "hint");
+            }
+            false
+        } else {
+            Self::cache_skip_reason(
+                self.proxy_state,
+                self.write_tracker,
+                status.trx_cache_policy,
+                "deep",
+                has_deep_cache,
+                || QueryId::from(&*q).to_string(),
+            )
+            .is_none()
+        };
+        if should_try {
             ShouldTrySelect::Yes {
-                status:
-                    status @ QueryStatus {
-                        migration_state: MigrationState::Successful(_) | MigrationState::Inlined(_),
-                        ..
-                    },
-                params,
-                schema_generation,
-            } => ShouldTrySelect::Yes {
                 status,
                 params,
                 schema_generation,
-            },
-            ShouldTrySelect::Yes { .. } => ShouldTrySelect::No { error: None },
-            no => no,
+            }
+        } else {
+            ShouldTrySelect::No { error: None }
         }
     }
 
@@ -531,67 +494,96 @@ impl<'session> SelectRouter<'session> {
         }
         Some(reason)
     }
+}
 
-    /// Helper function to process a query and determine if Readyset should handle it.
-    fn process_and_check(
-        &mut self,
-        q: &mut ViewCreateRequest,
-        rewrite_params: AdapterRewriteParams,
-        params: QueryParameters,
-        schema_generation: SchemaGeneration,
-        is_skip_cache: bool,
-    ) -> ShouldTrySelect {
-        match adapter_rewrites::rewrite_for_readyset(&mut q.statement, rewrite_params, params) {
+/// How a read arrives, which decides how [`rewrite_for_cache`] treats it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ReadKind {
+    /// An ad-hoc query.
+    AdHoc,
+    /// An execute of a prepared statement.
+    Prepared,
+}
+
+/// Rewrites `q` for Readyset into the form whose cache serves it. Returns that form's status and
+/// the parameters a read of it takes.
+///
+/// A query with a literal LIMIT has two forms. The first keeps the LIMIT, and a cache created with
+/// that same LIMIT serves it. The second drops the LIMIT, and a cache created with `LIMIT ?`
+/// serves it, with the adapter applying the query's own LIMIT to the rows. The first form whose
+/// cache exists is used. Both forms are recorded, which is how the views synchronizer finds
+/// either cache.
+///
+/// `kind` picks the form when neither has a cache yet. A prepared statement keeps the LIMIT, since
+/// its LIMIT never changes. An ad-hoc read drops it, since the same query arrives with different
+/// LIMITs and a cache without the LIMIT serves them all. An ad-hoc read also matches each form
+/// against the caches keeping their literals inline.
+pub(super) fn rewrite_for_cache(
+    q: &mut ViewCreateRequest,
+    mut rewrite_params: AdapterRewriteParams,
+    params: QueryParameters,
+    query_status_cache: &QueryStatusCache,
+    schema_generation: SchemaGeneration,
+    kind: ReadKind,
+) -> ReadySetResult<(QueryStatus, DfQueryParameters)> {
+    // The finished form is the shape a cache keeping its literals inline is filed under. On a hit
+    // the cache's own form, already finished, takes the read's place.
+    let with_inline_literal_cache =
+        |q: &mut ViewCreateRequest, params: DfQueryParameters| match (kind == ReadKind::AdHoc)
+            .then(|| inline_literal_cache_for(query_status_cache, q, &params))
+            .flatten()
+        {
+            Some((request, params)) => {
+                *q = request;
+                params
+            }
+            None => params,
+        };
+    let served = |status: &QueryStatus| {
+        matches!(
+            status.migration_state,
+            MigrationState::Successful(_) | MigrationState::Inlined(_)
+        )
+    };
+
+    let mut topk_form = None;
+    if rewrite_params.server_supports_topk && has_topk_literal_limit(&q.statement) {
+        let mut topk = q.clone();
+        match adapter_rewrites::rewrite_for_readyset(
+            &mut topk.statement,
+            rewrite_params,
+            params.clone(),
+        ) {
             Ok(params) => {
-                // The finished form is the shape a cache keeping its literals inline is filed
-                // under. On a hit the cache's own form, already finished, takes the read's place.
-                let params = match inline_literal_cache_for(self.query_status_cache, q, &params) {
-                    Some((request, params)) => {
-                        *q = request;
-                        params
-                    }
-                    None => params,
-                };
-                let status = self.query_status_cache.query_status(q, schema_generation);
-                let has_deep_cache = matches!(
-                    status.migration_state,
-                    MigrationState::Successful(CacheType::Deep)
-                );
-                let should_try = if is_skip_cache {
-                    if has_deep_cache {
-                        record_skip_cache(QueryId::from(&*q).to_string(), "deep", "hint");
-                    }
-                    false
-                } else {
-                    Self::cache_skip_reason(
-                        self.proxy_state,
-                        self.write_tracker,
-                        status.trx_cache_policy,
-                        "deep",
-                        has_deep_cache,
-                        || QueryId::from(&*q).to_string(),
-                    )
-                    .is_none()
-                };
-                if should_try {
-                    ShouldTrySelect::Yes {
-                        status,
-                        params,
-                        schema_generation,
-                    }
-                } else {
-                    ShouldTrySelect::No { error: None }
+                let params = with_inline_literal_cache(&mut topk, params);
+                let status = query_status_cache.query_status(&topk, schema_generation);
+                if served(&status) {
+                    *q = topk;
+                    return Ok((status, params));
                 }
+                topk_form = Some((topk, status, params));
             }
-            Err(error) => {
-                warn!(
-                    statement = %Sensitive(&q.statement.display(self.dialect)),
-                    %error,
-                    "This statement could not be rewritten by Readyset",
-                );
-                ShouldTrySelect::No { error: Some(error) }
-            }
+            Err(error) => warn!(
+                statement = %Sensitive(&q.statement.display(rewrite_params.dialect)),
+                %error,
+                "This statement could not be rewritten by Readyset",
+            ),
         }
+        trace!("No TopK cache for query, trying parameterized cache");
+        rewrite_params.server_supports_topk = false;
+    }
+
+    let params = adapter_rewrites::rewrite_for_readyset(&mut q.statement, rewrite_params, params)?;
+    let params = with_inline_literal_cache(q, params);
+    let status = query_status_cache.query_status(q, schema_generation);
+    match topk_form {
+        Some((topk, topk_status, topk_params))
+            if kind == ReadKind::Prepared && !served(&status) =>
+        {
+            *q = topk;
+            Ok((topk_status, topk_params))
+        }
+        _ => Ok((status, params)),
     }
 }
 

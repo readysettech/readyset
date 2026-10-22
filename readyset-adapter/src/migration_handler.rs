@@ -20,6 +20,7 @@ use readyset_sql::ast::SqlIdentifier;
 use readyset_sql::ast::TrxCachePolicy;
 use readyset_sql::{DialectDisplay, ast::Literal};
 use readyset_sql_passes::InlineLiterals;
+use readyset_sql_passes::adapter_rewrites;
 use readyset_util::redacted::Sensitive;
 use readyset_util::shutdown::ShutdownReceiver;
 use schema_catalog::{RewriteContext, SchemaCatalogHandle, SchemaGeneration};
@@ -253,9 +254,19 @@ impl MigrationHandler {
             .await
         {
             Ok(rewrite_context) => {
-                self.noria
-                    .prepare_select(view_request.statement.clone(), true, &rewrite_context)
-                    .await
+                let mut statement = view_request.statement.clone();
+                match adapter_rewrites::rewrite_query(
+                    &mut statement,
+                    self.noria.rewrite_params(),
+                    &rewrite_context,
+                ) {
+                    Ok(params) => {
+                        self.noria
+                            .prepare_select(statement, params, true, &rewrite_context)
+                            .await
+                    }
+                    Err(e) => Err(e),
+                }
             }
             Err(e) => Err(e),
         };

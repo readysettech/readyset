@@ -28,7 +28,7 @@ use readyset_sql::ast::{
     TrxCachePolicy, UnaryOperator, UpdateStatement,
 };
 use readyset_sql::{DialectDisplay, TryFromDialect as _, TryIntoDialect as _};
-use readyset_sql_passes::adapter_rewrites::{self, AdapterRewriteParams, DfQueryParameters};
+use readyset_sql_passes::adapter_rewrites::{AdapterRewriteParams, DfQueryParameters};
 use readyset_util::redacted::Sensitive;
 use readyset_util::shared_cache::{self, LocalCache};
 use schema_catalog::{RewriteContext, SchemaGeneration};
@@ -1555,19 +1555,15 @@ impl NoriaConnector {
         })
     }
 
+    /// Prepare `statement`, already rewritten for Readyset, against its cache.
+    /// `processed_query_params` are the parameters that rewrite produced.
     pub(crate) async fn prepare_select(
         &mut self,
-        mut statement: SelectStatement,
+        statement: SelectStatement,
+        processed_query_params: DfQueryParameters,
         create_if_not_exist: bool,
         rewrite_context: &RewriteContext,
     ) -> ReadySetResult<PrepareResult> {
-        trace!("select::collapse where-in clauses");
-        let processed_query_params = adapter_rewrites::rewrite_query(
-            &mut statement,
-            self.rewrite_params(),
-            rewrite_context,
-        )?;
-
         // check if we already have this query prepared
         trace!("select::access view");
         let qname = self

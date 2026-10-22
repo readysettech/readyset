@@ -6,6 +6,7 @@
 //! routing and session decisions but never enters here -- it has no handle to keep.
 
 use std::collections::HashMap;
+use std::mem;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -33,7 +34,10 @@ use slab::Slab;
 use tracing::{debug, error, warn};
 
 use super::noria_connector::{self, ExecuteSelectContext, NoriaConnector, PreparedSelectTypes};
-use super::routing::{ProxyState, SelectRouter, has_topk_literal_limit, record_skip_cache};
+use super::routing::{
+    ProxyState, ReadKind, SelectRouter, has_topk_literal_limit, record_skip_cache,
+    rewrite_for_cache,
+};
 use super::{
     Backend, MigrationMode, PrepareResult, PrepareResultInner, QueryInfo, QueryResult, StatementId,
     acl_decline_reason, convert_or_parse_query, log_query, no_upstream_err, parse_query,
@@ -77,6 +81,8 @@ enum PrepareMeta {
 struct PrepareSelectMeta {
     stmt: SelectStatement,
     view_request: ViewCreateRequest,
+    /// The parameters a read of `view_request` takes, when Readyset may serve the statement.
+    params: Option<DfQueryParameters>,
     inline_literal_shapes: Vec<PreparedShape>,
     inline_literal_caches_generation: u64,
     query_id: Option<QueryId>,
@@ -426,12 +432,17 @@ where
             .map(|u| u.prepare(query, data, statement_type))
             .into();
         let noria_prep: OptionFuture<_> = select_meta
-            .should_do_noria
-            .then_some(self.connectors.noria.prepare_select(
-                select_meta.stmt.clone(),
-                select_meta.must_migrate,
-                &rewrite_context,
-            ))
+            .params
+            .clone()
+            .filter(|_| select_meta.should_do_noria)
+            .map(|params| {
+                self.connectors.noria.prepare_select(
+                    select_meta.view_request.statement.clone(),
+                    params,
+                    select_meta.must_migrate,
+                    &rewrite_context,
+                )
+            })
             .into();
 
         let (upstream_res, noria_res) = future::join(up_prep, noria_prep).await;
@@ -668,10 +679,14 @@ where
         }
 
         let search_path = rewrite_context.search_path();
+        let mut view_request = ViewCreateRequest::new(
+            rewritten.clone(),
+            self.connectors.noria.schema_search_path().to_owned(),
+        );
         let params = match adapter_rewrites::rewrite_for_readyset(
             &mut rewritten,
             rewrite_params,
-            equivalent,
+            equivalent.clone(),
         ) {
             Ok(params) => params,
             Err(e) => {
@@ -716,14 +731,23 @@ where
                 .query_status_cache
                 .inline_literal_caches_under(&shape.shape);
         }
-        let view_request = ViewCreateRequest::new(
-            rewritten,
-            self.connectors.noria.schema_search_path().to_owned(),
-        );
-        let status = self
-            .state
-            .query_status_cache
-            .query_status(&view_request, rewrite_context.schema_generation());
+        let (status, params) = match rewrite_for_cache(
+            &mut view_request,
+            rewrite_params,
+            equivalent,
+            self.state.query_status_cache,
+            rewrite_context.schema_generation(),
+            ReadKind::Prepared,
+        ) {
+            Ok(form) => form,
+            Err(e) => {
+                warn!(
+                    statement = %Sensitive(&stmt.display(self.settings.dialect)),
+                    "This statement could not be rewritten for Readyset"
+                );
+                return Ok(PrepareMeta::FailedToRewrite(e));
+            }
+        };
         if self.state.proxy_state.is_proxy_always()
             && !matches!(status.trx_cache_policy, TrxCachePolicy::Always)
         {
@@ -735,6 +759,7 @@ where
             Ok(PrepareMeta::Select(PrepareSelectMeta {
                 stmt,
                 view_request,
+                params: Some(params),
                 inline_literal_shapes,
                 inline_literal_caches_generation,
                 query_id: Some(query_id),
@@ -820,6 +845,7 @@ where
                 PrepareMeta::Select(PrepareSelectMeta {
                     stmt,
                     view_request,
+                    params: None,
                     inline_literal_shapes: Vec::new(),
                     inline_literal_caches_generation: 0,
                     query_id: query_shallow.as_ref().map(QueryId::from),
@@ -1296,6 +1322,7 @@ where
     /// If the query is not in the `MigrationState::Pending` or `MigrationState::Inlined` state
     async fn update_noria_prepare(
         noria: &mut NoriaConnector,
+        query_status_cache: &QueryStatusCache,
         cached_entry: &mut PreparedStatement<DB>,
         rewrite_context: &RewriteContext,
     ) -> ReadySetResult<()> {
@@ -1315,8 +1342,29 @@ where
 
         let noria_prep = match &**parsed_statement {
             SqlQuery::Select(stmt) => {
+                // The cache may serve either form of a statement spelling its LIMIT out, so the
+                // form is picked again.
+                let mut statement = stmt.clone();
+                let rewrite_params = noria.rewrite_params();
+                let equivalent = adapter_rewrites::rewrite_equivalent_deep(
+                    &mut statement,
+                    rewrite_params,
+                    rewrite_context,
+                )?;
+                let mut view_request =
+                    ViewCreateRequest::new(statement, rewrite_context.search_path().to_vec());
+                let (_, params) = rewrite_for_cache(
+                    &mut view_request,
+                    rewrite_params,
+                    equivalent,
+                    query_status_cache,
+                    rewrite_context.schema_generation(),
+                    ReadKind::Prepared,
+                )?;
+                let statement = view_request.statement.clone();
+                cached_entry.view_request = Some(view_request);
                 noria
-                    .prepare_select(stmt.clone(), false, rewrite_context)
+                    .prepare_select(statement, params, false, rewrite_context)
                     .await?
             }
             _ => internal!("Only SELECT statements can be pending migration"),
@@ -1430,9 +1478,36 @@ where
                 search_path,
             );
 
-            if matches!(new_migration_state, Some(MigrationState::Successful(_))) {
+            // A cache created with `LIMIT ?` serves a statement keeping its literal LIMIT too. It is
+            // filed under the form without the LIMIT, so the LIMIT comes off for the lookup and goes
+            // back after.
+            let query_status_cache = self.state.query_status_cache;
+            let stripped_form_served = |form: &mut ViewCreateRequest| {
+                if !has_topk_literal_limit(&form.statement) {
+                    return false;
+                }
+                let limit = mem::take(&mut form.statement.limit_clause);
+                let served = matches!(
+                    query_status_cache.try_query_migration_state(&*form).1,
+                    Some(MigrationState::Successful(_))
+                );
+                form.statement.limit_clause = limit;
+                served
+            };
+            if matches!(new_migration_state, Some(MigrationState::Successful(_)))
+                || cached_statement
+                    .view_request
+                    .as_mut()
+                    .is_some_and(stripped_form_served)
+            {
                 // Attempt to prepare on ReadySet
-                let _ = Self::update_noria_prepare(noria, cached_statement, &rewrite_context).await;
+                let _ = Self::update_noria_prepare(
+                    noria,
+                    self.state.query_status_cache,
+                    cached_statement,
+                    &rewrite_context,
+                )
+                .await;
             } else if let Some(MigrationState::Inlined(new_state)) = new_migration_state
                 && let MigrationState::Inlined(ref old_state) = cached_statement.migration_state
             {
@@ -1459,9 +1534,14 @@ where
                     if updated_view_cache
                         && matches!(cached_statement.prep.inner, PrepareResultInner::Upstream(_))
                     {
-                        if Self::update_noria_prepare(noria, cached_statement, &rewrite_context)
-                            .await
-                            .is_ok()
+                        if Self::update_noria_prepare(
+                            noria,
+                            self.state.query_status_cache,
+                            cached_statement,
+                            &rewrite_context,
+                        )
+                        .await
+                        .is_ok()
                         {
                             cached_statement.migration_state = MigrationState::Inlined(new_state);
                         }

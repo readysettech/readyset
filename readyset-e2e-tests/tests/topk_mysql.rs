@@ -5,6 +5,7 @@ use mysql_async::consts::ColumnFlags;
 use mysql_async::prelude::Queryable;
 use mysql_async::{Conn, Row};
 use readyset_adapter::backend::{MigrationMode, QueryInfo};
+use readyset_adapter::query_status_cache::MigrationStyle;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter, last_query_info};
 use readyset_client_test_helpers::{TestBuilder, derive_test_name, sleep};
@@ -165,6 +166,151 @@ async fn test_topk_dual_lookup() {
         .query_drop(format!("DROP DATABASE {db_name}"))
         .await
         .unwrap();
+}
+
+#[tokio::test]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn test_topk_dual_lookup_prepared() {
+    readyset_tracing::init_test_logging();
+    let db_name = derive_test_name();
+    mysql_helpers::recreate_database(&db_name).await;
+
+    let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .migration_mode(MigrationMode::OutOfBand)
+        .parsing_preset(ParsingPreset::OnlyNom)
+        .fallback(true)
+        .set_topk(true)
+        .replicate_db(&db_name)
+        .build::<MySQLAdapter>()
+        .await;
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&db_name));
+    let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+
+    upstream_conn
+        .query_drop(
+            "CREATE TABLE test (x int, y int); INSERT INTO test (x, y) VALUES (1, 1), (2, 2), (3, 3);",
+        )
+        .await
+        .unwrap();
+    sleep().await;
+
+    // Prepared while no cache exists, so the statement proxies.
+    let read = "SELECT * FROM test ORDER BY x LIMIT 2";
+    let rows: Vec<(i32, i32)> = rs_conn.exec(read, ()).await.unwrap();
+    assert_eq!(rows, vec![(1, 1), (2, 2)]);
+    assert_last_target_was(&mut rs_conn, QueryDestination::Upstream).await;
+
+    rs_conn
+        .query_drop("CREATE CACHE parameterized_cache FROM SELECT * FROM test ORDER BY x LIMIT ?")
+        .await
+        .unwrap();
+
+    let served = QueryDestination::Readyset(Some("parameterized_cache".into()));
+    eventually!(run_test: {
+        let rows: Vec<(i32, i32)> = rs_conn.exec(read, ()).await.unwrap();
+        (rows, last_query_info(&mut rs_conn).await.destination)
+    }, then_assert: |(rows, destination)| {
+        assert_eq!(rows, vec![(1, 1), (2, 2)]);
+        assert_eq!(destination, served);
+    });
+
+    // Prepared once the cache exists, a statement reaches it from its first execute.
+    let rows: Vec<(i32, i32)> = rs_conn
+        .exec("SELECT * FROM test ORDER BY x LIMIT 1", ())
+        .await
+        .unwrap();
+    assert_eq!(rows, vec![(1, 1)]);
+    assert_last_target_was(&mut rs_conn, served).await;
+
+    // Dropping the cache takes the statement upstream.
+    rs_conn
+        .query_drop("DROP CACHE parameterized_cache")
+        .await
+        .unwrap();
+    let rows: Vec<(i32, i32)> = rs_conn.exec(read, ()).await.unwrap();
+    assert_eq!(rows, vec![(1, 1), (2, 2)]);
+    assert_last_target_was(&mut rs_conn, QueryDestination::Upstream).await;
+
+    // Prepared while no cache exists, a statement also picks up a cache created with its own
+    // LIMIT.
+    let read = "SELECT * FROM test ORDER BY x LIMIT 3";
+    let rows: Vec<(i32, i32)> = rs_conn.exec(read, ()).await.unwrap();
+    assert_eq!(rows, vec![(1, 1), (2, 2), (3, 3)]);
+    assert_last_target_was(&mut rs_conn, QueryDestination::Upstream).await;
+
+    rs_conn
+        .query_drop("CREATE CACHE top_3 FROM SELECT * FROM test ORDER BY x LIMIT 3")
+        .await
+        .unwrap();
+
+    let served = QueryDestination::Readyset(Some("top_3".into()));
+    eventually!(run_test: {
+        let rows: Vec<(i32, i32)> = rs_conn.exec(read, ()).await.unwrap();
+        (rows, last_query_info(&mut rs_conn).await.destination)
+    }, then_assert: |(rows, destination)| {
+        assert_eq!(rows, vec![(1, 1), (2, 2), (3, 3)]);
+        assert_eq!(destination, served);
+    });
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(mysql, modern)]
+async fn test_topk_dual_lookup_prepared_after_restart() {
+    readyset_tracing::init_test_logging();
+    let db_name = derive_test_name();
+    mysql_helpers::recreate_database(&db_name).await;
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&db_name));
+    let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    upstream_conn
+        .query_drop(
+            "CREATE TABLE test (x int, y int); INSERT INTO test (x, y) VALUES (1, 1), (2, 2), (3, 3);",
+        )
+        .await
+        .unwrap();
+
+    let (rs_opts, handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .migration_mode(MigrationMode::OutOfBand)
+        .migration_style(MigrationStyle::Explicit)
+        .parsing_preset(ParsingPreset::OnlyNom)
+        .fallback(true)
+        .set_topk(true)
+        .replicate_db(&db_name)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+    eventually! {
+        let rows: Vec<Row> = rs_conn.query("SHOW READYSET STATUS").await.unwrap();
+        rows.iter().any(|r| r.get::<String, _>(1).as_deref() == Some("Online"))
+    }
+    rs_conn
+        .query_drop("CREATE CACHE parameterized_cache FROM SELECT * FROM test ORDER BY x LIMIT ?")
+        .await
+        .unwrap();
+    drop(rs_conn);
+
+    let (rs_opts, _handle, shutdown_tx) = shutdown_tx.restart(handle).await;
+    let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+    let served = QueryDestination::Readyset(Some("parameterized_cache".into()));
+    eventually!(run_test: {
+        let rows: Vec<(i32, i32)> = rs_conn
+            .exec("SELECT * FROM test ORDER BY x LIMIT 2", ())
+            .await
+            .unwrap();
+        (rows, last_query_info(&mut rs_conn).await.destination)
+    }, then_assert: |(rows, destination)| {
+        assert_eq!(rows, vec![(1, 1), (2, 2)]);
+        assert_eq!(destination, served);
+    });
+
+    shutdown_tx.shutdown().await;
 }
 
 /// A literal LIMIT with no ORDER BY is kept on the query and lowered to a TopK node (feature-topk
