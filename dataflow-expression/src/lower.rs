@@ -10,7 +10,7 @@ use readyset_errors::{
 };
 use readyset_sql::ast::{
     ArrayArguments, BinaryOperator as SqlBinaryOperator, CollationName, Column, Expr as AstExpr,
-    FunctionExpr, InValue, Relation, UnaryOperator,
+    FunctionExpr, InValue, Relation, SqlType, UnaryOperator,
 };
 use readyset_sql::{DialectDisplay, TryIntoDialect as _};
 use readyset_util::redacted::Sensitive;
@@ -1957,8 +1957,19 @@ impl Expr {
             AstExpr::Cast {
                 expr, ty: to_type, ..
             } => {
-                let ty =
-                    DfType::from_sql_type(&to_type, dialect, |t| context.resolve_type(t), None)?;
+                let ty = match (&to_type, dialect.engine()) {
+                    // A MySQL cast to CHAR gives a variable-length string, cut to the length only
+                    // when one is given.
+                    (SqlType::Char(len), SqlEngine::MySQL) => {
+                        let collation = Collation::default_for(dialect);
+                        len.map_or(DfType::Text(collation), |len| {
+                            DfType::VarChar(len, collation)
+                        })
+                    }
+                    _ => {
+                        DfType::from_sql_type(&to_type, dialect, |t| context.resolve_type(t), None)?
+                    }
+                };
                 if let Some(arr) = Self::try_lower_empty_array_cast(&expr, &ty) {
                     return Ok(arr);
                 }
@@ -2477,6 +2488,35 @@ pub(crate) mod tests {
             "Error should mention ARRAY: {}",
             err
         );
+    }
+
+    #[test]
+    fn mysql_cast_to_char_is_variable_length() {
+        for (cast, input, expected, ty) in [
+            (
+                "CAST(t.a AS CHAR(7))",
+                " ",
+                " ",
+                DfType::VarChar(7, Collation::Utf8AiCi),
+            ),
+            ("CAST(t.a AS CHAR)", "a ", "a ", MYSQL_TEXT),
+            (
+                "CAST(t.a AS CHAR(3))",
+                "abcdef",
+                "abc",
+                DfType::VarChar(3, Collation::Utf8AiCi),
+            ),
+        ] {
+            let expr = Expr::lower(
+                parse_expr(ParserDialect::MySQL, cast).unwrap(),
+                Dialect::DEFAULT_MYSQL,
+                &resolve_columns(|_| Ok((0, MYSQL_TEXT))),
+            )
+            .unwrap();
+            let result = expr.eval::<DfValue>(&[mysql_str(input)]).unwrap();
+            assert_eq!(<&str>::try_from(&result).unwrap(), expected, "{cast}");
+            assert_eq!(expr.ty(), &ty, "{cast}");
+        }
     }
 
     #[test]
