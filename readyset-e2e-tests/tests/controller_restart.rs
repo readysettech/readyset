@@ -5,7 +5,7 @@
 use mysql_async::Row;
 use mysql_async::prelude::Queryable;
 use readyset_client::consensus::AuthorityControl;
-use readyset_client_test_helpers::TestBuilder;
+use readyset_client_test_helpers::{TestBuilder, derive_test_name};
 use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
 use readyset_util::eventually;
 use test_utils::{tags, upstream};
@@ -17,6 +17,13 @@ async fn readyset_status(conn: &mut mysql_async::Conn) -> String {
         .expect("Status row not found")
         .get::<String, _>(1)
         .unwrap()
+}
+
+async fn cache_names(conn: &mut mysql_async::Conn) -> Vec<String> {
+    let caches: Vec<Row> = conn.query("SHOW CACHES").await.unwrap();
+    let mut names: Vec<String> = caches.iter().map(|r| r.get(1).unwrap()).collect();
+    names.sort();
+    names
 }
 
 fn cache_id_and_name(rows: &[Row]) -> (String, String) {
@@ -180,6 +187,66 @@ async fn view_cache_survives_controller_restart_after_unrelated_ddl() {
         .await
         .unwrap();
     assert_eq!(val, Some(10));
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(mysql, modern)]
+async fn a_cache_on_a_dropped_table_leaves_the_others_restored() {
+    readyset_tracing::init_test_logging();
+    let db_name = derive_test_name();
+    mysql_helpers::recreate_database(&db_name).await;
+
+    let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&db_name));
+    let mut upstream_conn = mysql_async::Conn::new(upstream_opts).await.unwrap();
+    upstream_conn
+        .query_drop("CREATE TABLE t (id INT PRIMARY KEY, val INT)")
+        .await
+        .unwrap();
+    upstream_conn
+        .query_drop("CREATE TABLE dropped (id INT PRIMARY KEY, val INT)")
+        .await
+        .unwrap();
+
+    let (rs_opts, handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .replicate_db(&db_name)
+        .fallback(true)
+        .build::<MySQLAdapter>()
+        .await;
+    let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+    eventually!(run_test: {
+        readyset_status(&mut rs_conn).await
+    }, then_assert: |status| {
+        assert_eq!(status, "Online");
+    });
+
+    // Dropping the middle cache's table upstream leaves its CREATE CACHE persisted, so the restart
+    // refuses it.
+    for create in [
+        "CREATE CACHE first FROM SELECT val FROM t WHERE id = ?",
+        "CREATE CACHE middle FROM SELECT val FROM dropped WHERE id = ?",
+        "CREATE CACHE last FROM SELECT id FROM t WHERE val = ?",
+    ] {
+        rs_conn.query_drop(create).await.unwrap();
+    }
+    upstream_conn.query_drop("DROP TABLE dropped").await.unwrap();
+    eventually!(run_test: {
+        cache_names(&mut rs_conn).await
+    }, then_assert: |names| {
+        assert_eq!(names, ["first", "last"]);
+    });
+    drop(rs_conn);
+
+    let (rs_opts, _handle, shutdown_tx) = shutdown_tx.restart(handle).await;
+    let mut rs_conn = mysql_async::Conn::new(rs_opts).await.unwrap();
+    eventually!(run_test: {
+        cache_names(&mut rs_conn).await
+    }, then_assert: |names| {
+        assert_eq!(names, ["first", "last"]);
+    });
 
     shutdown_tx.shutdown().await;
 }

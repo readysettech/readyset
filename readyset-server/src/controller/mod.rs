@@ -1529,58 +1529,51 @@ impl Controller {
                 return Ok(());
             }
 
-            // We have to re-create in caches that share the same schema search path, but in
-            // practice they will likely all have the same schema search path.
-            // We also have to separate out the changelists into CreateCache ones and Drop ones so
-            // that the Drop ones can properly find the caches to drop.
-            let changelists = self
-                .separate_changelists_by_schema_search_path_and_change_type(caches.clone())
-                .await?;
-
-            for changelist in changelists {
+            let mut restored = 0;
+            for changelist in self.cache_ddl_changelists(caches.clone()).await? {
                 let mut guard = self.inner.write().await;
                 if let Some(ref mut inner) = *guard {
-                    let n_caches = changelist.changes.len();
-                    match retry_with_exponential_backoff!(
-                        || async {
-                            let mut changelist = changelist.clone();
-                            let mut writer = inner.dataflow_state_handle.write().await;
-                            let ds = writer.as_mut();
-                            changelist =
-                                changelist.with_schema_generation(ds.schema_generation());
-                            ds.extend_recipe(changelist.into(), false, None).await?;
-                            ReadySetResult::Ok(writer)
-                        },
-                        retries: 5,
-                        delay: 250,
-                        backoff: 2,
-                    ) {
+                    let restore = || async {
+                        let mut changelist = changelist.clone();
+                        let mut writer = inner.dataflow_state_handle.write().await;
+                        let ds = writer.as_mut();
+                        changelist = changelist.with_schema_generation(ds.schema_generation());
+                        ds.extend_recipe(changelist.into(), false, None).await?;
+                        ReadySetResult::Ok(writer)
+                    };
+                    let result = match restore().await {
+                        Err(error) if error.is_transient() => retry_with_exponential_backoff!(
+                            restore,
+                            retries: 5,
+                            delay: 250,
+                            backoff: 2,
+                        ),
+                        result => result,
+                    };
+                    match result {
                         Ok(writer) => {
                             inner
                                 .dataflow_state_handle
                                 .commit(writer, &self.authority)
                                 .await?;
-                            info!("Successfully restored {n_caches} caches");
+                            restored += 1;
                         }
-                        Err(error) => {
-                            error!(n_failed_caches=%n_caches, %error, "Failed to restore caches!");
-                        }
+                        Err(error) => error!(%error, "Failed to restore a cache!"),
                     }
                 } else {
                     return Err(ReadySetError::NotLeader);
                 }
             }
+            info!("Successfully restored {restored} caches");
 
             self.cache_ddl = None;
         }
         Ok(())
     }
 
-    /// Separates a vector of CacheDDLRequest into a vector of ChangeList based on the schema search
-    /// path and the type of change (CreateCache or Drop). Each ChangeList will contain either only
-    /// CreateCache changes or only Drop changes. For Drop changes, the schema search path is not
-    /// set.
-    async fn separate_changelists_by_schema_search_path_and_change_type(
+    /// Converts persisted cache DDL requests, in order, into a [`ChangeList`] each. A request that
+    /// no longer parses is logged and skipped.
+    async fn cache_ddl_changelists(
         &self,
         ddl_reqs: Vec<CacheDDLRequest>,
     ) -> ReadySetResult<Vec<ChangeList>> {
@@ -1595,136 +1588,33 @@ impl Controller {
                 return Err(ReadySetError::NotLeader);
             };
 
-        debug_assert!(
-            ddl_reqs
-                .iter()
-                .filter(|req| matches!(
-                    {
-                        let rewrite_context = schema_catalog::RewriteContext::new(
-                            req.dialect,
-                            schema_catalog.clone(),
-                            req.schema_search_path.clone(),
-                        );
-                        Change::from_cache_ddl_request(
-                            req,
-                            adapter_rewrite_params,
-                            &rewrite_context,
-                            self.parsing_preset,
-                            Some(rewrite_context.schema_generation()),
-                        )
-                    },
-                    Ok(Change::Drop { .. })
-                ))
-                .all(|req| req.dialect == ddl_reqs[0].dialect),
-            "All Drop statements should have the same dialect"
-        );
-
-        debug_assert!(
-            ddl_reqs
-                .iter()
-                .filter(|req| matches!(
-                    {
-                        let rewrite_context = schema_catalog::RewriteContext::new(
-                            req.dialect,
-                            schema_catalog.clone(),
-                            req.schema_search_path.clone(),
-                        );
-                        Change::from_cache_ddl_request(
-                            req,
-                            adapter_rewrite_params,
-                            &rewrite_context,
-                            self.parsing_preset,
-                            Some(rewrite_context.schema_generation()),
-                        )
-                    },
-                    Ok(Change::Drop { .. })
-                ))
-                .all(|req| req.schema_search_path.is_empty()),
-            "Drop changes should have an empty schema search path"
-        );
-
-        debug_assert!(
-            ddl_reqs
-                .iter()
-                .filter(|req| matches!(
-                    {
-                        let rewrite_context = schema_catalog::RewriteContext::new(
-                            req.dialect,
-                            schema_catalog.clone(),
-                            req.schema_search_path.clone(),
-                        );
-                        Change::from_cache_ddl_request(
-                            req,
-                            adapter_rewrite_params,
-                            &rewrite_context,
-                            self.parsing_preset,
-                            Some(rewrite_context.schema_generation()),
-                        )
-                    },
-                    Ok(Change::CreateCache(_))
-                ))
-                .all(|req| req.dialect == ddl_reqs[0].dialect),
-            "All CreateCache statements should have the same dialect"
-        );
-
-        let mut changelists = vec![];
-        let mut current_changes = vec![];
-        let mut current_dialect = None;
-        let mut current_schema_search_path = None;
-        let mut last_was_drop = false;
-
-        for ddl_req in ddl_reqs {
-            let rewrite_context = schema_catalog::RewriteContext::new(
-                ddl_req.dialect,
-                schema_catalog.clone(),
-                ddl_req.schema_search_path.clone(),
-            );
-            match Change::from_cache_ddl_request(
-                &ddl_req,
-                adapter_rewrite_params,
-                &rewrite_context,
-                self.parsing_preset,
-                Some(rewrite_context.schema_generation()),
-            ) {
-                Ok(change) => {
-                    let is_drop = matches!(change, Change::Drop { .. });
-
-                    // When the change type switches, push the current list and start a new one
-                    if current_changes.is_empty() || last_was_drop != is_drop {
-                        if !current_changes.is_empty() {
-                            changelists.push(ChangeList {
-                                changes: current_changes,
-                                schema_search_path: current_schema_search_path.unwrap_or_default(),
-                                dialect: ddl_req.dialect,
-                            });
-                            current_changes = Vec::new();
-                        }
-                        current_dialect = Some(ddl_req.dialect);
-                        current_schema_search_path = if is_drop {
-                            None
-                        } else {
-                            Some(ddl_req.schema_search_path.clone())
-                        };
+        Ok(ddl_reqs
+            .into_iter()
+            .filter_map(|ddl_req| {
+                let rewrite_context = schema_catalog::RewriteContext::new(
+                    ddl_req.dialect,
+                    schema_catalog.clone(),
+                    ddl_req.schema_search_path.clone(),
+                );
+                match Change::from_cache_ddl_request(
+                    &ddl_req,
+                    adapter_rewrite_params,
+                    &rewrite_context,
+                    self.parsing_preset,
+                    Some(rewrite_context.schema_generation()),
+                ) {
+                    Ok(change) => Some(ChangeList {
+                        changes: vec![change],
+                        schema_search_path: ddl_req.schema_search_path,
+                        dialect: ddl_req.dialect,
+                    }),
+                    Err(error) => {
+                        error!(%error, "Failed to re-parse change");
+                        None
                     }
-
-                    current_changes.push(change);
-                    last_was_drop = is_drop;
                 }
-                Err(error) => {
-                    error!(%error, "Failed to re-parse change");
-                }
-            }
-        }
-
-        if !current_changes.is_empty() {
-            changelists.push(ChangeList {
-                changes: current_changes,
-                schema_search_path: current_schema_search_path.unwrap_or_default(),
-                dialect: current_dialect.expect("Dialect should be set for the last batch"),
-            });
-        }
-
-        Ok(changelists)
+            })
+            .collect())
     }
 }
 
