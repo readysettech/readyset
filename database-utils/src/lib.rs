@@ -133,7 +133,7 @@ pub struct UpstreamConfig {
     /// upstream DB.
     ///
     /// For Postgres, this ends up being a suffix of the replication slot or resnapshot replication
-    /// slot, which have prefixes of 'readyset_' and 'readyset_resnapshot_', respectively. Since a
+    /// slot, which have prefixes of 'readyset_' and 'resnapshot_readyset_', respectively. Since a
     /// replication slot is limited by postgres to a length of 63 bytes, that means this server id
     /// must be 43 bytes or fewer.
     ///
@@ -466,7 +466,7 @@ impl From<&std::ffi::OsStr> for ReplicationServerId {
 fn parse_repl_server_id(s: &str) -> Result<ReplicationServerId, String> {
     let s = s.trim();
     // Postgres restricts identifiers to 63 bytes or fewer, and we add a prefix of at most 20 bytes
-    // ("readyset_resnapshot_")
+    // ("resnapshot_readyset_")
     if s.len() > 43 {
         return Err("Replication server id must be 43 characters or fewer".to_string());
     }

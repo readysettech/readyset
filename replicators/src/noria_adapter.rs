@@ -51,7 +51,7 @@ use tokio_util::sync::CancellationToken;
 /// DDL changes from thrashing snapshotting
 const WAIT_BEFORE_RESNAPSHOT: Duration = Duration::from_secs(3);
 
-const RESNAPSHOT_SLOT: &str = "readyset_resnapshot";
+const RESNAPSHOT_SLOT: &str = "resnapshot";
 
 #[derive(Debug)]
 pub(crate) enum ReplicationAction {
@@ -1780,9 +1780,22 @@ fn filter_already_applied_ops(
 
 #[cfg(test)]
 mod tests {
+    use database_utils::ReplicationServerId;
     use replication_offset::mysql::MySqlPosition;
 
     use super::*;
+
+    #[test]
+    fn slot_names_fit_postgres_identifier_limit() {
+        // The longest replication server id that the configuration accepts.
+        let config = UpstreamConfig {
+            replication_server_id: Some(ReplicationServerId("a".repeat(43))),
+            ..UpstreamConfig::default()
+        };
+        let repl_slot_name = replication_slot_name(&config);
+        assert!(repl_slot_name.len() <= 63);
+        assert!(resnapshot_slot_name(&repl_slot_name).len() <= 63);
+    }
 
     fn pos(p: u64) -> ReplicationOffset {
         ReplicationOffset::MySql(
