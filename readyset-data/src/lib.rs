@@ -32,7 +32,6 @@ use readyset_util::{
 };
 use serde_json::Value as JsonValue;
 use test_strategy::Arbitrary;
-use text::TextCoerce;
 use tokio_postgres::types::{to_sql_checked, FromSql, IsNull, Kind, ToSql, Type};
 use uuid::Uuid;
 
@@ -783,10 +782,12 @@ impl DfValue {
         macro_rules! int_types {
             () => {
                 DfType::TinyInt
+                    | DfType::SmallInt
                     | DfType::MediumInt
                     | DfType::Int
                     | DfType::BigInt
                     | DfType::UnsignedTinyInt
+                    | DfType::UnsignedSmallInt
                     | DfType::UnsignedMediumInt
                     | DfType::UnsignedInt
                     | DfType::UnsignedBigInt
@@ -804,15 +805,22 @@ impl DfValue {
                     return_error_if_disallowed_float!(v);
                 }
             }
-            (DfValue::TinyText(v), int_types!()) => {
-                if let DfValue::Double(v) = v.coerce_to(&DfType::Double, &DfType::Unknown, None)? {
-                    return_error_if_disallowed_float!(v);
+            // An integer string converts exactly, and any other number by its value, so `3e1` is 30
+            // and `3.5` matches nothing. A string that isn't a number is refused.
+            (DfValue::Text(_) | DfValue::TinyText(_) | DfValue::ByteArray(_), int_types!()) => {
+                let s = match self {
+                    DfValue::ByteArray(b) => str::from_utf8(b)?,
+                    _ => <&str>::try_from(self)?,
                 }
-            }
-            (DfValue::Text(v), int_types!()) => {
-                if let DfValue::Double(v) = v.coerce_to(&DfType::Double, &DfType::Unknown, None)? {
-                    return_error_if_disallowed_float!(v);
+                .trim();
+                if s.parse::<i128>().is_ok() {
+                    return self.coerce_to(to_ty, &DfType::Unknown);
                 }
+                let Ok(v) = s.parse::<f64>() else {
+                    return err();
+                };
+                return_error_if_disallowed_float!(v);
+                return DfValue::Double(v).coerce_to(to_ty, &DfType::Unknown);
             }
             // All bytes are significant for MySQL binary columns, and they should not be padded to
             // the column's length for comparisons; we pad them in `coerce_to` for use in e.g.
@@ -4958,6 +4966,34 @@ mod tests {
                 DfType::BigInt,
                 DfValue::Int(42),
             );
+        }
+
+        #[test]
+        fn string_coerce_for_comparison_uses_its_numeric_value() {
+            for (s, ty, number) in [
+                ("3e1", DfType::Int, Some(30)),
+                ("3.0", DfType::Int, Some(3)),
+                ("3.1", DfType::Int, None),
+                ("3.5", DfType::Int, None),
+                ("3.5", DfType::SmallInt, None),
+                ("300e-2", DfType::TinyInt, Some(3)),
+                ("abc", DfType::Int, None),
+                ("9007199254740993", DfType::BigInt, Some(9007199254740993)),
+            ] {
+                for value in [
+                    DfValue::from(s),
+                    DfValue::ByteArray(Arc::new(s.as_bytes().to_vec())),
+                ] {
+                    match number {
+                        Some(number) => {
+                            check_comparison!(value, ty, DfValue::Int(number));
+                        }
+                        None => {
+                            check_comparison!(value, ty, invalid);
+                        }
+                    }
+                }
+            }
         }
 
         #[test]
