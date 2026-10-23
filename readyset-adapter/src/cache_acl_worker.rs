@@ -136,18 +136,21 @@ fn msg_trigger(msg: &AclMessage) -> &'static str {
 
 /// Upstream connections for one message-handling call. Torn down when the
 /// call finishes, so the worker holds no idle upstream sessions between
-/// passes.
+/// passes. Connections are open to one database at a time, so callers group
+/// their work by database.
 struct PassConns<DB: UpstreamDatabase> {
     config: UpstreamConfig,
     /// The `change_user`-cycled connection and the user it is currently
     /// authenticated as. Used when the protocol supports an in-session
     /// re-authenticating switch (MySQL).
     cycled: Option<(SqlIdentifier, DB)>,
-    /// Lazy per-user and per-database connections for protocols without a user switch
+    /// The database `per_user` and `admin` are connected to.
+    database: Option<SqlIdentifier>,
+    /// Lazy per-user connections for protocols without a user switch
     /// (Postgres).
-    per_user: HashMap<Scope, DB>,
-    /// Admin-credential connections used to assume roles for role-row probes, by database.
-    admin: HashMap<Option<SqlIdentifier>, DB>,
+    per_user: HashMap<SqlIdentifier, DB>,
+    /// Admin-credential connection used to assume roles for role-row probes.
+    admin: Option<DB>,
 }
 
 impl<DB: UpstreamDatabase> PassConns<DB> {
@@ -156,8 +159,18 @@ impl<DB: UpstreamDatabase> PassConns<DB> {
         Self {
             config,
             cycled: None,
+            database: None,
             per_user: HashMap::new(),
-            admin: HashMap::new(),
+            admin: None,
+        }
+    }
+
+    /// Close the connections to any database other than `database`.
+    fn use_database(&mut self, database: Option<&SqlIdentifier>) {
+        if self.database.as_ref() != database {
+            self.per_user.clear();
+            self.admin = None;
+            self.database = database.cloned();
         }
     }
 
@@ -234,8 +247,8 @@ impl<DB: UpstreamDatabase> PassConns<DB> {
             }
             Ok(&mut self.cycled.as_mut().expect("just ensured above").1)
         } else {
-            let scope = (user.clone(), database.cloned());
-            if !self.per_user.contains_key(&scope) {
+            self.use_database(database);
+            if !self.per_user.contains_key(user) {
                 let conn = Self::open(self.config.clone(), database, Some(user), Some(password))
                     .await
                     .map_err(|e| {
@@ -245,17 +258,17 @@ impl<DB: UpstreamDatabase> PassConns<DB> {
                             || warn!(error = %e, user = %user, "ACL prober failed to connect"),
                         );
                     })?;
-                self.per_user.insert(scope.clone(), conn);
+                self.per_user.insert(user.clone(), conn);
             }
-            Ok(self.per_user.get_mut(&scope).expect("just inserted above"))
+            Ok(self.per_user.get_mut(user).expect("just inserted above"))
         }
     }
 
     /// The admin-credential connection to `database` that role rows are probed through.
     async fn admin(&mut self, database: Option<&SqlIdentifier>) -> Result<&mut DB, ()> {
-        let database = database.cloned();
-        if !self.admin.contains_key(&database) {
-            let conn = Self::open(self.config.clone(), database.as_ref(), None, None)
+        self.use_database(database);
+        if self.admin.is_none() {
+            let conn = Self::open(self.config.clone(), database, None, None)
                 .await
                 .map_err(|e| {
                     rate_limit(
@@ -264,9 +277,9 @@ impl<DB: UpstreamDatabase> PassConns<DB> {
                         || warn!(error = %e, "ACL prober failed to open admin connection"),
                     );
                 })?;
-            self.admin.insert(database.clone(), conn);
+            self.admin = Some(conn);
         }
-        Ok(self.admin.get_mut(&database).expect("just inserted above"))
+        Ok(self.admin.as_mut().expect("just ensured above"))
     }
 }
 
@@ -410,12 +423,16 @@ impl<DB: UpstreamDatabase + 'static> AclWorker<DB> {
         PassConns::new(self.upstream_config.read().await.clone())
     }
 
+    /// The current caches' probe targets, grouped by database.
     fn probe_targets(&self) -> Vec<ProbeTarget> {
-        self.shallow
+        let mut targets: Vec<ProbeTarget> = self
+            .shallow
             .list_caches(None, None)
             .iter()
             .map(ProbeTarget::from_cache_info)
-            .collect()
+            .collect();
+        targets.sort_by(|a, b| a.database.cmp(&b.database));
+        targets
     }
 
     /// The relations current caches on `database` reference, for fingerprint scoping.
@@ -436,7 +453,7 @@ impl<DB: UpstreamDatabase + 'static> AclWorker<DB> {
         relations
     }
 
-    /// The full pass: per-identity fingerprint check, row re-probe on a flip,
+    /// The full pass: per-identity fingerprint check, row discard on a flip,
     /// then probe every cell still `Unknown`.
     async fn full_pass(&mut self) {
         self.pass_seq += 1;
@@ -466,7 +483,7 @@ impl<DB: UpstreamDatabase + 'static> AclWorker<DB> {
         // mass-discard live rows.
         let mut discovered: HashSet<SqlIdentifier> = HashSet::new();
         let mut discovery_complete = true;
-        for ((user, credentials), database) in users.iter().cartesian_product(&databases) {
+        for (database, (user, credentials)) in databases.iter().cartesian_product(&users) {
             let user = SqlIdentifier::from(user.as_str());
             let scope = (user.clone(), database.clone());
             // Role membership is cluster-wide, so discover it on one database.
@@ -530,10 +547,10 @@ impl<DB: UpstreamDatabase + 'static> AclWorker<DB> {
                         };
                     self.fingerprints
                         .insert(scope, (fingerprint, Instant::now()));
+                    // The unknown fill below re-probes a discarded row.
                     if flipped {
                         counter!(CACHE_ACL_FINGERPRINT_FLIPS).increment(1);
                         self.matrix.discard_row(&user);
-                        self.probe_row(&mut conns, &user, &targets).await;
                     }
                 }
                 Err(e) => {
@@ -567,7 +584,7 @@ impl<DB: UpstreamDatabase + 'static> AclWorker<DB> {
 
         // Refresh role rows the same way, preferring a member's connection.
         let roles: Vec<SqlIdentifier> = self.roles.keys().cloned().collect();
-        for (role, database) in roles.iter().cartesian_product(&databases) {
+        for (database, role) in databases.iter().cartesian_product(&roles) {
             // A role discarded on an earlier database stays discarded.
             if !self.roles.contains_key(role) {
                 continue;
@@ -609,7 +626,6 @@ impl<DB: UpstreamDatabase + 'static> AclWorker<DB> {
                     if flipped {
                         counter!(CACHE_ACL_FINGERPRINT_FLIPS).increment(1);
                         self.matrix.discard_row(role);
-                        self.probe_role_row(&mut conns, role, &targets).await;
                     }
                 }
                 Err(e) => {
@@ -640,20 +656,21 @@ impl<DB: UpstreamDatabase + 'static> AclWorker<DB> {
             .map(|u| SqlIdentifier::from(u.as_str()))
             .collect();
         identities.extend(self.roles.keys().cloned());
-        let caches: Vec<QueryId> = targets.iter().map(|t| t.cache).collect();
-        for (identity, cache) in self.matrix.unknown_pairs(&identities, &caches) {
-            let Some(target) = targets.iter().find(|t| t.cache == cache) else {
-                continue;
-            };
-            if !self.should_attempt(&(identity.clone(), target.database.clone())) {
-                continue;
-            }
-            if let Some(credentials) = users.get(identity.as_str()) {
-                let password = credentials.current.clone();
-                self.probe_cell_as_user(&mut conns, &identity, &password, target)
-                    .await;
-            } else {
-                self.probe_cell_as_role(&mut conns, &identity, target).await;
+        for target in &targets {
+            let unknown = self
+                .matrix
+                .unknown_pairs(&identities, slice::from_ref(&target.cache));
+            for (identity, _) in unknown {
+                if !self.should_attempt(&(identity.clone(), target.database.clone())) {
+                    continue;
+                }
+                if let Some(credentials) = users.get(identity.as_str()) {
+                    let password = credentials.current.clone();
+                    self.probe_cell_as_user(&mut conns, &identity, &password, target)
+                        .await;
+                } else {
+                    self.probe_cell_as_role(&mut conns, &identity, target).await;
+                }
             }
         }
     }
