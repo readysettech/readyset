@@ -157,28 +157,26 @@ EOF
   echo -e "${INFO}To clean up, run \`docker compose -f readyset.compose.yml down\`"
 }
 
+# Run psql against the demo's Postgres container directly, bypassing Readyset.
+upstream_psql() {
+  docker compose -f readyset.compose.yml exec -T postgres psql -U postgres -d testdb "$@"
+}
+
+# Start only Postgres, so the sample data is in place with its primary keys before Readyset
+# snapshots it. Adding the primary keys after Readyset has snapshotted the tables makes it
+# snapshot them again, and it refuses cache changes until that ends.
+start_demo_postgres() {
+  echo -e "${BLUE}${ELEPHANT}Starting the demo Postgres database... ${NOCOLOR}"
+  if ! docker compose -f readyset.compose.yml up -d --wait postgres; then
+    echo -e "${RED}${ROTATING_LIGHT}Unable to start the demo Postgres database.${NOCOLOR}"
+    exit 1
+  fi
+}
+
 check_sample_data() {
-  retry_count=0
-  max_retries=5
-  sleep_interval_secs=1
-
   echo -e "${BLUE}${ELEPHANT}Checking if sample data is already loaded...${NOCOLOR}"
-  dots=""
+  tables_exist=$(upstream_psql -tAc "SELECT count(*) = 2 FROM pg_tables WHERE schemaname = 'public' AND tablename IN ('title_basics', 'title_ratings');" 2>/dev/null)
 
-  while :; do
-    tables_exist=$(timeout 2 psql $CONNECTION_STRING -tAc "SELECT EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public' AND tablename IN ('title_basics', 'title_ratings'));" 2>/dev/null | head -n 1 | tr -d '[:space:]')
-
-    if [[ $tables_exist == "t" ]] || [[ $retry_count -eq $max_retries ]]; then
-      break
-    fi
-
-    dots+="."
-    echo -ne "$dots"
-    retry_count=$((retry_count + 1))
-    sleep $sleep_interval_secs
-  done
-
-  echo ""
   if [[ $tables_exist == "t" ]]; then
     echo -e "${GREEN}${GREEN_CHECK}Sample data detected!${NOCOLOR}"
   else
@@ -190,6 +188,18 @@ prompt_for_import() {
   if [[ $tables_exist != "t" ]]; then
     read -rp "Import sample data? (y/n, default: y): " import_choice
     import_choice=${import_choice:-y}
+  fi
+}
+
+# Remove the Readyset container and state of an earlier run of the demo, so that Readyset
+# snapshots the imported tables when it starts instead of replicating the import.
+discard_demo_readyset() {
+  if [[ $import_choice == "y" ]]; then
+    if ! docker compose -f readyset.compose.yml rm --stop --force cache \
+        || ! docker volume rm --force readyset_readyset >/dev/null; then
+      echo -e "${RED}${ROTATING_LIGHT}Unable to remove the Readyset state of an earlier demo.${NOCOLOR}"
+      exit 1
+    fi
   fi
 }
 
@@ -213,11 +223,11 @@ import_data() {
     # ON_ERROR_STOP makes psql exit non-zero on the first bad statement, so a
     # truncated or non-SQL file (e.g. an HTML error page) fails loudly here.
     if command -v pv &>/dev/null; then
-      pv -w 80 imdb-postgres.sql | psql -v ON_ERROR_STOP=1 $CONNECTION_STRING >/dev/null 2>"$import_errors" \
+      pv -w 80 imdb-postgres.sql | upstream_psql -v ON_ERROR_STOP=1 >/dev/null 2>"$import_errors" \
         || import_status=$?
     else
       echo -e "This may take a few minutes. Install \`pv\` if you would like to see a progress bar for this step."
-      psql -v ON_ERROR_STOP=1 $CONNECTION_STRING < imdb-postgres.sql >/dev/null 2>"$import_errors" \
+      upstream_psql -v ON_ERROR_STOP=1 < imdb-postgres.sql >/dev/null 2>"$import_errors" \
         || import_status=$?
     fi
 
@@ -231,6 +241,42 @@ import_data() {
 
     echo -e "${GREEN}${GREEN_CHECK}Sample data imported successfully!${NOCOLOR}"
   fi
+}
+
+# Readyset refuses cache changes until it finishes snapshotting the database.
+wait_for_readyset_online() {
+  local retry_count=0
+  local max_retries=300
+  local status
+  local status_errors
+  local dots=""
+
+  echo -e "${BLUE}${ELEPHANT}Waiting for Readyset to finish snapshotting the database...${NOCOLOR}"
+  while :; do
+    status_errors=""
+    if status=$(psql $CONNECTION_STRING -tAc "SHOW READYSET STATUS;" 2>&1); then
+      if grep -qx "Status|Online" <<< "$status"; then
+        break
+      fi
+    else
+      status_errors=$status
+    fi
+
+    if [[ $retry_count -eq $max_retries ]]; then
+      echo ""
+      echo -e "${RED}${ROTATING_LIGHT}Readyset did not finish snapshotting the database.${NOCOLOR}"
+      if [[ -n $status_errors ]]; then
+        echo "$status_errors" >&2
+      fi
+      exit 1
+    fi
+
+    dots+="."
+    echo -ne "$dots"
+    retry_count=$((retry_count + 1))
+    sleep 1
+  done
+  echo ""
 }
 
 explore_data() {
@@ -247,7 +293,7 @@ UPDATE title_ratings
    SET averagerating = 2.5
  WHERE tconst = 'tt0185183';
 -- Also drop the cache so that the uncached->miss->hit latencies work.
-DROP CACHE q_bccd97aea07c545f;
+DROP ALL CACHES;
 \o
 \timing
 \! printf "%b\n" "${BLUE}Let's cache a query with Readyset!${NOCOLOR}"
@@ -600,7 +646,8 @@ run_byo_postgres() {
 
   postgres_docker_compose_setup
   # Transform the user's connection string into a readyset one:
-  echo "$USER_CONNECTION_STRING" | sed -E 's/@[^:/]+:[0-9]+/@127.0.0.1:5433/' > CONNECTION_STRING
+  CONNECTION_STRING=$(echo "$USER_CONNECTION_STRING" \
+    | sed -E "s#^([a-z]+://([^@/]*@)?)(\[[^]]*\]|[^/:?]*)(:[0-9]+)?#\1${HOST}:5433#")
 
   run_after_connection "psql"
 }
@@ -680,17 +727,19 @@ run_byo_mysql() {
   echo -e "${GREEN}${GREEN_CHECK}Connection String verified.${NOCOLOR}"
 
   mysql_docker_compose_setup
-  echo "$USER_CONNECTION_STRING" | sed -E 's/@[^:/]+:[0-9]+/@127.0.0.1:3307/' > CONNECTION_STRING
   run_after_connection "mysql"
 }
 
 run_demo() {
   download_demo_compose_file
   sed_in_place "s|readyset-postgres|readyset|" readyset.compose.yml
-  run_docker_compose
+  start_demo_postgres
   check_sample_data
   prompt_for_import
+  discard_demo_readyset
   import_data
+  run_docker_compose
+  wait_for_readyset_online
   explore_data
   free_form_connect "psql"
   print_exit_message "psql"

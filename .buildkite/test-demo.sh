@@ -107,6 +107,9 @@ run_script() {
                 expect -re \".*Explore sample data in psql.*\" {
                   send \"$4\r\"
                 }
+              } else {
+                # The demo starts Readyset and waits for its snapshot before connecting.
+                expect \"Connecting to Readyset...\" {}
               }
 
               set timeout 8
@@ -142,7 +145,7 @@ run_script() {
 
         if {\"$2\" == \"d\" || \"$2\" == \"p\"} {
           # Postgres prompt
-          expect -re \".*testdb=>\" {
+          expect -re \".*testdb(nopw)?=>\" {
             send \"exit\r\n\"
           }
         } else {
