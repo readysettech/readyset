@@ -274,6 +274,9 @@ impl BuiltinFunction {
                 antithesis_sdk::assert_reachable!(
                     r#"{"id":"Built-in function","sub":"convert_tz","tags":["exclude-nightly"]}"#
                 );
+                if dialect.engine() != SqlEngine::MySQL {
+                    unsupported!("Function {name} does not exist in {}", dialect.engine());
+                }
                 // Type is inferred from input argument
                 let input = next_arg()?;
                 let ty = input.ty().clone();
@@ -3436,6 +3439,22 @@ pub(crate) mod tests {
         for sql in ["(1, 2) = (3, 4)", "(1, 2) IN ((1, 2), (3, 4))"] {
             lower(Dialect::DEFAULT_MYSQL, sql).unwrap();
         }
+    }
+
+    /// CONVERT_TZ is a MySQL function, so PostgreSQL has no built-in by that name.
+    #[test]
+    fn call_convert_tz_lowers_only_in_mysql() {
+        let sql = "convert_tz('2020-01-01 10:00:00', '+00:00', '+05:30')";
+        let lower = |parser, dialect| {
+            Expr::lower(
+                parse_expr(parser, sql).unwrap(),
+                dialect,
+                &no_op_lower_context(),
+            )
+        };
+        let error = lower(ParserDialect::PostgreSQL, Dialect::DEFAULT_POSTGRESQL).unwrap_err();
+        assert!(error.is_unsupported(), "{error}");
+        lower(ParserDialect::MySQL, Dialect::DEFAULT_MYSQL).unwrap();
     }
 
     mod row_comparison_coercions {
