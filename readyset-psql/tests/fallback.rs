@@ -2040,26 +2040,19 @@ async fn named_cache_queryable_after_being_cleared() {
     let conn = connect(config).await;
 
     eventually!(run_test: {
-        conn.simple_query("SELECT * FROM t WHERE x = 1")
-            .await
-            .unwrap();
-
-        let destination = match conn
-            .simple_query("EXPLAIN LAST STATEMENT")
-            .await
-            .unwrap()
-            .into_iter()
-            .next()
-            .unwrap()
-        {
+        let select = conn.simple_query("SELECT * FROM t WHERE x = 1").await;
+        let explain = conn.simple_query("EXPLAIN LAST STATEMENT").await;
+        AssertUnwindSafe(|| (select, explain))
+    },
+    then_assert: |res| {
+        let (select, explain) = res();
+        select.unwrap();
+        let destination = match explain.unwrap().into_iter().next().unwrap() {
             SimpleQueryMessage::Row(row) => row.get(0).unwrap().to_owned(),
             _ => panic!(),
         };
-        AssertUnwindSafe(|| destination)
-    },
-    then_assert: |destination| {
         assert_eq!(
-            destination().try_into(),
+            destination.try_into(),
             Ok(QueryDestination::Readyset(Some("test".into())))
         );
     });
