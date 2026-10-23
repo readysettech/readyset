@@ -17,7 +17,7 @@ use smallvec::SmallVec;
 
 use super::allowlist::{is_allowed_guc, lookup_function};
 use super::{CacheSessionDeps, Cacheability, RefuseReason};
-use crate::policy_registry::PolicyRegistry;
+use crate::policy_registry::{OidKind, PolicyRegistry};
 use crate::types::SessionInputType;
 
 /// Walk the policies attached to `referenced_relations` and produce the merged
@@ -37,81 +37,131 @@ pub fn analyze(
     // lives on tables, not on the view, so a query against a view must be
     // analyzed against what the view reads. `seen` guards view dependency
     // cycles and repeated work.
-    let mut work: Vec<Oid> = referenced_relations.to_vec();
-    let mut seen: std::collections::HashSet<Oid> = std::collections::HashSet::new();
+    let mut work: Vec<(OidKind, Oid, bool)> = referenced_relations
+        .iter()
+        .map(|r| (OidKind::Rel, *r, false))
+        .collect::<Vec<_>>();
+    let mut seen: std::collections::HashSet<(OidKind, Oid, bool)> =
+        std::collections::HashSet::new();
 
-    while let Some(relid) = work.pop() {
-        if !seen.insert(relid) {
+    while let Some(obj) = work.pop() {
+        if !seen.insert(obj) {
             continue;
         }
-        deps.visited_relations.push(relid);
-        let flags = registry.flags_for(relid).unwrap_or_default();
 
-        // Views and materialized views carry no policies of their own. With `security_invoker`
-        // the underlying policies run as the querying role, so expanding to the base relations
-        // and partitioning by them is correct. Without it the view runs as its owner and
-        // bypasses the caller's RLS, which is not representable per-session. A view whose
-        // dependencies the registry has not loaded yet fails closed rather than being treated
-        // as a plain table.
-        if matches!(flags.relkind, b'v' | b'm') {
-            let Some(underlying) = registry.view_underlying(relid) else {
-                deps.cacheability = Cacheability::Refuse(RefuseReason::PolicyTooDynamic(format!(
-                    "view oid={relid} dependencies not loaded into the registry"
-                )));
-                return deps;
-            };
-            if flags.security_invoker {
-                work.extend(underlying.iter().copied());
-            } else {
-                // Owner-context view: cacheable only when nothing beneath it is RLS-active
-                // (then the result is identical for every session). Any RLS-active or
-                // nested-view dependency is not representable per-caller, so refuse.
-                for &u in underlying.iter() {
-                    let uf = registry.flags_for(u).unwrap_or_default();
-                    if uf.relrowsecurity || matches!(uf.relkind, b'v' | b'm') {
-                        deps.cacheability =
-                            Cacheability::Refuse(RefuseReason::ViewWithoutSecurityInvoker(relid));
+        match obj.0 {
+            OidKind::Rel => {
+                let relid = obj.1;
+
+                deps.visited_relations.push(relid);
+
+                let flags = registry.flags_for_rel(relid).unwrap_or_default();
+
+                // Views and materialized views carry no policies of their own. With `security_invoker`
+                // the underlying policies run as the querying role, so expanding to the base relations
+                // and partitioning by them is correct. Without it the view runs as its owner and
+                // bypasses the caller's RLS, which is not representable per-session. A view whose
+                // dependencies the registry has not loaded yet fails closed rather than being treated
+                // as a plain table.
+                if matches!(flags.relkind, b'v' | b'm') {
+                    let Some(underlying) = registry.view_underlying(relid) else {
+                        deps.cacheability = Cacheability::Refuse(RefuseReason::PolicyTooDynamic(
+                            format!("view oid={relid} dependencies not loaded into the registry"),
+                        ));
                         return deps;
+                    };
+
+                    let owner = (obj.2) | !flags.security_invoker;
+                    if owner {
+                        for &(kind, oid) in underlying.iter() {
+                            if kind == OidKind::Rel {
+                                let uf = registry.flags_for_rel(oid).unwrap_or_default();
+                                if uf.relrowsecurity {
+                                    deps.cacheability = Cacheability::Refuse(
+                                        RefuseReason::RlsTableInOwnerContext(oid),
+                                    );
+                                    return deps;
+                                }
+                            }
+                            // Only the SECURITY DEFINER flag propagates: it changes `current_user`,
+                            // while a view only changes how its direct relations are checked.
+                            work.push((kind, oid, obj.2));
+                        }
+                    } else {
+                        work.extend(underlying.iter().map(|d| (d.0, d.1, obj.2)));
                     }
                 }
-                // Not expanded, but still visited: RLS turning on beneath this view must reach
-                // the caches over it.
-                deps.visited_relations.extend(underlying.iter().copied());
-            }
-            continue;
-        }
 
-        if !flags.relrowsecurity {
-            continue;
-        }
+                if !flags.relrowsecurity {
+                    continue;
+                }
 
-        // Partitioned tables refuse outright.
-        if flags.relkind == b'p' {
-            deps.cacheability = Cacheability::Refuse(RefuseReason::PartitionedTable(relid));
-            return deps;
-        }
-
-        deps.rls_active_for_tables.push(relid);
-
-        let Some(policies) = registry.policies_for(relid) else {
-            // RLS enabled but no policies: Postgres returns zero rows for any non-owner role.
-            // Safe to cache (same answer for every session), but we conservatively refuse.
-            deps.cacheability = Cacheability::Refuse(RefuseReason::PolicyTooDynamic(format!(
-                "rls_enabled_but_no_policies_in_registry table_oid={relid}"
-            )));
-            return deps;
-        };
-
-        for policy in policies.iter() {
-            let Some(expr_text) = policy.using_expr.as_deref() else {
-                continue;
-            };
-            match check_policy_expr(expr_text) {
-                Ok(walk) => merge(&mut inputs, walk),
-                Err(reason) => {
-                    deps.cacheability = Cacheability::Refuse(reason);
+                // Beneath a SECURITY DEFINER function `current_user` is the function's owner, so this
+                // table's policies do not run as the caller.
+                if obj.2 {
+                    deps.cacheability =
+                        Cacheability::Refuse(RefuseReason::RlsTableInOwnerContext(relid));
                     return deps;
                 }
+
+                // Partitioned tables refuse outright.
+                if flags.relkind == b'p' {
+                    deps.cacheability = Cacheability::Refuse(RefuseReason::PartitionedTable(relid));
+                    return deps;
+                }
+
+                deps.rls_active_for_tables.push(relid);
+
+                let Some(policies) = registry.policies_for(relid) else {
+                    // RLS enabled but no policies: Postgres returns zero rows for any non-owner role.
+                    // Safe to cache (same answer for every session), but we conservatively refuse.
+                    deps.cacheability = Cacheability::Refuse(RefuseReason::PolicyTooDynamic(
+                        format!("rls_enabled_but_no_policies_in_registry table_oid={relid}"),
+                    ));
+                    return deps;
+                };
+
+                for policy in policies.iter() {
+                    let Some(expr_text) = policy.using_expr.as_deref() else {
+                        continue;
+                    };
+                    match check_policy_expr(expr_text) {
+                        Ok(walk) => merge(&mut inputs, walk),
+                        Err(reason) => {
+                            deps.cacheability = Cacheability::Refuse(reason);
+                            return deps;
+                        }
+                    }
+                }
+            }
+            OidKind::Func => {
+                let funoid = obj.1;
+
+                // Visited before any check, so a function loaded or changed later reaches the
+                // caches that call it.
+                deps.visited_functions.push(funoid);
+
+                let Some(func) = registry.func_info(funoid) else {
+                    deps.cacheability = Cacheability::Refuse(RefuseReason::PolicyTooDynamic(
+                        format!("function oid={funoid} not loaded into the registry"),
+                    ));
+                    return deps;
+                };
+
+                if func.provolatile == b'v' {
+                    deps.cacheability = Cacheability::Refuse(RefuseReason::VolatileFunction(
+                        format!("{}.{}", func.schema, func.name),
+                    ));
+                    return deps;
+                }
+
+                let owner = obj.2;
+
+                work.extend(
+                    func.deps
+                        .iter()
+                        .map(|dep| (dep.0, dep.1, func.security_definer | owner)),
+                );
             }
         }
     }
@@ -438,7 +488,7 @@ fn check_function_call(func: &FunctionExpr, walk: &mut PolicyWalk) -> Result<(),
 
 #[cfg(test)]
 mod tests {
-    use crate::policy_registry::{Policy, RelationFlags};
+    use crate::policy_registry::{FuncInfo, Policy, RelationFlags};
 
     use super::*;
 
@@ -710,7 +760,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        r.set_view_underlying(view_oid, vec![base_oid]);
+        r.set_view_underlying(view_oid, vec![(OidKind::Rel, base_oid)]);
     }
 
     /// A `security_invoker` view over an RLS table is cacheable and keys on the base table's
@@ -740,7 +790,7 @@ mod tests {
         let deps = analyze(&r, &[302], r.generation());
         assert!(matches!(
             deps.cacheability,
-            Cacheability::Refuse(RefuseReason::ViewWithoutSecurityInvoker(302))
+            Cacheability::Refuse(RefuseReason::RlsTableInOwnerContext(300))
         ));
     }
 
@@ -818,7 +868,7 @@ mod tests {
         policy_table(&r, 510, "user_id = (SELECT auth.uid())");
         plain_table(&r, 512);
         view_over(&r, 511, 510, true);
-        r.set_view_underlying(511, vec![510, 512]);
+        r.set_view_underlying(511, vec![(OidKind::Rel, 510), (OidKind::Rel, 512)]);
         let deps = analyze(&r, &[511], r.generation());
         assert_eq!(deps.cacheability, Cacheability::Cacheable);
         assert_eq!(deps.rls_active_for_tables.as_slice(), &[510]);
@@ -854,11 +904,89 @@ mod tests {
         assert!(analyze(&r, &[531], r.generation()).same_dependencies(&before));
 
         policy_table(&r, 532, "user_id = (SELECT auth.uid())");
-        r.set_view_underlying(531, vec![532]);
+        r.set_view_underlying(531, vec![(OidKind::Rel, 532)]);
         assert!(!analyze(&r, &[531], r.generation()).same_dependencies(&before));
 
-        r.set_view_underlying(531, vec![530]);
+        r.set_view_underlying(531, vec![(OidKind::Rel, 530)]);
         policy_table(&r, 530, "user_id = (SELECT auth.uid())");
         assert!(!analyze(&r, &[531], r.generation()).same_dependencies(&before));
+    }
+
+    fn stable_func(
+        r: &Arc<PolicyRegistry>,
+        oid: Oid,
+        security_definer: bool,
+        deps: Vec<(OidKind, Oid)>,
+    ) {
+        r.set_func_info(
+            oid,
+            FuncInfo {
+                schema: "public".into(),
+                name: format!("f{oid}"),
+                provolatile: b's',
+                security_definer,
+                deps,
+            },
+        );
+    }
+
+    /// A function called from a view without `security_invoker` still runs as the caller, so an
+    /// RLS-active table it reads is scoped by its policy.
+    #[test]
+    fn view_without_security_invoker_over_invoker_function_is_scoped() {
+        let r = registry();
+        policy_table(&r, 650, "user_id = (SELECT auth.uid())");
+        stable_func(&r, 651, false, vec![(OidKind::Rel, 650)]);
+        view_over(&r, 652, 650, false);
+        r.set_view_underlying(652, vec![(OidKind::Func, 651)]);
+        let deps = analyze(&r, &[652], r.generation());
+        assert_eq!(deps.cacheability, Cacheability::Cacheable);
+        assert_eq!(deps.rls_active_for_tables.as_slice(), &[650]);
+    }
+
+    /// A `security_invoker` view checks its relations as the current user even when a view without
+    /// `security_invoker` reads it, so the RLS-active table beneath it is scoped.
+    #[test]
+    fn invoker_view_nested_in_view_without_security_invoker_is_scoped() {
+        let r = registry();
+        policy_table(&r, 680, "user_id = (SELECT auth.uid())");
+        view_over(&r, 681, 680, true);
+        view_over(&r, 682, 681, false);
+        let deps = analyze(&r, &[682], r.generation());
+        assert_eq!(deps.cacheability, Cacheability::Cacheable);
+        assert_eq!(deps.rls_active_for_tables.as_slice(), &[680]);
+    }
+
+    /// A SECURITY DEFINER function reads as its owner, so an RLS-active table beneath it is refused
+    /// even under a `security_invoker` view.
+    #[test]
+    fn security_definer_function_reading_rls_table_refuses() {
+        let r = registry();
+        policy_table(&r, 660, "user_id = (SELECT auth.uid())");
+        stable_func(&r, 661, true, vec![(OidKind::Rel, 660)]);
+        view_over(&r, 662, 660, true);
+        r.set_view_underlying(662, vec![(OidKind::Func, 661)]);
+        let deps = analyze(&r, &[662], r.generation());
+        assert_eq!(
+            deps.cacheability,
+            Cacheability::Refuse(RefuseReason::RlsTableInOwnerContext(660))
+        );
+    }
+
+    /// Everything beneath a SECURITY DEFINER function runs as its owner, including an invoker
+    /// function it calls, so the RLS-active table that one reads is refused.
+    #[test]
+    fn invoker_function_beneath_security_definer_function_refuses() {
+        let r = registry();
+        policy_table(&r, 690, "user_id = (SELECT auth.uid())");
+        stable_func(&r, 691, false, vec![(OidKind::Rel, 690)]);
+        stable_func(&r, 692, true, vec![(OidKind::Func, 691)]);
+        view_over(&r, 693, 690, true);
+        r.set_view_underlying(693, vec![(OidKind::Func, 692)]);
+        let deps = analyze(&r, &[693], r.generation());
+        assert_eq!(
+            deps.cacheability,
+            Cacheability::Refuse(RefuseReason::RlsTableInOwnerContext(690))
+        );
     }
 }

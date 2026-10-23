@@ -398,13 +398,17 @@ where
                     && let Some((referenced_relations, relations, analysis)) = &rls_registration
                 {
                     let coordinator = rls_catalog.coordinator();
+                    // Functions register in their own index, so a redefined function at any
+                    // depth reaches the cache.
+                    let functions = analysis.visited_functions.to_vec();
                     if analysis.rls_active_for_tables.is_empty() {
-                        coordinator.register_relations(query_id, relations.clone());
+                        coordinator.register_relations(query_id, relations.clone(), functions);
                     } else {
                         coordinator.register_scoped(
                             query_id,
                             analysis.session_rls_inputs.clone(),
                             relations.clone(),
+                            functions,
                         );
                     }
 

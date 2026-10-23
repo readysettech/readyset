@@ -51,6 +51,8 @@ pub struct ScopedDescriptor {
     pub session_rls_inputs: Arc<[SessionInputType]>,
     /// Relations whose policy / RLS state invalidates this cache.
     pub relations: Vec<Oid>,
+    /// Functions whose definition invalidates this cache.
+    pub functions: Vec<Oid>,
 }
 
 /// Bridges the generic [`CacheManager`] to the RLS catalog.
@@ -72,6 +74,9 @@ where
     /// caches, so `on_rls_flag_enabled` can find a plain cache to drop when its relation turns
     /// RLS-active.
     caches_by_relation: HashMap<Oid, Arc<Mutex<HashSet<QueryId>>>>,
+    /// Function OID -> the query ids of caches whose analysis reached it, scoped and plain. Kept
+    /// apart from `caches_by_relation` because an OID is unique only within its catalog.
+    caches_by_function: HashMap<Oid, Arc<Mutex<HashSet<QueryId>>>>,
 }
 
 impl<V> std::fmt::Debug for RlsCoordinator<V>
@@ -102,6 +107,7 @@ where
             query_status_cache,
             descriptors: HashMap::new(),
             caches_by_relation: HashMap::new(),
+            caches_by_function: HashMap::new(),
         }
     }
 
@@ -129,7 +135,7 @@ where
     }
 
     /// Register an RLS-active (scoped) cache. Records its descriptor and adds it to the relation
-    /// reverse index.
+    /// and function reverse indices.
     ///
     /// Role changes need no reverse index: a scoped key always folds in the effective role and
     /// session user, so a role-attribute change is invalidated by the registry generation bump.
@@ -138,23 +144,32 @@ where
         query_id: QueryId,
         session_rls_inputs: Arc<[SessionInputType]>,
         relations: Vec<Oid>,
+        functions: Vec<Oid>,
     ) {
         let descriptor = Arc::new(ScopedDescriptor {
             session_rls_inputs,
             relations: relations.clone(),
+            functions: functions.clone(),
         });
         self.descriptors.pin().insert(query_id, descriptor);
         for relid in relations {
             Self::index_insert(&self.caches_by_relation, relid, query_id);
         }
+        for func in functions {
+            Self::index_insert(&self.caches_by_function, func, query_id);
+        }
     }
 
     /// Register a plain cache that references RLS-eligible relations. No descriptor is recorded,
     /// but the relation reverse index gains an entry so [`Self::on_rls_flag_enabled`] can find and
-    /// drop the cache if its relation later turns RLS-active.
-    pub fn register_relations(&self, query_id: QueryId, relations: Vec<Oid>) {
+    /// drop the cache if its relation later turns RLS-active, and the function reverse index so
+    /// [`Self::on_function_changed`] can find it if a function it reaches is redefined.
+    pub fn register_relations(&self, query_id: QueryId, relations: Vec<Oid>, functions: Vec<Oid>) {
         for relid in relations {
             Self::index_insert(&self.caches_by_relation, relid, query_id);
+        }
+        for func in functions {
+            Self::index_insert(&self.caches_by_function, func, query_id);
         }
     }
 
@@ -166,19 +181,25 @@ where
         self.unregister(query_id);
     }
 
-    /// Forget a cache: drop its descriptor and remove it from the relation reverse index.
+    /// Forget a cache: drop its descriptor and remove it from the relation and function reverse
+    /// indices.
     pub fn unregister(&self, query_id: &QueryId) {
         let descriptor = self.descriptors.pin().remove(query_id).cloned();
         if let Some(descriptor) = descriptor {
             for relid in &descriptor.relations {
                 Self::index_remove(&self.caches_by_relation, *relid, query_id);
             }
+            for func in &descriptor.functions {
+                Self::index_remove(&self.caches_by_function, *func, query_id);
+            }
         } else {
-            // Plain cache: its relations are not tracked here, so sweep every relation bucket.
-            // The buckets are small and unregister is off the hot path.
-            let guard = self.caches_by_relation.pin();
-            for set in guard.values() {
-                set.lock().remove(query_id);
+            // Plain cache: its relations and functions are not tracked here, so sweep every
+            // bucket. The buckets are small and unregister is off the hot path.
+            for index in [&self.caches_by_relation, &self.caches_by_function] {
+                let guard = index.pin();
+                for set in guard.values() {
+                    set.lock().remove(query_id);
+                }
             }
         }
     }
@@ -247,6 +268,7 @@ where
     pub fn clear(&self) {
         self.descriptors.pin().clear();
         self.caches_by_relation.pin().clear();
+        self.caches_by_function.pin().clear();
     }
 
     /// `true` if the cache for `query_id` is scoped (has a descriptor). The lookup path uses this
@@ -261,6 +283,15 @@ where
         let guard = self.caches_by_relation.pin();
         guard
             .get(&relid)
+            .map(|set| set.lock().iter().copied().collect())
+            .unwrap_or_default()
+    }
+
+    /// Snapshot the query ids registered against function `func`.
+    fn query_ids_for_function(&self, func: Oid) -> Vec<QueryId> {
+        let guard = self.caches_by_function.pin();
+        guard
+            .get(&func)
             .map(|set| set.lock().iter().copied().collect())
             .unwrap_or_default()
     }
@@ -288,6 +319,7 @@ where
                     let refreshed = Arc::new(ScopedDescriptor {
                         session_rls_inputs: analysis.session_rls_inputs,
                         relations: descriptor.relations.clone(),
+                        functions: descriptor.functions.clone(),
                     });
                     self.descriptors.pin().insert(query_id, refreshed);
                 }
@@ -323,6 +355,14 @@ where
         // definition. Drop every cache over it; the next read re-migrates against the reloaded
         // registry.
         for query_id in self.query_ids_for_relation(relid) {
+            self.drop_registered(&query_id);
+        }
+    }
+
+    fn on_function_changed(&self, func: Oid) {
+        // Same reasoning as a redefined view: what the function reads, or how it runs, changed
+        // beneath every cache that reached it.
+        for query_id in self.query_ids_for_function(func) {
             self.drop_registered(&query_id);
         }
     }

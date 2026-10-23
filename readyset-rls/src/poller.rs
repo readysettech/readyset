@@ -1,9 +1,9 @@
 //! Catalog poller.
 //!
 //! Periodically fingerprints `pg_policy` / `pg_class` / `pg_roles` and each
-//! view's dependencies (independent hashes), diffs each tick against the
+//! view's and function's dependencies (independent hashes), diffs each tick against the
 //! previous one, and applies surgical reload events to the [`PolicyRegistry`]:
-//! it reloads only the relations, views, and roles whose fingerprint changed,
+//! it reloads only the relations, views, functions, and roles whose fingerprint changed,
 //! then routes invalidation
 //! events into the shallow cache through the [`crate::InvalidationSink`].
 
@@ -73,15 +73,18 @@ pub(crate) mod sql {
                md5(rolsuper::text || ':' || rolbypassrls::text) AS role_hash \
         FROM   pg_catalog.pg_roles";
 
-    /// Per-view hash over the view's qualified name, the relations it reads and its `reloptions`.
-    /// `CREATE OR REPLACE VIEW`, `ALTER VIEW ... RENAME` and `ALTER VIEW ... SET SCHEMA` keep the
-    /// view's OID, and `security_invoker` lives in `reloptions`, so none of them reaches the other
-    /// fingerprints. A redefinition that reads the same relations keeps the hash.
+    /// Per-view hash over the view's qualified name, the relations and functions it reads and its
+    /// `reloptions`. `CREATE OR REPLACE VIEW`, `ALTER VIEW ... RENAME` and `ALTER VIEW ... SET
+    /// SCHEMA` keep the view's OID, and `security_invoker` lives in `reloptions`, so none of them
+    /// reaches the other fingerprints. A redefinition that reads the same relations and functions
+    /// keeps the hash. Dependencies hash as `refclassid:refobjid`, since an OID is unique only
+    /// within its catalog.
     pub(crate) const VIEW_DEPS_FINGERPRINT: &str = "\
         SELECT rw.ev_class AS oid, \
                md5(n.nspname || '.' || v.relname \
-                   || '|' || coalesce(string_agg(DISTINCT d.refobjid::text, ',' \
-                                                 ORDER BY d.refobjid::text), '') \
+                   || '|' || coalesce(string_agg( \
+                                DISTINCT d.refclassid::text || ':' || d.refobjid::text, ',' \
+                                ORDER BY d.refclassid::text || ':' || d.refobjid::text), '') \
                    || '|' || coalesce(array_to_string(v.reloptions, ','), '')) \
                  AS view_deps_hash \
         FROM   pg_catalog.pg_rewrite rw \
@@ -89,11 +92,36 @@ pub(crate) mod sql {
         JOIN   pg_catalog.pg_namespace n ON n.oid = v.relnamespace \
         LEFT JOIN pg_catalog.pg_depend d \
                ON  d.classid = 'pg_rewrite'::regclass AND d.objid = rw.oid \
-               AND d.refclassid = 'pg_class'::regclass AND d.refobjid <> rw.ev_class \
+               AND d.refclassid IN ('pg_class'::regclass, 'pg_proc'::regclass) \
+               AND d.refobjid <> rw.ev_class \
         WHERE  rw.rulename = '_RETURN' \
           AND  v.relkind IN ('v','m') \
           AND  n.nspname NOT IN ('pg_catalog','information_schema','pg_toast') \
         GROUP BY rw.ev_class, n.nspname, v.relname, v.reloptions";
+
+    /// Per-function hash over the columns the loader keeps: qualified name, `provolatile`,
+    /// `prosecdef`, and the relations and functions the body reads. `CREATE OR REPLACE FUNCTION`
+    /// and `ALTER FUNCTION` keep the OID, so none of them reaches the other fingerprints. A
+    /// redefinition that reads the same objects keeps the hash, as does any change to a body
+    /// Postgres records no dependencies for (string, PL/pgSQL, C).
+    // `provolatile` is Postgres's internal `\"char\"` type with no implicit cast to text, so `||`
+    // rejects it without an explicit `::text`.
+    pub(crate) const FUNC_DEPS_FINGERPRINT: &str = "\
+        SELECT f.oid, \
+               md5(n.nspname || '.' || f.proname \
+                   || '|' || f.provolatile::text || '|' || f.prosecdef::text \
+                   || '|' || coalesce(string_agg( \
+                                DISTINCT d.refclassid::text || ':' || d.refobjid::text, ',' \
+                                ORDER BY d.refclassid::text || ':' || d.refobjid::text), '')) \
+                 AS func_deps_hash \
+        FROM   pg_catalog.pg_proc      f \
+        JOIN   pg_catalog.pg_namespace n ON n.oid = f.pronamespace \
+        LEFT JOIN pg_catalog.pg_depend d \
+               ON  d.classid = 'pg_proc'::regclass AND d.objid = f.oid \
+               AND d.refclassid IN ('pg_class'::regclass, 'pg_proc'::regclass) \
+               AND d.refobjid <> f.oid \
+        WHERE  n.nspname NOT IN ('pg_catalog','information_schema','pg_toast') \
+        GROUP BY f.oid, n.nspname, f.proname, f.provolatile, f.prosecdef";
 }
 
 #[derive(Debug, Error)]
@@ -130,6 +158,9 @@ pub enum ChangeEvent {
     RlsFlagChanged(crate::Oid),
     /// A view's dependencies or `reloptions` changed, or the view appeared.
     ViewDepsChanged(crate::Oid),
+    /// A function's dependencies, volatility, `SECURITY DEFINER`, or name changed, or the function
+    /// appeared.
+    FuncDepsChanged(crate::Oid),
     /// A row that previously existed has been dropped.
     Removed { kind: ChangeKind, oid: crate::Oid },
 }
@@ -140,6 +171,7 @@ pub enum ChangeKind {
     Role,
     RlsFlag,
     ViewDeps,
+    FuncDeps,
 }
 
 /// A coalesced fingerprint snapshot for a single poll tick. The maps are independent.
@@ -149,6 +181,7 @@ pub struct Fingerprints {
     pub rls_flags: HashMap<PgOid, [u8; 16]>,
     pub roles: HashMap<PgOid, [u8; 16]>,
     pub views: HashMap<PgOid, [u8; 16]>,
+    pub funcs: HashMap<PgOid, [u8; 16]>,
 }
 
 impl Fingerprints {
@@ -161,11 +194,14 @@ impl Fingerprints {
         let roles = load_hash_map(client, sql::ROLE_FINGERPRINT, "oid", "role_hash").await?;
         let views =
             load_hash_map(client, sql::VIEW_DEPS_FINGERPRINT, "oid", "view_deps_hash").await?;
+        let funcs =
+            load_hash_map(client, sql::FUNC_DEPS_FINGERPRINT, "oid", "func_deps_hash").await?;
         Ok(Self {
             policies,
             rls_flags,
             roles,
             views,
+            funcs,
         })
     }
 
@@ -199,6 +235,13 @@ impl Fingerprints {
             &next.views,
             ChangeEvent::ViewDepsChanged,
             ChangeKind::ViewDeps,
+            &mut out,
+        );
+        diff_map(
+            &self.funcs,
+            &next.funcs,
+            ChangeEvent::FuncDepsChanged,
+            ChangeKind::FuncDeps,
             &mut out,
         );
         out
@@ -490,6 +533,11 @@ async fn apply_events(
                 kind: ChangeKind::ViewDeps,
                 ..
             } => counter!(metric::RLS_POLICY_RELOADS_TOTAL, "kind" => "view").increment(1),
+            ChangeEvent::FuncDepsChanged(_)
+            | ChangeEvent::Removed {
+                kind: ChangeKind::FuncDeps,
+                ..
+            } => counter!(metric::RLS_POLICY_RELOADS_TOTAL, "kind" => "function").increment(1),
         }
         let result = match event {
             ChangeEvent::RelationPolicyChanged(relid)
@@ -514,6 +562,11 @@ async fn apply_events(
                 kind: ChangeKind::ViewDeps,
                 oid: view,
             } => crate::loader::reload_view(client, registry, *view).await,
+            ChangeEvent::FuncDepsChanged(func)
+            | ChangeEvent::Removed {
+                kind: ChangeKind::FuncDeps,
+                oid: func,
+            } => crate::loader::reload_func(client, registry, *func).await,
         };
         if let Err(e) = result {
             warn!(?event, error = %e, "RLS surgical reload failed");
@@ -551,7 +604,7 @@ async fn apply_events(
                     // deps_gen bump path.
                     sink.on_relation_changed(*relid);
                     let now_rls_active = registry
-                        .flags_for(*relid)
+                        .flags_for_rel(*relid)
                         .map(|f| f.relrowsecurity)
                         .unwrap_or(false);
                     if now_rls_active {
@@ -570,6 +623,11 @@ async fn apply_events(
                 } => {
                     sink.on_definition_changed(*view);
                 }
+                ChangeEvent::FuncDepsChanged(func)
+                | ChangeEvent::Removed {
+                    kind: ChangeKind::FuncDeps,
+                    oid: func,
+                } => sink.on_function_changed(*func),
             }
         }
     }

@@ -44,6 +44,9 @@ pub trait InvalidationSink: Send + Sync {
     /// A view's definition changed (the relations it reads, or its `security_invoker`): drop
     /// every cache over `relid`, plain and scoped, so they re-enter against the reloaded registry.
     fn on_definition_changed(&self, relid: Oid);
+    /// A function's definition changed (what it reads, its volatility, or `SECURITY DEFINER`), or
+    /// it was dropped: drop every cache whose analysis reached `func`, plain and scoped.
+    fn on_function_changed(&self, func: Oid);
 }
 
 use std::sync::Arc;
@@ -105,6 +108,11 @@ impl InvalidationSink for DeferredSink {
     fn on_definition_changed(&self, relid: Oid) {
         if let Some(sink) = self.inner.get() {
             sink.on_definition_changed(relid);
+        }
+    }
+    fn on_function_changed(&self, func: Oid) {
+        if let Some(sink) = self.inner.get() {
+            sink.on_function_changed(func);
         }
     }
 }

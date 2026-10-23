@@ -62,6 +62,30 @@ struct RelationName {
     name: String,
 }
 
+/// Catalog an OID belongs to. An OID is unique only within its catalog, so a dependency is
+/// identified by both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OidKind {
+    /// `pg_class`: a table, partitioned table, view, or materialized view.
+    Rel,
+    /// `pg_proc`.
+    Func,
+}
+
+/// Per-function attributes from `pg_proc`, plus the relations and functions its body reads. Only
+/// SQL-standard bodies (PG 14+) record what they read, so `deps` is empty for any other function.
+#[derive(Debug, Clone, Default)]
+pub struct FuncInfo {
+    pub schema: String,
+    pub name: String,
+    /// `provolatile`: `b'i'` immutable, `b's'` stable, `b'v'` volatile.
+    pub provolatile: u8,
+    /// `prosecdef`: the function runs as its owner.
+    pub security_definer: bool,
+    /// Function Dependencies.
+    pub deps: Vec<(OidKind, Oid)>,
+}
+
 /// Snapshot of the catalog tables that drive RLS evaluation.
 ///
 /// Independent typed maps share one `seize::Collector` so each getter is
@@ -72,7 +96,8 @@ pub struct PolicyRegistry {
     policies: ConcurrentMap<Oid, Arc<Vec<Policy>>>,
     flags: ConcurrentMap<Oid, RelationFlags>,
     roles: ConcurrentMap<Oid, RoleAttrs>,
-    view_underlying: ConcurrentMap<Oid, Arc<Vec<Oid>>>,
+    view_underlying: ConcurrentMap<Oid, Arc<Vec<(OidKind, Oid)>>>,
+    functions: ConcurrentMap<Oid, Arc<FuncInfo>>,
     role_gucs: ConcurrentMap<Oid, Arc<HashMap<String, String>>>,
     relations_by_name: ConcurrentMap<RelationName, Oid>,
     roles_by_name: ConcurrentMap<String, Oid>,
@@ -106,6 +131,7 @@ impl PolicyRegistry {
             flags: new_table(),
             roles: new_table(),
             view_underlying: new_table(),
+            functions: new_table(),
             role_gucs: new_table(),
             relations_by_name: new_table(),
             roles_by_name: new_table(),
@@ -149,7 +175,7 @@ impl PolicyRegistry {
         self.policies.pin().get(&relid).map(Arc::clone)
     }
 
-    pub fn flags_for(&self, relid: Oid) -> Option<RelationFlags> {
+    pub fn flags_for_rel(&self, relid: Oid) -> Option<RelationFlags> {
         self.flags.pin().get(&relid).copied()
     }
 
@@ -157,8 +183,12 @@ impl PolicyRegistry {
         self.roles.pin().get(&roleid).copied()
     }
 
-    pub fn view_underlying(&self, view_oid: Oid) -> Option<Arc<Vec<Oid>>> {
+    pub fn view_underlying(&self, view_oid: Oid) -> Option<Arc<Vec<(OidKind, Oid)>>> {
         self.view_underlying.pin().get(&view_oid).map(Arc::clone)
+    }
+
+    pub fn func_info(&self, func_oid: Oid) -> Option<Arc<FuncInfo>> {
+        self.functions.pin().get(&func_oid).map(Arc::clone)
     }
 
     /// Resolve a `(schema, table)` reference to an OID.
@@ -260,10 +290,18 @@ impl PolicyRegistry {
             .unwrap_or(false)
     }
 
-    pub fn set_view_underlying(&self, view_oid: Oid, underlying: Vec<Oid>) {
+    pub fn set_view_underlying(&self, view_oid: Oid, underlying: Vec<(OidKind, Oid)>) {
         self.view_underlying
             .pin()
             .insert(view_oid, Arc::new(underlying));
+    }
+
+    pub fn set_func_info(&self, func_oid: Oid, info: FuncInfo) {
+        self.functions.pin().insert(func_oid, Arc::new(info));
+    }
+
+    pub fn remove_func_info(&self, func_oid: Oid) {
+        self.functions.pin().remove(&func_oid);
     }
 
     pub fn set_role_default_gucs(&self, roleid: Oid, gucs: HashMap<String, String>) {
@@ -319,7 +357,7 @@ mod tests {
         let policies = r.policies_for(100).expect("policies");
         assert_eq!(policies.len(), 1);
         assert_eq!(policies[0].name, "owner_policy");
-        assert!(r.flags_for(100).unwrap().relrowsecurity);
+        assert!(r.flags_for_rel(100).unwrap().relrowsecurity);
         assert!(!r.role_attrs(10).unwrap().rolbypassrls);
     }
 
@@ -328,13 +366,13 @@ mod tests {
         let r = PolicyRegistry::new();
         r.set_flags(100, RelationFlags::default());
         r.set_policies(100, vec![]);
-        r.set_view_underlying(100, vec![7]);
+        r.set_view_underlying(100, vec![(OidKind::Rel, 7)]);
         r.set_relation_name("public", "widgets", 100);
 
         r.remove_relation(100);
         r.remove_view_deps(100);
 
-        assert!(r.flags_for(100).is_none());
+        assert!(r.flags_for_rel(100).is_none());
         assert!(r.policies_for(100).is_none());
         assert!(r.view_underlying(100).is_none());
         assert!(r.relid_for(Some("public"), "widgets").is_none());

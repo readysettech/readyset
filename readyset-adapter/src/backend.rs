@@ -3208,11 +3208,15 @@ where
         match analyze_recovered_cache(policy_registry, &request.query, &request.schema_search_path)
         {
             RecoveryDeps::Plain => None,
-            RecoveryDeps::PlainTracked { relations } => Some((relations, None)),
+            RecoveryDeps::PlainTracked {
+                relations,
+                functions,
+            } => Some((relations, functions, None)),
             RecoveryDeps::Scoped {
                 relations,
+                functions,
                 session_rls_inputs,
-            } => Some((relations, Some(session_rls_inputs))),
+            } => Some((relations, functions, Some(session_rls_inputs))),
             RecoveryDeps::WaitForPoll { unknown } => {
                 return Ok(RecoveryOutcome::Deferred {
                     unknown: unknown.iter().map(|u| u.qualified()).collect(),
@@ -3236,13 +3240,14 @@ where
         stmt.adaptive,
     )?;
 
-    if let (Some(coordinator), Some((relations, session_rls_inputs))) = (coordinator, registration)
+    if let (Some(coordinator), Some((relations, functions, session_rls_inputs))) =
+        (coordinator, registration)
     {
         match session_rls_inputs {
             Some(inputs) => {
-                coordinator.register_scoped(query_id, inputs, relations);
+                coordinator.register_scoped(query_id, inputs, relations, functions);
             }
-            None => coordinator.register_relations(query_id, relations),
+            None => coordinator.register_relations(query_id, relations, functions),
         }
     }
 
@@ -3259,11 +3264,16 @@ enum RecoveryDeps {
     /// RLS disabled: plain cache, not coordinator-tracked.
     Plain,
     /// Plain cache that references RLS-eligible relations. Register the
-    /// relations so an RLS flag flip on one of them later drops the cache.
-    PlainTracked { relations: Vec<readyset_rls::Oid> },
+    /// relations so an RLS flag flip on one of them later drops the cache,
+    /// and the functions so a redefinition of one of them does.
+    PlainTracked {
+        relations: Vec<readyset_rls::Oid>,
+        functions: Vec<readyset_rls::Oid>,
+    },
     /// RLS-active: scoped cache keyed on `session_rls_inputs`.
     Scoped {
         relations: Vec<readyset_rls::Oid>,
+        functions: Vec<readyset_rls::Oid>,
         session_rls_inputs: Arc<[readyset_rls::SessionInputType]>,
     },
     /// Registry doesn't have the referenced relations yet (catalog
@@ -3304,6 +3314,7 @@ fn analyze_recovered_cache(
     // the views and base tables beneath a view, not just the
     // query-referenced relation (the view itself).
     let mut relations: Vec<readyset_rls::Oid> = referenced_relations;
+    let functions = deps.visited_functions.to_vec();
     for &t in deps.visited_relations.iter() {
         if !relations.contains(&t) {
             relations.push(t);
@@ -3313,10 +3324,14 @@ fn analyze_recovered_cache(
         readyset_rls::Cacheability::Cacheable if !deps.rls_active_for_tables.is_empty() => {
             RecoveryDeps::Scoped {
                 relations,
+                functions,
                 session_rls_inputs: deps.session_rls_inputs,
             }
         }
-        readyset_rls::Cacheability::Cacheable => RecoveryDeps::PlainTracked { relations },
+        readyset_rls::Cacheability::Cacheable => RecoveryDeps::PlainTracked {
+            relations,
+            functions,
+        },
         readyset_rls::Cacheability::Refuse(reason) => RecoveryDeps::Skip {
             reason: reason.structured_display(),
         },

@@ -2872,7 +2872,7 @@ async fn run_view_security_invoker_toggled(proto: Protocol) {
         .expect_err("a cache over an owner-context view must be refused");
     assert!(
         err.as_db_error()
-            .is_some_and(|e| e.message().contains("code=view_without_security_invoker")),
+            .is_some_and(|e| e.message().contains("code=rls_table_in_owner_context")),
         "unexpected refusal: {err:?}",
     );
     read_owner_ids(&rs, proto, view).await;

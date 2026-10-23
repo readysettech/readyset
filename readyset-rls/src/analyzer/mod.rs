@@ -52,6 +52,9 @@ pub struct CacheSessionDeps {
     /// every base table whether or not it is RLS-active. Caches register against all of them so a
     /// change anywhere beneath invalidates them.
     pub visited_relations: SmallVec<[Oid; 4]>,
+    /// Every function the analysis reached. Caches register against all of them so a change anywhere
+    /// beneath invalidates them.
+    pub visited_functions: SmallVec<[Oid; 4]>,
 }
 
 impl CacheSessionDeps {
@@ -69,6 +72,7 @@ impl CacheSessionDeps {
             && sorted(&self.session_rls_inputs) == sorted(&other.session_rls_inputs)
             && sorted(&self.rls_active_for_tables) == sorted(&other.rls_active_for_tables)
             && sorted(&self.visited_relations) == sorted(&other.visited_relations)
+            && sorted(&self.visited_functions) == sorted(&other.visited_functions)
     }
 }
 
@@ -85,10 +89,13 @@ pub enum RefuseReason {
     PolicyTooDynamic(String),
     #[error("table oid={0} is partitioned; expand to partitions (Phase 3)")]
     PartitionedTable(Oid),
-    #[error("view oid={0} lacks security_invoker = true")]
-    ViewWithoutSecurityInvoker(Oid),
-    #[error("query calls SECURITY DEFINER function {0}")]
-    SecurityDefinerFunction(String),
+    #[error(
+        "RLS-active table oid={0} is read as the owner of a view without security_invoker or of a \
+         SECURITY DEFINER function, not as the caller"
+    )]
+    RlsTableInOwnerContext(Oid),
+    #[error("query calls volatile function {0}")]
+    VolatileFunction(String),
 }
 
 impl RefuseReason {
@@ -100,8 +107,8 @@ impl RefuseReason {
             Self::NonStableFunctionInPolicy(_) => "non_stable_function_in_policy",
             Self::PolicyTooDynamic(_) => "policy_too_dynamic",
             Self::PartitionedTable(_) => "partitioned_table",
-            Self::ViewWithoutSecurityInvoker(_) => "view_without_security_invoker",
-            Self::SecurityDefinerFunction(_) => "security_definer_function",
+            Self::RlsTableInOwnerContext(_) => "rls_table_in_owner_context",
+            Self::VolatileFunction(_) => "volatile_function",
         }
     }
 
@@ -112,8 +119,8 @@ impl RefuseReason {
             Self::PolicyReadsOtherTable(oid) => format!("table_oid={oid}"),
             Self::NonStableFunctionInPolicy(name) => format!("function={name}"),
             Self::PartitionedTable(oid) => format!("table_oid={oid}"),
-            Self::ViewWithoutSecurityInvoker(oid) => format!("view_oid={oid}"),
-            Self::SecurityDefinerFunction(name) => format!("function={name}"),
+            Self::RlsTableInOwnerContext(oid) => format!("table_oid={oid}"),
+            Self::VolatileFunction(name) => format!("function={name}"),
             Self::PolicyTooDynamic(detail) => format!("detail={detail}"),
         };
         format!("rls_uncacheable[code={}, {}]", self.code(), detail)
@@ -143,8 +150,8 @@ mod tests {
             RefuseReason::NonStableFunctionInPolicy("f".into()).code(),
             RefuseReason::PolicyTooDynamic(String::new()).code(),
             RefuseReason::PartitionedTable(2).code(),
-            RefuseReason::ViewWithoutSecurityInvoker(3).code(),
-            RefuseReason::SecurityDefinerFunction("g".into()).code(),
+            RefuseReason::RlsTableInOwnerContext(3).code(),
+            RefuseReason::VolatileFunction("h".into()).code(),
         ];
         let mut sorted = codes.to_vec();
         sorted.sort_unstable();
