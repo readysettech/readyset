@@ -319,37 +319,31 @@ impl ConstraintRegistry {
 
     /// Create a registry with all default patterns and rules.
     pub fn default_registry() -> Self {
+        Self::try_default_registry().expect("dante's default patterns are well formed")
+    }
+
+    /// [`Self::default_registry`], or the first default pattern that fails to register.
+    fn try_default_registry() -> Result<Self, PatternRegistrationError> {
         use crate::registry::*;
 
         let mut reg = Self::new();
 
         // Basic patterns
-        reg.register(basic::single_table())
-            .expect("pattern is malformed");
-        reg.register(basic::single_parameter())
-            .expect("pattern is malformed");
-        reg.register(basic::project_literal())
-            .expect("pattern is malformed");
+        reg.register(basic::single_table())?;
+        reg.register(basic::single_parameter())?;
+        reg.register(basic::project_literal())?;
 
         // Example-pinned bait patterns (exercise the full example pipeline)
-        reg.register(examples::int_int_divide_bait())
-            .expect("pattern is malformed");
+        reg.register(examples::int_int_divide_bait())?;
 
         // Aggregate patterns
-        reg.register(aggregates::count())
-            .expect("pattern is malformed");
-        reg.register(aggregates::sum())
-            .expect("pattern is malformed");
-        reg.register(aggregates::avg())
-            .expect("pattern is malformed");
-        reg.register(aggregates::min_max())
-            .expect("pattern is malformed");
-        reg.register(aggregates::count_distinct())
-            .expect("pattern is malformed");
-        reg.register(aggregates::aggregate_with_group_by())
-            .expect("pattern is malformed");
-        reg.register(aggregates::having_clause())
-            .expect("pattern is malformed");
+        reg.register(aggregates::count())?;
+        reg.register(aggregates::sum())?;
+        reg.register(aggregates::avg())?;
+        reg.register(aggregates::min_max())?;
+        reg.register(aggregates::count_distinct())?;
+        reg.register(aggregates::aggregate_with_group_by())?;
+        reg.register(aggregates::having_clause())?;
         // Bare `group_concat()` and bare `array_agg()` yield
         // non-deterministic per-group ordering without an inner `ORDER BY`,
         // so they're skipped until `AggregateFn` carries an
@@ -359,297 +353,175 @@ impl ConstraintRegistry {
         // pattern still emits `MirNodeInner::Accumulator` so the
         // Antithesis `Create dataflow node::Accumulator` reachability
         // assertion fires on MySQL.
-        reg.register(aggregates::array_agg())
-            .expect("pattern is malformed");
-        reg.register(aggregates::group_concat_grouped())
-            .expect("pattern is malformed");
-        reg.register(aggregates::multi_aggregate())
-            .expect("pattern is malformed");
+        reg.register(aggregates::array_agg())?;
+        reg.register(aggregates::group_concat_grouped())?;
+        reg.register(aggregates::multi_aggregate())?;
         // Multi-aggregate without GROUP BY or parameters targets the
         // JoinAggregates empty group_by Antithesis assertion.
-        reg.register(aggregates::multi_aggregate_no_group_by())
-            .expect("pattern is malformed");
-        reg.register(aggregates::in_list_aggregate())
-            .expect("pattern is malformed");
+        reg.register(aggregates::multi_aggregate_no_group_by())?;
+        reg.register(aggregates::in_list_aggregate())?;
         // Max as a bare aggregate and as a post-lookup aggregate.
-        reg.register(aggregates::max())
-            .expect("pattern is malformed");
-        reg.register(aggregates::max_in_list())
-            .expect("pattern is malformed");
-        reg.register(aggregates::min_in_list())
-            .expect("pattern is malformed");
-        reg.register(aggregates::avg_in_list())
-            .expect("pattern is malformed");
-        reg.register(aggregates::count_in_list())
-            .expect("pattern is malformed");
+        reg.register(aggregates::max())?;
+        reg.register(aggregates::max_in_list())?;
+        reg.register(aggregates::min_in_list())?;
+        reg.register(aggregates::avg_in_list())?;
+        reg.register(aggregates::count_in_list())?;
         // JsonObjectAgg accumulation (Antithesis Accumulation: JsonObjectAgg) and
         // post-lookup (Post-lookup aggregate: JsonObjectAgg); GroupConcat
         // post-lookup (Post-lookup aggregate: GroupConcat). All MySQL-only.
-        reg.register(aggregates::json_object_agg_grouped())
-            .expect("pattern is malformed");
-        reg.register(aggregates::json_object_agg_in_list())
-            .expect("pattern is malformed");
-        reg.register(aggregates::group_concat_in_list())
-            .expect("pattern is malformed");
+        reg.register(aggregates::json_object_agg_grouped())?;
+        reg.register(aggregates::json_object_agg_in_list())?;
+        reg.register(aggregates::group_concat_in_list())?;
         // StringAgg accumulation (Antithesis Accumulation: StringAgg) and
         // post-lookup (Post-lookup aggregate: StringAgg). PostgreSQL-only.
-        reg.register(aggregates::string_agg_grouped())
-            .expect("pattern is malformed");
-        reg.register(aggregates::string_agg_in_list())
-            .expect("pattern is malformed");
+        reg.register(aggregates::string_agg_grouped())?;
+        reg.register(aggregates::string_agg_in_list())?;
         // CountStar post-lookup (Post-lookup aggregate::CountStar). Both dialects.
-        reg.register(aggregates::count_star_in_list())
-            .expect("pattern is malformed");
+        reg.register(aggregates::count_star_in_list())?;
         // ArrayAgg post-lookup (Post-lookup aggregate::ArrayAgg). PostgreSQL-only.
-        reg.register(aggregates::array_agg_in_list())
-            .expect("pattern is malformed");
+        reg.register(aggregates::array_agg_in_list())?;
         // array_to_string(ARRAY_AGG(col), ',') — scalar over aggregate. PostgreSQL-only.
-        reg.register(aggregates::array_to_string_agg())
-            .expect("pattern is malformed");
+        reg.register(aggregates::array_to_string_agg())?;
         // normalize_topk_with_aggregate: aggregate without GROUP BY + ORDER BY/LIMIT.
-        reg.register(aggregates::aggregate_no_group_by_with_topk())
-            .expect("pattern is malformed");
+        reg.register(aggregates::aggregate_no_group_by_with_topk())?;
 
         // Filter patterns
-        reg.register(filters::between())
-            .expect("pattern is malformed");
-        reg.register(filters::in_list())
-            .expect("pattern is malformed");
-        reg.register(filters::like()).expect("pattern is malformed");
-        reg.register(filters::is_null())
-            .expect("pattern is malformed");
-        reg.register(filters::compound_where())
-            .expect("pattern is malformed");
+        reg.register(filters::between())?;
+        reg.register(filters::in_list())?;
+        reg.register(filters::like())?;
+        reg.register(filters::is_null())?;
+        reg.register(filters::compound_where())?;
 
         // Join patterns
-        reg.register(joins::inner_join())
-            .expect("pattern is malformed");
-        reg.register(joins::left_join())
-            .expect("pattern is malformed");
-        reg.register(joins::self_join())
-            .expect("pattern is malformed");
-        reg.register(joins::self_join_with_filter())
-            .expect("pattern is malformed");
-        reg.register(joins::self_join_same_column())
-            .expect("pattern is malformed");
-        reg.register(joins::cross_join())
-            .expect("pattern is malformed");
-        reg.register(joins::left_join_with_rhs_filter())
-            .expect("pattern is malformed");
-        reg.register(joins::straddled_inner_join_with_both_filters())
-            .expect("pattern is malformed");
-        reg.register(joins::values_join())
-            .expect("pattern is malformed");
-        reg.register(joins::inner_join_using())
-            .expect("pattern is malformed");
-        reg.register(joins::redundant_join_on_unique_key())
-            .expect("pattern is malformed");
+        reg.register(joins::inner_join())?;
+        reg.register(joins::left_join())?;
+        reg.register(joins::self_join())?;
+        reg.register(joins::self_join_with_filter())?;
+        reg.register(joins::self_join_same_column())?;
+        reg.register(joins::cross_join())?;
+        reg.register(joins::left_join_with_rhs_filter())?;
+        reg.register(joins::straddled_inner_join_with_both_filters())?;
+        reg.register(joins::values_join())?;
+        reg.register(joins::inner_join_using())?;
+        reg.register(joins::redundant_join_on_unique_key())?;
         // lateral_join pass: LATERAL correlated subquery (PostgreSQL-only).
-        reg.register(joins::lateral_correlated_subquery())
-            .expect("pattern is malformed");
+        reg.register(joins::lateral_correlated_subquery())?;
 
         // Ordering patterns
-        reg.register(ordering::topk())
-            .expect("pattern is malformed");
-        reg.register(ordering::order_by())
-            .expect("pattern is malformed");
-        reg.register(ordering::paginate())
-            .expect("pattern is malformed");
-        reg.register(ordering::topk_unique_key_eq())
-            .expect("pattern is malformed");
+        reg.register(ordering::topk())?;
+        reg.register(ordering::order_by())?;
+        reg.register(ordering::paginate())?;
+        reg.register(ordering::topk_unique_key_eq())?;
 
         // Subquery patterns
-        reg.register(subqueries::exists_subquery())
-            .expect("pattern is malformed");
-        reg.register(subqueries::in_subquery())
-            .expect("pattern is malformed");
-        reg.register(subqueries::scalar_subquery())
-            .expect("pattern is malformed");
-        reg.register(subqueries::join_subquery())
-            .expect("pattern is malformed");
-        reg.register(subqueries::not_in_subquery())
-            .expect("pattern is malformed");
+        reg.register(subqueries::exists_subquery())?;
+        reg.register(subqueries::in_subquery())?;
+        reg.register(subqueries::scalar_subquery())?;
+        reg.register(subqueries::join_subquery())?;
+        reg.register(subqueries::not_in_subquery())?;
 
         // CTE patterns
-        reg.register(ctes::simple_cte())
-            .expect("pattern is malformed");
-        reg.register(ctes::cte_with_join())
-            .expect("pattern is malformed");
-        reg.register(ctes::cte_with_param())
-            .expect("pattern is malformed");
+        reg.register(ctes::simple_cte())?;
+        reg.register(ctes::cte_with_join())?;
+        reg.register(ctes::cte_with_param())?;
 
         // Hoisting patterns (exercise HoistParametrizableFilters pass)
-        reg.register(hoisting::aggregated_join_subquery_eq_filter())
-            .expect("pattern is malformed");
-        reg.register(hoisting::aggregated_join_subquery_having_filter())
-            .expect("pattern is malformed");
-        reg.register(hoisting::having_to_where_promotion())
-            .expect("pattern is malformed");
-        reg.register(hoisting::from_subquery_filter())
-            .expect("pattern is malformed");
-        reg.register(hoisting::from_aggregated_subquery_join())
-            .expect("pattern is malformed");
+        reg.register(hoisting::aggregated_join_subquery_eq_filter())?;
+        reg.register(hoisting::aggregated_join_subquery_having_filter())?;
+        reg.register(hoisting::having_to_where_promotion())?;
+        reg.register(hoisting::from_subquery_filter())?;
+        reg.register(hoisting::from_aggregated_subquery_join())?;
 
         // Compound patterns
-        reg.register(compound::union_all_same_table())
-            .expect("pattern is malformed");
+        reg.register(compound::union_all_same_table())?;
         for class in [
             crate::constraint::TypeClass::Integer,
             crate::constraint::TypeClass::String,
             crate::constraint::TypeClass::DateTime,
         ] {
-            reg.register(compound::union_all_two_tables(class))
-                .expect("pattern is malformed");
+            reg.register(compound::union_all_two_tables(class))?;
         }
-        reg.register(compound::union_all_cross_type())
-            .expect("pattern is malformed");
+        reg.register(compound::union_all_cross_type())?;
 
         // Advanced patterns
-        reg.register(advanced::window_function())
-            .expect("pattern is malformed");
-        reg.register(advanced::window_rank())
-            .expect("pattern is malformed");
-        reg.register(advanced::window_dense_rank())
-            .expect("pattern is malformed");
-        reg.register(advanced::window_row_number_in_list())
-            .expect("pattern is malformed");
-        reg.register(advanced::window_rank_in_list())
-            .expect("pattern is malformed");
-        reg.register(advanced::window_dense_rank_in_list())
-            .expect("pattern is malformed");
-        reg.register(advanced::distinct())
-            .expect("pattern is malformed");
-        reg.register(advanced::multi_join())
-            .expect("pattern is malformed");
+        reg.register(advanced::window_function())?;
+        reg.register(advanced::window_rank())?;
+        reg.register(advanced::window_dense_rank())?;
+        reg.register(advanced::window_row_number_in_list())?;
+        reg.register(advanced::window_rank_in_list())?;
+        reg.register(advanced::window_dense_rank_in_list())?;
+        reg.register(advanced::distinct())?;
+        reg.register(advanced::multi_join())?;
 
         // Scalar function patterns
-        reg.register(functions::coalesce())
-            .expect("pattern is malformed");
-        reg.register(functions::ifnull())
-            .expect("pattern is malformed");
-        reg.register(functions::ifnull_datetime())
-            .expect("pattern is malformed");
-        reg.register(functions::concat())
-            .expect("pattern is malformed");
-        reg.register(functions::substring())
-            .expect("pattern is malformed");
-        reg.register(functions::round())
-            .expect("pattern is malformed");
-        reg.register(functions::length())
-            .expect("pattern is malformed");
-        reg.register(functions::month())
-            .expect("pattern is malformed");
-        reg.register(functions::dayofweek())
-            .expect("pattern is malformed");
-        reg.register(functions::greatest())
-            .expect("pattern is malformed");
-        reg.register(functions::concat_ws())
-            .expect("pattern is malformed");
-        reg.register(functions::least())
-            .expect("pattern is malformed");
-        reg.register(functions::ascii())
-            .expect("pattern is malformed");
-        reg.register(functions::split_part())
-            .expect("pattern is malformed");
-        reg.register(functions::date_trunc())
-            .expect("pattern is malformed");
-        reg.register(functions::upper())
-            .expect("pattern is malformed");
-        reg.register(functions::lower())
-            .expect("pattern is malformed");
-        reg.register(functions::upper_in_list())
-            .expect("pattern is malformed");
-        reg.register(functions::lower_in_list())
-            .expect("pattern is malformed");
-        reg.register(functions::substring_in_list())
-            .expect("pattern is malformed");
-        reg.register(functions::json_object())
-            .expect("pattern is malformed");
-        reg.register(functions::json_quote())
-            .expect("pattern is malformed");
-        reg.register(functions::json_overlaps())
-            .expect("pattern is malformed");
-        reg.register(functions::json_valid())
-            .expect("pattern is malformed");
-        reg.register(functions::json_depth())
-            .expect("pattern is malformed");
-        reg.register(functions::json_build_object())
-            .expect("pattern is malformed");
-        reg.register(functions::jsonb_build_object())
-            .expect("pattern is malformed");
-        reg.register(functions::json_strip_nulls())
-            .expect("pattern is malformed");
-        reg.register(functions::json_typeof())
-            .expect("pattern is malformed");
-        reg.register(functions::json_extract_path_text())
-            .expect("pattern is malformed");
-        reg.register(functions::date_format())
-            .expect("pattern is malformed");
-        reg.register(functions::timediff())
-            .expect("pattern is malformed");
-        reg.register(functions::addtime())
-            .expect("pattern is malformed");
-        reg.register(functions::convert_tz())
-            .expect("pattern is malformed");
-        reg.register(functions::hex())
-            .expect("pattern is malformed");
-        reg.register(functions::jsonb_strip_nulls())
-            .expect("pattern is malformed");
-        reg.register(functions::jsonb_pretty())
-            .expect("pattern is malformed");
-        reg.register(functions::jsonb_extract_path())
-            .expect("pattern is malformed");
-        reg.register(functions::jsonb_set())
-            .expect("pattern is malformed");
-        reg.register(functions::jsonb_set_lax())
-            .expect("pattern is malformed");
-        reg.register(functions::jsonb_insert())
-            .expect("pattern is malformed");
-        reg.register(functions::st_astext())
-            .expect("pattern is malformed");
-        reg.register(functions::st_asewkt())
-            .expect("pattern is malformed");
-        reg.register(functions::json_array_length())
-            .expect("pattern is malformed");
-        reg.register(functions::jsonb_array_length())
-            .expect("pattern is malformed");
+        reg.register(functions::coalesce())?;
+        reg.register(functions::ifnull())?;
+        reg.register(functions::ifnull_datetime())?;
+        reg.register(functions::concat())?;
+        reg.register(functions::substring())?;
+        reg.register(functions::round())?;
+        reg.register(functions::length())?;
+        reg.register(functions::month())?;
+        reg.register(functions::dayofweek())?;
+        reg.register(functions::greatest())?;
+        reg.register(functions::concat_ws())?;
+        reg.register(functions::least())?;
+        reg.register(functions::ascii())?;
+        reg.register(functions::split_part())?;
+        reg.register(functions::date_trunc())?;
+        reg.register(functions::upper())?;
+        reg.register(functions::lower())?;
+        reg.register(functions::upper_in_list())?;
+        reg.register(functions::lower_in_list())?;
+        reg.register(functions::substring_in_list())?;
+        reg.register(functions::json_object())?;
+        reg.register(functions::json_quote())?;
+        reg.register(functions::json_overlaps())?;
+        reg.register(functions::json_valid())?;
+        reg.register(functions::json_depth())?;
+        reg.register(functions::json_build_object())?;
+        reg.register(functions::jsonb_build_object())?;
+        reg.register(functions::json_strip_nulls())?;
+        reg.register(functions::json_typeof())?;
+        reg.register(functions::json_extract_path_text())?;
+        reg.register(functions::date_format())?;
+        reg.register(functions::timediff())?;
+        reg.register(functions::addtime())?;
+        reg.register(functions::convert_tz())?;
+        reg.register(functions::hex())?;
+        reg.register(functions::jsonb_strip_nulls())?;
+        reg.register(functions::jsonb_pretty())?;
+        reg.register(functions::jsonb_extract_path())?;
+        reg.register(functions::jsonb_set())?;
+        reg.register(functions::jsonb_set_lax())?;
+        reg.register(functions::jsonb_insert())?;
+        reg.register(functions::st_astext())?;
+        reg.register(functions::st_asewkt())?;
+        reg.register(functions::json_array_length())?;
+        reg.register(functions::jsonb_array_length())?;
 
         // Expression-eval patterns (tagged `expr_eval`)
-        reg.register(expressions::binary_op_int_int_add())
-            .expect("pattern is malformed");
-        reg.register(expressions::binary_op_int_int_subtract())
-            .expect("pattern is malformed");
-        reg.register(expressions::binary_op_int_int_multiply())
-            .expect("pattern is malformed");
-        reg.register(expressions::binary_op_int_int_divide())
-            .expect("pattern is malformed");
-        reg.register(expressions::binary_op_int_int_modulo())
-            .expect("pattern is malformed");
-        reg.register(expressions::binary_op_signed_unsigned_modulo())
-            .expect("pattern is malformed");
-        reg.register(expressions::binary_op_float_double_add())
-            .expect("pattern is malformed");
-        reg.register(expressions::binary_op_float_double_subtract())
-            .expect("pattern is malformed");
-        reg.register(expressions::binary_op_float_double_multiply())
-            .expect("pattern is malformed");
-        reg.register(expressions::binary_op_float_double_divide())
-            .expect("pattern is malformed");
-        reg.register(expressions::cast_decimal_widen_to_narrow())
-            .expect("pattern is malformed");
-        reg.register(expressions::cast_decimal_to_bigint())
-            .expect("pattern is malformed");
-        reg.register(expressions::cast_float_to_double())
-            .expect("pattern is malformed");
-        reg.register(expressions::where_lookup_decimal_eq_int_div_int())
-            .expect("pattern is malformed");
+        reg.register(expressions::binary_op_int_int_add())?;
+        reg.register(expressions::binary_op_int_int_subtract())?;
+        reg.register(expressions::binary_op_int_int_multiply())?;
+        reg.register(expressions::binary_op_int_int_divide())?;
+        reg.register(expressions::binary_op_int_int_modulo())?;
+        reg.register(expressions::binary_op_signed_unsigned_modulo())?;
+        reg.register(expressions::binary_op_float_double_add())?;
+        reg.register(expressions::binary_op_float_double_subtract())?;
+        reg.register(expressions::binary_op_float_double_multiply())?;
+        reg.register(expressions::binary_op_float_double_divide())?;
+        reg.register(expressions::cast_decimal_widen_to_narrow())?;
+        reg.register(expressions::cast_decimal_to_bigint())?;
+        reg.register(expressions::cast_float_to_double())?;
+        reg.register(expressions::where_lookup_decimal_eq_int_div_int())?;
 
         // Default compatibility rules
         for rule in default_rules() {
             reg.add_rule(rule);
         }
 
-        reg
+        Ok(reg)
     }
 }
 
@@ -1115,6 +987,14 @@ mod tests {
             .expect("pattern is malformed");
         assert_eq!(reg.len(), 2);
         assert!(!reg.is_empty());
+    }
+
+    /// Every default pattern registers; a malformed one is an error the registry returns, not a
+    /// panic at its own registration.
+    #[test]
+    fn every_default_pattern_registers() {
+        let reg = ConstraintRegistry::try_default_registry().expect("well-formed patterns");
+        assert_eq!(reg.len(), ConstraintRegistry::default_registry().len());
     }
 
     #[test]
