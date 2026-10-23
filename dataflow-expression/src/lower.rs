@@ -1966,6 +1966,12 @@ impl Expr {
                             DfType::VarChar(len, collation)
                         })
                     }
+                    (SqlType::Char(Some(0)), SqlEngine::PostgreSQL) => {
+                        invalid_query!("length for type char must be at least 1")
+                    }
+                    (SqlType::VarChar(Some(0)), SqlEngine::PostgreSQL) => {
+                        invalid_query!("length for type varchar must be at least 1")
+                    }
                     _ => {
                         DfType::from_sql_type(&to_type, dialect, |t| context.resolve_type(t), None)?
                     }
@@ -2517,6 +2523,39 @@ pub(crate) mod tests {
             assert_eq!(<&str>::try_from(&result).unwrap(), expected, "{cast}");
             assert_eq!(expr.ty(), &ty, "{cast}");
         }
+    }
+
+    #[test]
+    fn postgresql_cast_to_zero_length_char_rejected() {
+        let lower = |parser, dialect, cast| {
+            Expr::lower(
+                parse_expr(parser, cast).unwrap(),
+                dialect,
+                &resolve_columns(|_| Ok((0, DfType::DEFAULT_TEXT))),
+            )
+        };
+        for (cast, message) in [
+            (
+                "CAST(t.a AS CHAR(0))",
+                "length for type char must be at least 1",
+            ),
+            (
+                "CAST(t.a AS VARCHAR(0))",
+                "length for type varchar must be at least 1",
+            ),
+        ] {
+            let result = lower(ParserDialect::PostgreSQL, Dialect::DEFAULT_POSTGRESQL, cast);
+            assert!(
+                matches!(&result, Err(ReadySetError::InvalidQuery(m)) if m.ends_with(message)),
+                "{cast}: {result:?}"
+            );
+        }
+        lower(
+            ParserDialect::MySQL,
+            Dialect::DEFAULT_MYSQL,
+            "CAST(t.a AS CHAR(0))",
+        )
+        .unwrap();
     }
 
     #[test]

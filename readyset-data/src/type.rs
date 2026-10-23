@@ -6,7 +6,7 @@ use postgres_types::Type as PGType;
 use proptest::arbitrary::{any, any_with, Arbitrary};
 use proptest::prop_oneof;
 use proptest::strategy::{BoxedStrategy, Just};
-use readyset_errors::{unsupported, unsupported_err, ReadySetError, ReadySetResult};
+use readyset_errors::{invalid_query, unsupported, unsupported_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{EnumVariants, Relation, SqlIdentifier, SqlType};
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -368,6 +368,12 @@ impl DfType {
             // `varchar` by itself is an error in MySQL but synonymous with `text` in PostgreSQL.
             Text | TinyText | MediumText | LongText | VarChar(None) => {
                 Self::Text(Collation::unwrap_or_default(collation, dialect))
+            }
+            Char(Some(0)) if dialect.engine() == SqlEngine::PostgreSQL => {
+                invalid_query!("length for type char must be at least 1")
+            }
+            VarChar(Some(0)) if dialect.engine() == SqlEngine::PostgreSQL => {
+                invalid_query!("length for type varchar must be at least 1")
             }
             VarChar(Some(len)) => {
                 Self::VarChar(len, Collation::unwrap_or_default(collation, dialect))
@@ -1036,5 +1042,44 @@ mod tests {
     ) {
         DfType::from_sql_type(&sql_type, Dialect::DEFAULT_POSTGRESQL, |_| None, None)
             .expect("Unsupported type generated");
+    }
+
+    #[test]
+    fn postgres_rejects_zero_length_char_and_varchar() {
+        for ty in [SqlType::Char(Some(0)), SqlType::VarChar(Some(0))] {
+            let err = DfType::from_sql_type(&ty, Dialect::DEFAULT_POSTGRESQL, |_| None, None)
+                .unwrap_err();
+            assert!(err.is_invalid_query(), "{err:?}");
+            assert!(err.to_string().contains("must be at least 1"), "{err}");
+        }
+    }
+
+    #[test]
+    fn mysql_accepts_zero_length_char() {
+        assert_eq!(
+            DfType::from_sql_type(
+                &SqlType::Char(Some(0)),
+                Dialect::DEFAULT_MYSQL,
+                |_| None,
+                None
+            )
+            .unwrap(),
+            DfType::Char(
+                0,
+                Collation::unwrap_or_default(None, Dialect::DEFAULT_MYSQL)
+            )
+        );
+    }
+
+    #[test]
+    fn postgres_accepts_positive_char_length_and_bare_varchar() {
+        let pg = Dialect::DEFAULT_POSTGRESQL;
+        let char1 = DfType::from_sql_type(&SqlType::Char(Some(1)), pg, |_| None, None).unwrap();
+        assert_eq!(
+            char1,
+            DfType::Char(1, Collation::unwrap_or_default(None, pg))
+        );
+        let bare = DfType::from_sql_type(&SqlType::VarChar(None), pg, |_| None, None).unwrap();
+        assert_eq!(bare, DfType::Text(Collation::unwrap_or_default(None, pg)));
     }
 }
