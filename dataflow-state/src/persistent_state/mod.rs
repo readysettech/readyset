@@ -150,12 +150,48 @@ const WORKING_DIR: &str = "readyset.tmp";
 // Maximum rows per WriteBatch when building new indices for existing rows.
 const INDEX_BATCH_SIZE: usize = 10_000;
 
+/// Share of process memory used for the shared RocksDB block cache when no override is set.
+pub const BLOCK_CACHE_DEFAULT_PERCENT: u64 = 10;
+
+/// Minimum shared RocksDB block cache capacity, in bytes.
+pub const BLOCK_CACHE_FLOOR_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Maximum shared RocksDB block cache capacity, in bytes.
+pub const BLOCK_CACHE_CAP_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+
+/// Bytes of shared RocksDB block cache for `memory_bytes` at `percent` of that memory.
+///
+/// `raw` is `memory_bytes.saturating_mul(percent) / 100`. A zero memory probe returns
+/// [`BLOCK_CACHE_FLOOR_BYTES`] so a failed read never builds a 0-byte cache. Otherwise the
+/// result is `raw` clamped into `[min(floor, upper), upper]`, where
+/// `upper = min(cap, memory_bytes)`.
+pub fn block_cache_bytes_for_memory(memory_bytes: u64, percent: u64) -> usize {
+    let bytes = if memory_bytes == 0 {
+        BLOCK_CACHE_FLOOR_BYTES
+    } else {
+        let raw = memory_bytes.saturating_mul(percent) / 100;
+        let upper = BLOCK_CACHE_CAP_BYTES.min(memory_bytes);
+        let lower = BLOCK_CACHE_FLOOR_BYTES.min(upper);
+        raw.clamp(lower, upper)
+    };
+    usize::try_from(bytes).unwrap_or(usize::MAX)
+}
+
 /// Default capacity for the shared rocksdb block cache, in bytes.
 ///
-/// Sized as a starting point that works for typical deployments rather than a theoretical
-/// optimum. Override via `PersistenceParameters::block_cache_bytes`.
+/// [`BLOCK_CACHE_DEFAULT_PERCENT`] of the memory available to the process (the cgroup limit
+/// when sysinfo reports one, otherwise physical RAM — the same source as `--memory-limit`),
+/// clamped to [`BLOCK_CACHE_FLOOR_BYTES`]–[`BLOCK_CACHE_CAP_BYTES`]. The probe is cached so
+/// serde defaults and [`PersistenceParameters::default`] / [`PersistenceParameters::new`] do
+/// not re-probe. Override via `PersistenceParameters::block_cache_bytes`.
 pub(crate) fn default_block_cache_bytes() -> usize {
-    1024 * 1024 * 1024
+    static CACHED: OnceLock<usize> = OnceLock::new();
+    *CACHED.get_or_init(|| {
+        block_cache_bytes_for_memory(
+            common::host_info::host_memory_bytes(),
+            BLOCK_CACHE_DEFAULT_PERCENT,
+        )
+    })
 }
 
 /// Process-wide shared rocksdb block cache. One LRU is allocated and reused by
@@ -3070,6 +3106,50 @@ mod tests {
     use readyset_decimal::Decimal;
 
     use super::*;
+
+    #[test]
+    fn block_cache_bytes_for_memory_matches_worked_examples() {
+        const MIB: u64 = 1024 * 1024;
+        const GIB: u64 = 1024 * MIB;
+
+        assert_eq!(BLOCK_CACHE_DEFAULT_PERCENT, 10);
+        assert_eq!(BLOCK_CACHE_FLOOR_BYTES, 64 * MIB);
+        assert_eq!(BLOCK_CACHE_CAP_BYTES, 16 * GIB);
+
+        assert_eq!(block_cache_bytes_for_memory(GIB, 10), 107_374_182);
+        assert_eq!(block_cache_bytes_for_memory(2 * GIB, 10), 214_748_364);
+        assert_eq!(block_cache_bytes_for_memory(247 * GIB, 10), 17_179_869_184);
+        assert_eq!(block_cache_bytes_for_memory(256 * MIB, 10), 67_108_864);
+        assert_eq!(block_cache_bytes_for_memory(32 * MIB, 10), 33_554_432);
+        assert_eq!(block_cache_bytes_for_memory(0, 10), 67_108_864);
+        assert_eq!(block_cache_bytes_for_memory(GIB, 100), GIB as usize);
+        assert_eq!(block_cache_bytes_for_memory(247 * GIB, 100), 17_179_869_184);
+    }
+
+    #[test]
+    fn block_cache_bytes_default_and_serde_round_trip() {
+        assert_eq!(
+            PersistenceParameters::default().block_cache_bytes,
+            default_block_cache_bytes()
+        );
+        assert_eq!(
+            PersistenceParameters::new(DurabilityMode::MemoryOnly, None, None, None, 0)
+                .block_cache_bytes,
+            default_block_cache_bytes()
+        );
+
+        let mut value = serde_json::to_value(PersistenceParameters::default()).unwrap();
+        value.as_object_mut().unwrap().remove("block_cache_bytes");
+        let decoded: PersistenceParameters = serde_json::from_value(value).unwrap();
+        assert_eq!(decoded.block_cache_bytes, default_block_cache_bytes());
+
+        let explicit = 123_456_789usize;
+        let mut params = PersistenceParameters::default();
+        params.block_cache_bytes = explicit;
+        let encoded = serde_json::to_string(&params).unwrap();
+        let decoded: PersistenceParameters = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded.block_cache_bytes, explicit);
+    }
 
     // Verify new serialize_key produces identical bytes to the old implementation
     #[test]
