@@ -435,7 +435,10 @@ impl TableEntry {
     ) -> Result<String, pgsql::Error> {
         let query = "SELECT definition FROM pg_catalog.pg_views WHERE viewname=$1";
 
-        let mut create_view = format!("CREATE VIEW \"{}\" AS", self.name);
+        let mut create_view = format!(
+            "CREATE VIEW {} AS",
+            Dialect::PostgreSQL.quote_identifier(&self.name)
+        );
 
         for col in transaction.query(query, &[&self.name]).await? {
             create_view.push_str(col.try_get(0)?);
@@ -640,9 +643,9 @@ impl TableDescription {
 
         // The most efficient way to copy an entire table is COPY BINARY
         let query = format!(
-            "COPY \"{}\".\"{}\" TO stdout BINARY",
-            self.schema()?,
-            self.name.name
+            "COPY {}.{} TO stdout BINARY",
+            Dialect::PostgreSQL.quote_identifier(self.schema()?),
+            Dialect::PostgreSQL.quote_identifier(&self.name.name)
         );
         let rows = transaction.copy_out(query.as_str()).await?;
 
@@ -1314,7 +1317,11 @@ impl<'a> PostgresReplicator<'a> {
             trace!(%schema, %name, "Setting REPLICA IDENTITY FULL for table");
             get_transaction!(self)
                 .execute(
-                    &format!(r#"ALTER TABLE "{schema}"."{name}" REPLICA IDENTITY FULL"#),
+                    &format!(
+                        "ALTER TABLE {}.{} REPLICA IDENTITY FULL",
+                        Dialect::PostgreSQL.quote_identifier(&schema),
+                        Dialect::PostgreSQL.quote_identifier(&name)
+                    ),
                     &[],
                 )
                 .await?;

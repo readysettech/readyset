@@ -93,7 +93,10 @@ pub async fn load_table_list<Q: Queryable>(
     kind: TableKind,
     db: &str,
 ) -> mysql::Result<Vec<String>> {
-    let query = format!("show full tables in `{db}` where Table_Type={kind}");
+    let query = format!(
+        "show full tables in {} where Table_Type={kind}",
+        readyset_sql::Dialect::MySQL.quote_identifier(db)
+    );
     let tables_entries: Vec<(String, String)> = q.query_map(query, std::convert::identity).await?;
     Ok(tables_entries.into_iter().map(|(name, _)| name).collect())
 }
@@ -128,7 +131,12 @@ pub async fn create_for_table<Q: Queryable>(
     table_name: &str,
     kind: TableKind,
 ) -> mysql::Result<String> {
-    let query = format!("show create {} `{db}`.`{table_name}`", kind.kind());
+    let query = format!(
+        "show create {} {}.{}",
+        kind.kind(),
+        readyset_sql::Dialect::MySQL.quote_identifier(db),
+        readyset_sql::Dialect::MySQL.quote_identifier(table_name)
+    );
     match kind {
         TableKind::View => {
             // For SHOW CREATE VIEW the format is the name of the view, the create DDL,
@@ -226,7 +234,13 @@ impl MySqlReplicator<'_> {
 
         let all_tables_formatted = replicated_tables
             .iter()
-            .map(|(db, tbl)| format!("`{db}`.`{tbl}`"))
+            .map(|(db, tbl)| {
+                format!(
+                    "{}.{}",
+                    readyset_sql::Dialect::MySQL.quote_identifier(db),
+                    readyset_sql::Dialect::MySQL.quote_identifier(tbl)
+                )
+            })
             .collect::<Vec<_>>();
 
         for tables in all_tables_formatted.chunks(20) {
