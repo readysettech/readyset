@@ -44,7 +44,7 @@ pub enum Decimal {
 
 macro_rules! impl_to_from_primitive {
     ($ty:ty) => {
-        paste::paste! {
+        pastey::paste! {
             impl From<$ty> for Decimal {
                 fn from(value: $ty) -> Self {
                     // SAFETY: The conversion from primitive integer types to BigDecimal has no
@@ -93,7 +93,7 @@ impl_to_from_primitive!(usize);
 
 macro_rules! impl_to_from_float {
     ($ty:ty) => {
-        paste::paste! {
+        pastey::paste! {
             impl TryFrom<$ty> for Decimal {
                 type Error = ReadysetDecimalError;
 

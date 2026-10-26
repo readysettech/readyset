@@ -16,7 +16,7 @@ test-discovery = { path = "../test-discovery" }
 [dependencies]
 clap = { workspace = true }
 nom-sql = { path = "../nom-sql" }
-paste = { workspace = true }
+pastey = { workspace = true }
 pretty_assertions = { workspace = true }
 readyset-errors = { path = "../readyset-errors" }
 readyset-sql = { path = "../readyset-sql" }

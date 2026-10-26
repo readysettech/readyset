@@ -164,7 +164,7 @@ async fn test_aggregation_type_inner_mysql(
 }
 macro_rules! test_aggregation_type {
     (postgres, $name:ident, $expr:expr, $coltype:expr) => {
-        paste::paste! {
+        pastey::paste! {
             #[tokio::test]
             #[tags(serial, slow)]
             #[upstream(postgres)]
@@ -180,7 +180,7 @@ macro_rules! test_aggregation_type {
         }
     };
     (postgres, $name:ident, $expr:expr, $coltype:expr, [$($value:expr),+ $(,)?]) => {
-        paste::paste! {
+        pastey::paste! {
             #[tokio::test]
             #[tags(serial, slow)]
             #[upstream(postgres)]
@@ -196,7 +196,7 @@ macro_rules! test_aggregation_type {
         }
     };
     (mysql, $name:ident, $expr:expr, $coltype:expr) => {
-        paste::paste! {
+        pastey::paste! {
             #[tokio::test]
             #[tags(serial, slow)]
             #[upstream(mysql)]
@@ -212,7 +212,7 @@ macro_rules! test_aggregation_type {
         }
     };
     (mysql, $name:ident, $expr:expr, $coltype:expr, [$($value:expr),+ $(,)?]) => {
-        paste::paste! {
+        pastey::paste! {
             #[tokio::test]
             #[tags(serial, slow)]
             #[upstream(mysql)]
@@ -231,7 +231,7 @@ macro_rules! test_aggregation_type {
 
 macro_rules! test_window_aggregation_type {
     (postgres, $name:ident, $expr:expr, $coltype:expr, [$($value:expr),+ $(,)?]) => {
-        paste::paste! {
+        pastey::paste! {
             #[tokio::test]
             #[tags(serial, slow)]
             #[upstream(postgres)]
@@ -247,7 +247,7 @@ macro_rules! test_window_aggregation_type {
         }
     };
     (mysql, $name:ident, $expr:expr, $coltype:expr, [$($value:expr),+ $(,)?]) => {
-        paste::paste! {
+        pastey::paste! {
             #[tokio::test]
             #[tags(serial, slow)]
             #[upstream(mysql, modern)]

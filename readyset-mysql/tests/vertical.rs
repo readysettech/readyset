@@ -40,7 +40,7 @@ use itertools::Itertools;
 use mysql_async::prelude::Queryable;
 use mysql_async::Conn;
 use mysql_common::value::Value;
-use paste::paste;
+use pastey::paste;
 use proptest::prelude::*;
 use proptest::sample::select;
 use proptest_stateful::{

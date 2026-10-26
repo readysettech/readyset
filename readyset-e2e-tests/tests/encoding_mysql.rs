@@ -370,7 +370,7 @@ where
 
 macro_rules! test_encoding_replication {
     ($name:ident, $coltype:expr_2021, $charset:expr_2021, $range:expr_2021) => {
-        paste::paste! {
+        pastey::paste! {
             #[tokio::test]
             #[tags(serial, slow)]
             #[upstream(mysql)]
@@ -390,7 +390,7 @@ macro_rules! test_encoding_replication {
 
 macro_rules! test_encoding_replication_very_slow {
     ($name:ident, $coltype:expr_2021, $charset:expr_2021, $range:expr_2021) => {
-        paste::paste! {
+        pastey::paste! {
             #[tokio::test]
             #[tags(serial, very_slow)]
             #[upstream(mysql)]

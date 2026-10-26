@@ -305,7 +305,7 @@ macro_rules! collation_test {
 /// adapter starts) and a streaming variant (DDL through the binlog).
 macro_rules! collation_case_tests {
     ($name:ident, $column_def:expr_2021, [$($gate:tt)*] $(, $extra:meta)*) => {
-        paste::paste! {
+        pastey::paste! {
             collation_test!(
                 [<test_ $name _case_snapshot>], compare_case_ops, $column_def, CASE_ROWS, false,
                 [$($gate)*] $(, $extra)*

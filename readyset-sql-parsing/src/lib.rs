@@ -2132,7 +2132,7 @@ where
 
 macro_rules! export_parser {
     ($(#[doc = $doc:expr])+ $parser:ident, $ty:ty) => {
-        paste::paste! {
+        pastey::paste! {
             $(
                 #[doc = $doc]
             )+

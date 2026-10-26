@@ -25,7 +25,7 @@ itertools = { workspace = true }
 mysql_async = { workspace = true }
 mysql_common = { workspace = true }
 mysql-srv = { path = "../mysql-srv" }
-paste = { workspace = true }
+pastey = { workspace = true }
 postgres-protocol = { workspace = true }
 postgres-types = { workspace = true }
 pretty_assertions = { workspace = true }

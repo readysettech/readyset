@@ -48,7 +48,7 @@ readyset-util = { path = "../readyset-util" }
 
 [dev-dependencies]
 futures = { workspace = true }
-paste = { workspace = true }
+pastey = { workspace = true }
 proptest = { workspace = true }
 regex = { workspace = true }
 reqwest = { workspace = true }
