@@ -6,7 +6,7 @@ use postgres_types::Kind;
 use ps::PsqlValue;
 use ps::util::type_is_oid;
 use psql_srv as ps;
-use readyset_data::{Array, DfValue, parse_box, parse_path, parse_point};
+use readyset_data::{Array, DfValue, parse_box, parse_interval, parse_path, parse_point};
 use readyset_decimal::Decimal;
 use tokio_postgres::types::Type;
 use tracing::{error, trace};
@@ -151,6 +151,15 @@ impl TryFrom<TypedDfValue<'_>> for PsqlValue {
                         .map_err(|e| ps::Error::InternalError(e.to_string()))
                         .and_then(|s| {
                             parse_path(s).map_err(|e| ps::Error::ParseError(e.to_string()))
+                        })?,
+                ))
+            }
+            (&Type::INTERVAL, ref i @ (DfValue::Text(_) | DfValue::TinyText(_))) => {
+                Ok(PsqlValue::Interval(
+                    <&str>::try_from(i)
+                        .map_err(|e| ps::Error::InternalError(e.to_string()))
+                        .and_then(|s| {
+                            parse_interval(s).map_err(|e| ps::Error::ParseError(e.to_string()))
                         })?,
                 ))
             }

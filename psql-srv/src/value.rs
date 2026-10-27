@@ -5,6 +5,7 @@ use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use cidr::{IpCidr, IpInet};
 use eui48::MacAddress;
 use geo_types::{Point, Rect};
+use pg_interval::Interval;
 use postgres_types::{FromSql, Kind, Type};
 use readyset_data::{Array, PassThroughFormat, PostgresPath, Text, TinyText};
 use readyset_decimal::Decimal;
@@ -43,6 +44,7 @@ pub enum PsqlValue {
     VarBit(BitVec),
     Point(Point),
     Box(Rect),
+    Interval(Interval),
     Path(PostgresPath),
     Array(Array, Type),
     /// An anonymous composite (`record`) value. The second element is the composite [`Type`], whose
@@ -103,6 +105,7 @@ impl<'a> FromSql<'a> for PsqlValue {
                 Type::POINT => Point::from_sql(ty, raw).map(PsqlValue::Point),
                 Type::BOX => Rect::from_sql(ty, raw).map(PsqlValue::Box),
                 Type::PATH => PostgresPath::from_sql(ty, raw).map(PsqlValue::Path),
+                Type::INTERVAL => <Interval as FromSql>::from_sql(ty, raw).map(PsqlValue::Interval),
                 _ => Ok(PsqlValue::PassThrough(readyset_data::PassThrough {
                     ty: ty.clone(),
                     format: PassThroughFormat::Binary,

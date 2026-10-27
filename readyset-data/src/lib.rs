@@ -19,6 +19,7 @@ use eui48::{MacAddress, MacAddressFormat};
 use geo_types::{Point, Rect};
 use itertools::Itertools;
 use mysql_time::MySqlTime;
+use pg_interval::Interval;
 use postgres_types::Format;
 use readyset_decimal::Decimal;
 use readyset_errors::{internal, invalid_query_err, unsupported, ReadySetError, ReadySetResult};
@@ -44,6 +45,7 @@ pub mod encoding;
 mod r#enum;
 mod float;
 mod integer;
+mod interval;
 mod path;
 mod point;
 mod ranges;
@@ -60,6 +62,7 @@ pub use crate::array::Array;
 pub use crate::average::{AverageAccumulator, AvgScaleMode};
 pub use crate::collation::{CharsetFamily, Collation};
 pub use crate::dialect::{Dialect, SqlEngine};
+pub use crate::interval::{format_interval, parse_interval};
 pub use crate::path::{format_path, parse_path, PostgresPath};
 pub use crate::point::{format_point, parse_point};
 pub use crate::r#box::{format_box, parse_box};
@@ -2106,6 +2109,9 @@ impl ToSql for DfValue {
             (Self::Text(_) | Self::TinyText(_), &Type::PATH) => {
                 parse_path(<&str>::try_from(self)?)?.to_sql(ty, out)
             }
+            (Self::Text(_) | Self::TinyText(_), &Type::INTERVAL) => {
+                ToSql::to_sql(&parse_interval(<&str>::try_from(self)?)?, ty, out)
+            }
             (Self::Text(_) | Self::TinyText(_), _) => {
                 <&str>::try_from(self).unwrap().to_sql(ty, out)
             }
@@ -2242,6 +2248,9 @@ impl<'a> FromSql<'a> for DfValue {
                 Type::PATH => Ok(DfValue::from(format_path(&PostgresPath::from_sql(
                     ty, raw,
                 )?))),
+                Type::INTERVAL => Ok(DfValue::from(format_interval(
+                    &<Interval as FromSql>::from_sql(ty, raw)?,
+                ))),
                 // we intentionally throw away the tsvector data.
                 Type::TS_VECTOR => Ok(DfValue::None),
                 ref ty if ty.name() == "citext" => Ok(DfValue::from_str_and_collation(

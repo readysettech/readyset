@@ -5330,6 +5330,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pg_interval"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8408fb1e08ebf2e7676d001caa6482d1b33e7e1f1dad9d3a758a05640eea2026"
+dependencies = [
+ "bytes",
+ "chrono",
+ "postgres-types",
+]
+
+[[package]]
 name = "phf"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5787,6 +5798,7 @@ dependencies = [
  "hex",
  "hmac",
  "nom 7.1.3",
+ "pg_interval",
  "postgres",
  "postgres-native-tls",
  "postgres-protocol",
@@ -6485,6 +6497,7 @@ dependencies = [
  "nom-sql",
  "nom_locate",
  "once_cell",
+ "pg_interval",
  "postgres-protocol",
  "postgres-types",
  "proptest",
@@ -6877,6 +6890,7 @@ dependencies = [
  "metric",
  "metrics",
  "native-tls",
+ "pg_interval",
  "postgres-native-tls",
  "postgres-types",
  "pretty_assertions",

@@ -25,6 +25,7 @@ mod types {
     use cidr::{IpCidr, IpInet};
     use eui48::MacAddress;
     use geo_types::{Point, Rect};
+    use pg_interval::Interval;
     use proptest::collection::vec;
     use proptest::prelude::*;
     use proptest::string::string_regex;
@@ -203,6 +204,8 @@ mod types {
         box_builtin("box", Rect, arbitrary_postgres_box());
         path_builtin("path", PostgresPath, (any::<bool>(), vec(arbitrary_postgres_point(), 1..10))
             .prop_map(|(closed, points)| PostgresPath { closed, points: points.into() }));
+        interval_builtin("interval", Interval, any::<(i32, i32, i64)>()
+            .prop_map(|(months, days, microseconds)| Interval::new(months, days, microseconds)));
         timestamp_tz_datetime("timestamp with time zone", chrono::DateTime::<chrono::FixedOffset>, arbitrary_date_time());
         text_array("text[]", Vec<String>);
     }

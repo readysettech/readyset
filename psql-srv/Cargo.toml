@@ -27,6 +27,7 @@ geo-types = { workspace = true }
 hex = { workspace = true }
 hmac = { workspace = true }
 nom = { workspace = true }
+pg_interval = { workspace = true }
 postgres = { workspace = true }
 postgres-protocol = { workspace = true }
 postgres-types = { workspace = true, features = [

@@ -65,6 +65,7 @@ readyset-util = { path = "../readyset-util" }
 chrono = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio"] }
 geo-types = { workspace = true }
+pg_interval = { workspace = true }
 pretty_assertions = { workspace = true }
 proptest = { workspace = true }
 regex = { workspace = true }

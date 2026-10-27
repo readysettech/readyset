@@ -6,7 +6,7 @@ use geo_types::{Point, Rect};
 use postgres::error::ErrorPosition;
 use postgres_protocol::types::box_to_sql;
 use postgres_types::{Kind, ToSql, Type};
-use readyset_data::PostgresPath;
+use readyset_data::{format_interval, PostgresPath};
 use readyset_util::fmt::FastEncode;
 use tokio_util::codec::Encoder;
 
@@ -626,6 +626,9 @@ fn put_binary_value(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
         PsqlValue::Path(path) => {
             path.to_sql(&Type::PATH, dst)?;
         }
+        PsqlValue::Interval(interval) => {
+            ToSql::to_sql(interval, &Type::INTERVAL, dst)?;
+        }
         PsqlValue::Array(arr, ty) => {
             arr.to_sql(ty, dst)?;
         }
@@ -753,6 +756,7 @@ fn put_text_payload(val: &PsqlValue, dst: &mut BytesMut) -> Result<(), Error> {
         PsqlValue::Point(point) => write_point(point, dst)?,
         PsqlValue::Box(rect) => write_box(rect, dst)?,
         PsqlValue::Path(path) => write_path(path, dst)?,
+        PsqlValue::Interval(interval) => dst.put_slice(format_interval(interval).as_bytes()),
         PsqlValue::Array(arr, _) => write!(dst, "{arr}")?,
         PsqlValue::Row(fields, _) => put_record_text(fields, dst)?,
         PsqlValue::PassThrough(p) => {

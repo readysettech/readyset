@@ -8,10 +8,11 @@ use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZon
 use cidr::{IpCidr, IpInet};
 use eui48::MacAddress;
 use geo_types::{Point, Rect};
+use pg_interval::Interval;
 use postgres_types::{FromSql, Kind, Type};
 use readyset_data::{
-    parse_box, parse_path, parse_point, Array, Collation, PassThroughFormat, PostgresPath,
-    DATE_FORMAT, ISO_TIMESTAMP_PARSE_FORMAT, TIMESTAMP_PARSE_FORMAT,
+    parse_box, parse_interval, parse_path, parse_point, Array, Collation, PassThroughFormat,
+    PostgresPath, DATE_FORMAT, ISO_TIMESTAMP_PARSE_FORMAT, TIMESTAMP_PARSE_FORMAT,
 };
 use readyset_decimal::Decimal;
 use tokio_util::codec::Decoder;
@@ -442,6 +443,9 @@ fn get_binary_value(src: &mut Bytes, t: &Type) -> Result<PsqlValue, Error> {
             Type::POINT => Ok(PsqlValue::Point(Point::from_sql(t, buf)?)),
             Type::BOX => Ok(PsqlValue::Box(Rect::from_sql(t, buf)?)),
             Type::PATH => Ok(PsqlValue::Path(PostgresPath::from_sql(t, buf)?)),
+            Type::INTERVAL => Ok(PsqlValue::Interval(<Interval as FromSql>::from_sql(
+                t, buf,
+            )?)),
             ref t if t.name() == "citext" => Ok(PsqlValue::Text(
                 readyset_data::Text::from_str_with_collation(
                     <&str>::from_sql(t, buf)?,
@@ -598,6 +602,9 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<PsqlValue, Error> {
         Type::PATH => parse_path(text_str)
             .map_err(|_| DecodeError::InvalidTextPathValue(text_str.to_owned()))
             .map(PsqlValue::Path),
+        Type::INTERVAL => parse_interval(text_str)
+            .map_err(|_| DecodeError::InvalidTextIntervalValue(text_str.to_owned()))
+            .map(PsqlValue::Interval),
         ref t if matches!(t.kind(), Kind::Array(_)) => {
             let inner_t = match t.kind() {
                 Kind::Array(inner_t) => inner_t.clone(),
