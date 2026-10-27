@@ -102,7 +102,7 @@ pub fn commit(d: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult<&[u8], 
             ))(i)?,
         };
 
-        Ok((remaining_input, CommitStatement))
+        Ok((remaining_input, CommitStatement::default()))
     }
 }
 
@@ -131,6 +131,7 @@ pub fn rollback(
         Ok((
             i,
             RollbackStatement {
+                chain: false,
                 savepoint: savepoint.map(|(.., name)| name),
             },
         ))
@@ -183,12 +184,12 @@ mod tests {
         let qstring = "    COMMIT";
 
         let res = commit(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
-        assert_eq!(res.unwrap().1, CommitStatement,);
+        assert_eq!(res.unwrap().1, CommitStatement::default(),);
 
         let qstring = "    COMMIT       WORK   ";
 
         let res = commit(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
-        assert_eq!(res.unwrap().1, CommitStatement,);
+        assert_eq!(res.unwrap().1, CommitStatement::default(),);
     }
 
     #[test]
@@ -196,32 +197,32 @@ mod tests {
         let qstring = "    COMMIT";
 
         let res = commit(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
-        assert_eq!(res.unwrap().1, CommitStatement,);
+        assert_eq!(res.unwrap().1, CommitStatement::default(),);
 
         let qstring = "    COMMIT       WORK   ";
 
         let res = commit(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
-        assert_eq!(res.unwrap().1, CommitStatement,);
+        assert_eq!(res.unwrap().1, CommitStatement::default(),);
 
         let qstring = "    COMMIT       TRANSACTION   ";
 
         let res = commit(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
-        assert_eq!(res.unwrap().1, CommitStatement,);
+        assert_eq!(res.unwrap().1, CommitStatement::default(),);
 
         let qstring = "    END";
 
         let res = commit(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
-        assert_eq!(res.unwrap().1, CommitStatement,);
+        assert_eq!(res.unwrap().1, CommitStatement::default(),);
 
         let qstring = "    END       WORK   ";
 
         let res = commit(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
-        assert_eq!(res.unwrap().1, CommitStatement,);
+        assert_eq!(res.unwrap().1, CommitStatement::default(),);
 
         let qstring = "    END       TRANSACTION   ";
 
         let res = commit(Dialect::PostgreSQL)(LocatedSpan::new(qstring.as_bytes()));
-        assert_eq!(res.unwrap().1, CommitStatement,);
+        assert_eq!(res.unwrap().1, CommitStatement::default(),);
     }
 
     #[test]
@@ -229,12 +230,12 @@ mod tests {
         let qstring = "    ROLLBACK ";
 
         let res = rollback(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
-        assert_eq!(res.unwrap().1, RollbackStatement { savepoint: None });
+        assert_eq!(res.unwrap().1, RollbackStatement::default());
 
         let qstring = "    ROLLBACK       WORK   ";
 
         let res = rollback(Dialect::MySQL)(LocatedSpan::new(qstring.as_bytes()));
-        assert_eq!(res.unwrap().1, RollbackStatement { savepoint: None });
+        assert_eq!(res.unwrap().1, RollbackStatement::default());
     }
 
     #[test]
@@ -245,6 +246,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             RollbackStatement {
+                chain: false,
                 savepoint: Some("sp1".into())
             }
         );
@@ -255,6 +257,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             RollbackStatement {
+                chain: false,
                 savepoint: Some("sp1".into())
             }
         );
@@ -265,6 +268,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             RollbackStatement {
+                chain: false,
                 savepoint: Some("sp1".into())
             }
         );
@@ -275,6 +279,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             RollbackStatement {
+                chain: false,
                 savepoint: Some("sp1".into())
             }
         );
@@ -288,6 +293,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             RollbackStatement {
+                chain: false,
                 savepoint: Some("my-savepoint".into())
             }
         );
@@ -298,6 +304,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             RollbackStatement {
+                chain: false,
                 savepoint: Some("my savepoint".into())
             }
         );
@@ -308,6 +315,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             RollbackStatement {
+                chain: false,
                 savepoint: Some("My-Savepoint".into())
             }
         );
@@ -318,6 +326,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             RollbackStatement {
+                chain: false,
                 savepoint: Some("MyMixedCase".into())
             }
         );
@@ -331,6 +340,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             RollbackStatement {
+                chain: false,
                 savepoint: Some("select".into())
             }
         );
@@ -341,6 +351,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             RollbackStatement {
+                chain: false,
                 savepoint: Some("select".into())
             }
         );
@@ -354,6 +365,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             RollbackStatement {
+                chain: false,
                 savepoint: Some("mymixedcase".into())
             }
         );
@@ -364,6 +376,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             RollbackStatement {
+                chain: false,
                 savepoint: Some("MyMixedCase".into())
             }
         );

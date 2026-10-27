@@ -25,16 +25,25 @@ impl fmt::Display for StartTransactionStatement {
 }
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
-pub struct CommitStatement;
+pub struct CommitStatement {
+    /// Whether this is COMMIT AND CHAIN, which starts a new transaction once this one ends.
+    pub chain: bool,
+}
 
 impl fmt::Display for CommitStatement {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "COMMIT")
+        write!(f, "COMMIT")?;
+        if self.chain {
+            write!(f, " AND CHAIN")?;
+        }
+        Ok(())
     }
 }
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub struct RollbackStatement {
+    /// Whether this is ROLLBACK AND CHAIN, which starts a new transaction once this one ends.
+    pub chain: bool,
     /// If present, this is a ROLLBACK TO SAVEPOINT statement, which does NOT end the transaction.
     pub savepoint: Option<SqlIdentifier>,
 }
@@ -51,6 +60,9 @@ impl DialectDisplay for RollbackStatement {
     fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
         fmt_with(move |f| {
             write!(f, "ROLLBACK")?;
+            if self.chain {
+                write!(f, " AND CHAIN")?;
+            }
             if let Some(savepoint) = &self.savepoint {
                 write!(f, " TO SAVEPOINT {}", dialect.quote_identifier(savepoint))?;
             }
@@ -98,6 +110,7 @@ mod tests {
     fn rollback_display_quotes_identifiers() {
         // Simple savepoint name
         let stmt = RollbackStatement {
+            chain: false,
             savepoint: Some("sp1".into()),
         };
         assert_eq!(
@@ -111,6 +124,7 @@ mod tests {
 
         // Savepoint name with special characters
         let stmt = RollbackStatement {
+            chain: false,
             savepoint: Some("my-savepoint".into()),
         };
         assert_eq!(
@@ -124,6 +138,7 @@ mod tests {
 
         // Reserved keyword as savepoint name
         let stmt = RollbackStatement {
+            chain: false,
             savepoint: Some("select".into()),
         };
         assert_eq!(
@@ -136,8 +151,26 @@ mod tests {
         );
 
         // No savepoint (plain ROLLBACK)
-        let stmt = RollbackStatement { savepoint: None };
+        let stmt = RollbackStatement::default();
         assert_eq!(stmt.display(Dialect::MySQL).to_string(), "ROLLBACK");
         assert_eq!(stmt.display(Dialect::PostgreSQL).to_string(), "ROLLBACK");
+    }
+
+    #[test]
+    fn chain_display() {
+        assert_eq!(CommitStatement::default().to_string(), "COMMIT");
+        assert_eq!(
+            CommitStatement { chain: true }.to_string(),
+            "COMMIT AND CHAIN"
+        );
+
+        let stmt = RollbackStatement {
+            chain: true,
+            savepoint: None,
+        };
+        assert_eq!(
+            stmt.display(Dialect::PostgreSQL).to_string(),
+            "ROLLBACK AND CHAIN"
+        );
     }
 }

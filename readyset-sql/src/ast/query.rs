@@ -232,10 +232,11 @@ impl TryFromDialect<sqlparser::ast::Statement> for SqlQuery {
                 StartTransactionStatement::Start
             })),
             CreateType { .. } => Err(AstConversionError::Skipped(format!("CREATE TYPE: {value}"))),
-            Rollback { savepoint, .. } => Ok(Self::Rollback(RollbackStatement {
+            Rollback { chain, savepoint } => Ok(Self::Rollback(RollbackStatement {
+                chain,
                 savepoint: savepoint.map(|ident| SqlIdentifier::from(ident.value)),
             })),
-            Commit { .. } => Ok(Self::Commit(CommitStatement {})),
+            Commit { chain, .. } => Ok(Self::Commit(CommitStatement { chain })),
             Savepoint { name } => Ok(Self::Savepoint(SavepointStatement {
                 name: name.value.into(),
             })),

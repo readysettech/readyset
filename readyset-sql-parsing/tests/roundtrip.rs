@@ -379,3 +379,34 @@ fn savepoint_and_release() {
         assert_eq!(name, "sp1", "{dialect:?}: {sql}");
     }
 }
+
+#[test]
+fn commit_and_rollback_chain() {
+    check_rt_mysql_sqlparser!("COMMIT AND CHAIN");
+    check_rt_postgres_sqlparser!("COMMIT AND CHAIN");
+    check_rt_mysql_sqlparser!("ROLLBACK AND CHAIN");
+    check_rt_postgres_sqlparser!("ROLLBACK AND CHAIN");
+
+    for (dialect, sql, expected) in [
+        (Dialect::MySQL, "COMMIT", false),
+        (Dialect::MySQL, "COMMIT AND CHAIN", true),
+        (Dialect::MySQL, "COMMIT WORK AND CHAIN", true),
+        (Dialect::MySQL, "COMMIT AND NO CHAIN", false),
+        (Dialect::MySQL, "ROLLBACK", false),
+        (Dialect::MySQL, "ROLLBACK AND CHAIN", true),
+        (Dialect::MySQL, "ROLLBACK AND NO CHAIN", false),
+        (Dialect::PostgreSQL, "COMMIT AND CHAIN", true),
+        (Dialect::PostgreSQL, "COMMIT TRANSACTION AND CHAIN", true),
+        (Dialect::PostgreSQL, "END AND CHAIN", true),
+        (Dialect::PostgreSQL, "COMMIT AND NO CHAIN", false),
+        (Dialect::PostgreSQL, "ROLLBACK AND CHAIN", true),
+        (Dialect::PostgreSQL, "ROLLBACK AND NO CHAIN", false),
+    ] {
+        let chain = match parse_query_with_config(ParsingPreset::OnlySqlparser, dialect, sql) {
+            Ok(SqlQuery::Commit(stmt)) => stmt.chain,
+            Ok(SqlQuery::Rollback(stmt)) => stmt.chain,
+            other => panic!("{sql} parsed as {other:?}"),
+        };
+        assert_eq!(chain, expected, "{dialect:?}: {sql}");
+    }
+}
