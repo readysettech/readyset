@@ -51,7 +51,9 @@ use replication_offset::mysql::MySqlPosition;
 use replication_offset::{GtidEvent, GtidSet, GtidSource, ReplicationOffset};
 use uuid::Uuid;
 
-use crate::mysql_connector::utils::{mysql_pad_binary_column, mysql_pad_char_column};
+use crate::mysql_connector::utils::{
+    mysql_json_print, mysql_pad_binary_column, mysql_pad_char_column,
+};
 use crate::noria_adapter::{Connector, ReplicationAction};
 use crate::table_filter::TableFilter;
 
@@ -2427,9 +2429,11 @@ fn temporal_packed_from_binary(data: &[u8]) -> i64 {
     }
 }
 
-fn mysql_common_value_to_json_string(val: &Value) -> String {
+fn mysql_common_value_to_json_string(val: &Value, kind: ColumnType) -> String {
     match *val {
-        Value::Date(y, m, d, 0, 0, 0, 0) => format!("\"{y:04}-{m:02}-{d:02}\""),
+        Value::Date(y, m, d, ..) if kind == ColumnType::MYSQL_TYPE_DATE => {
+            format!("\"{y:04}-{m:02}-{d:02}\"")
+        }
         Value::Date(year, month, day, hour, minute, second, micros) => format!(
             "\"{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02}.{micros:06}\""
         ),
@@ -2447,11 +2451,12 @@ fn mysql_common_value_to_json_string(val: &Value) -> String {
 
 fn binary_temporal_to_serde_value(
     data: &[u8],
+    kind: ColumnType,
     temporal_from_packed_func: fn(i64) -> Value,
 ) -> ReadySetResult<serde_json::Value> {
     let packed = temporal_packed_from_binary(data);
     let val = temporal_from_packed_func(packed);
-    string_to_serde_value(&mysql_common_value_to_json_string(&val)[..])
+    string_to_serde_value(&mysql_common_value_to_json_string(&val, kind)[..])
 }
 
 fn binlog_opaque_to_serde_value(v: &OpaqueValue) -> ReadySetResult<serde_json::Value> {
@@ -2467,15 +2472,19 @@ fn binlog_opaque_to_serde_value(v: &OpaqueValue) -> ReadySetResult<serde_json::V
             string_to_serde_value(&decimal.to_string())
         }
 
-        ColumnType::MYSQL_TYPE_TIME => {
-            binary_temporal_to_serde_value(v.data_raw(), binlog::misc::time_from_packed)
-        }
+        ColumnType::MYSQL_TYPE_TIME => binary_temporal_to_serde_value(
+            v.data_raw(),
+            v.value_type(),
+            binlog::misc::time_from_packed,
+        ),
 
         ColumnType::MYSQL_TYPE_DATETIME
         | ColumnType::MYSQL_TYPE_TIMESTAMP
-        | ColumnType::MYSQL_TYPE_DATE => {
-            binary_temporal_to_serde_value(v.data_raw(), binlog::misc::datetime_from_packed)
-        }
+        | ColumnType::MYSQL_TYPE_DATE => binary_temporal_to_serde_value(
+            v.data_raw(),
+            v.value_type(),
+            binlog::misc::datetime_from_packed,
+        ),
 
         _ => Err(unsupported_err!(
             "Can not handle opaque value for column type {:?}",
@@ -2551,10 +2560,11 @@ fn binlog_row_to_noria_row(
                 BinlogValue::Jsonb(val) => {
                     let json: Result<serde_json::Value, _> = val.clone().try_into(); // urgh no TryFrom impl
                     match json {
-                        Ok(val) => Ok(DfValue::from(&val)),
-                        Err(JsonbToJsonError::Opaque) => {
-                            Ok(DfValue::from(&binlog_to_serde_jsonb_value(val)?))
-                        }
+                        Ok(val) => mysql_json_print(&val).map(DfValue::from),
+                        Err(JsonbToJsonError::Opaque) => mysql_json_print(
+                            &binlog_to_serde_jsonb_value(val)?,
+                        )
+                        .map(DfValue::from),
                         Err(JsonbToJsonError::InvalidUtf8(e)) => Err(e.into()),
                         Err(JsonbToJsonError::InvalidJsonb(e)) => Err(e.into()),
                     }
