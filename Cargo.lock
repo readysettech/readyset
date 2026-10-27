@@ -7442,6 +7442,7 @@ dependencies = [
  "futures",
  "hex",
  "itertools 0.15.0",
+ "itoa",
  "metric",
  "metrics",
  "mysql-srv",

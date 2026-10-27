@@ -3,7 +3,7 @@ use mysql_common::collations::{Collation as MyCollation, CollationId};
 use readyset_data::encoding::Encoding;
 use readyset_data::{Collation as RsCollation, DfValue, Dialect};
 use readyset_errors::{internal, replication_failed, replication_failed_err, ReadySetResult};
-use serde_json::Value as JsonValue;
+use std::io::Write as _;
 use std::sync::Arc;
 
 //TODO(marce): Make this a configuration parameter or dynamically adjust based on the table size
@@ -109,99 +109,88 @@ pub fn parse_mysql_version(version: &str) -> mysql_async::Result<u32> {
     Ok(major * 10000 + minor * 100 + patch)
 }
 
-/// Format a double the way MySQL renders one inside a JSON value: `my_gcvt()` with the widest
+/// Write a double the way MySQL renders one inside a JSON value: `my_gcvt()` with the widest
 /// field width, plus a trailing `.0` when the result reads as an integer.
-pub(crate) fn mysql_json_double(x: f64) -> String {
+pub(crate) fn write_mysql_json_double(out: &mut String, x: f64) {
     // `my_gcvt()` keeps fixed notation while the decimal point lands within `DBL_DIG` places
     // of the first digit, or while some digit falls after it.
     const MAX_DECPT_FOR_F_FORMAT: i32 = 15;
 
-    // LowerExp prints the shortest digits that round-trip, as `dtoa()` does for `my_gcvt()`.
-    let sci = format!("{x:e}");
+    // LowerExp prints the shortest digits that round-trip, as `dtoa()` does for `my_gcvt()`, and
+    // its exponent form (`1.5e-7`, `1e15`) is the one MySQL uses. The longest f64 output,
+    // `-2.2250738585072014e-308`, fits in the buffer.
+    let mut buf = [0u8; 32];
+    let mut cursor = std::io::Cursor::new(&mut buf[..]);
+    write!(cursor, "{:e}", x.abs()).expect("LowerExp output fits in 32 bytes");
+    let len = cursor.position() as usize;
+    let sci = str::from_utf8(&buf[..len]).expect("LowerExp output is ASCII");
     let (mantissa, exp) = sci
         .split_once('e')
         .expect("LowerExp output has an exponent");
     let exp: i32 = exp.parse().expect("LowerExp exponent is an integer");
-    let (sign, mantissa) = match mantissa.strip_prefix('-') {
-        Some(m) => ("-", m),
-        None => ("", mantissa),
-    };
-    let digits = mantissa.replacen('.', "", 1);
-    let len = digits.len() as i32;
+    // `-0.0` keeps its sign, as in MySQL.
+    if x.is_sign_negative() {
+        out.push('-');
+    }
+
+    let digits = || mantissa.chars().filter(|c| *c != '.');
+    let len = digits().count() as i32;
     // Position of the decimal point relative to the first digit, as `dtoa()` reports it.
     let decpt = exp + 1;
+    let zeros = |out: &mut String, n: i32| out.extend(std::iter::repeat_n('0', n as usize));
 
     if decpt >= 1 - MAX_DECPT_FOR_F_FORMAT && (decpt <= MAX_DECPT_FOR_F_FORMAT || len > decpt) {
         if decpt <= 0 {
-            format!("{sign}0.{}{digits}", "0".repeat(-decpt as usize))
-        } else if decpt < len {
-            let (int, frac) = digits.split_at(decpt as usize);
-            format!("{sign}{int}.{frac}")
+            out.push_str("0.");
+            zeros(out, -decpt);
+            out.extend(digits());
         } else {
-            format!("{sign}{digits}{}.0", "0".repeat((decpt - len) as usize))
+            for (i, d) in digits().enumerate() {
+                if i as i32 == decpt {
+                    out.push('.');
+                }
+                out.push(d);
+            }
+            if decpt >= len {
+                zeros(out, decpt - len);
+                out.push_str(".0");
+            }
         }
     } else {
-        format!("{sign}{mantissa}e{exp}")
+        out.push_str(sci);
     }
 }
 
-/// Format JSON the same way MySQL renders a JSON column in a result set.
-pub(crate) fn mysql_json_print(json: &JsonValue) -> ReadySetResult<String> {
-    fn write_json_string(output: &mut String, string: &str) -> ReadySetResult<()> {
-        output.push_str(&serde_json::to_string(string)?);
-        Ok(())
-    }
-
-    fn write_json(output: &mut String, json: &JsonValue) -> ReadySetResult<()> {
-        match json {
-            JsonValue::Object(object) => {
-                let mut fields = object.iter().collect::<Vec<_>>();
-                fields.sort_unstable_by(|(left, _), (right, _)| {
-                    left.len()
-                        .cmp(&right.len())
-                        .then_with(|| left.as_bytes().cmp(right.as_bytes()))
-                });
-
-                output.push('{');
-                for (index, (key, value)) in fields.into_iter().enumerate() {
-                    if index != 0 {
-                        output.push_str(", ");
-                    }
-                    write_json_string(output, key)?;
-                    output.push_str(": ");
-                    write_json(output, value)?;
-                }
-                output.push('}');
-            }
-            JsonValue::Array(array) => {
-                output.push('[');
-                for (index, value) in array.iter().enumerate() {
-                    if index != 0 {
-                        output.push_str(", ");
-                    }
-                    write_json(output, value)?;
-                }
-                output.push(']');
-            }
-            JsonValue::String(string) => write_json_string(output, string)?,
-            // serde_json stores a positive exponent as `e+N`, where MySQL writes `eN`.
-            JsonValue::Number(number) => match number.as_str().split_once("e+") {
-                Some((mantissa, exp)) => {
-                    output.push_str(mantissa);
-                    output.push('e');
-                    output.push_str(exp);
-                }
-                None => output.push_str(number.as_str()),
-            },
-            JsonValue::Bool(boolean) => output.push_str(if *boolean { "true" } else { "false" }),
-            JsonValue::Null => output.push_str("null"),
+/// Write `s` as a JSON string literal escaped the way MySQL escapes it.
+pub(crate) fn write_mysql_json_string(out: &mut String, s: &str) {
+    out.push('"');
+    let mut start = 0;
+    for (i, b) in s.bytes().enumerate() {
+        let escape = match b {
+            b'"' => "\\\"",
+            b'\\' => "\\\\",
+            b'\n' => "\\n",
+            b'\r' => "\\r",
+            b'\t' => "\\t",
+            0x08 => "\\b",
+            0x0c => "\\f",
+            0x00..=0x1f => "",
+            _ => continue,
+        };
+        // Escaped bytes are ASCII, so `i` is always a char boundary.
+        out.push_str(&s[start..i]);
+        if escape.is_empty() {
+            const HEX: &[u8; 16] = b"0123456789abcdef";
+            out.push_str("\\u00");
+            out.push(HEX[usize::from(b >> 4)].into());
+            out.push(HEX[usize::from(b & 0xf)].into());
+        } else {
+            out.push_str(escape);
         }
-        Ok(())
+        start = i + 1;
     }
-
-    let mut output = String::with_capacity(64);
-    write_json(&mut output, json)?;
-    Ok(output)
+    out.push_str(&s[start..]);
+    out.push('"');
 }
 
 /// Get MySQL Server Version
@@ -231,30 +220,6 @@ mod tests {
     }
 
     #[test]
-    fn mysql_json_print_matches_mysql_key_order_and_spacing() {
-        let json = serde_json::json!({
-            "zeta": 1,
-            "alpha": 2,
-            "middle": {
-                "z": 1,
-                "a": 2,
-                "m": 3
-            },
-            "numeric": {
-                "10": "ten",
-                "2": "two",
-                "1": "one",
-                "20": "twenty"
-            }
-        });
-
-        assert_eq!(
-            mysql_json_print(&json).unwrap(),
-            r#"{"zeta": 1, "alpha": 2, "middle": {"a": 2, "m": 3, "z": 1}, "numeric": {"1": "one", "2": "two", "10": "ten", "20": "twenty"}}"#
-        );
-    }
-
-    #[test]
     fn mysql_json_double_matches_mysql() {
         // Expected strings are MySQL 8.4 output for `JSON_ARRAY()` of each value as a DOUBLE.
         let cases = [
@@ -276,19 +241,17 @@ mod tests {
             (1e100, "1e100"),
         ];
         for (x, expected) in cases {
-            assert_eq!(mysql_json_double(x), expected, "{x:e}");
+            let mut out = String::new();
+            write_mysql_json_double(&mut out, x);
+            assert_eq!(out, expected, "{x:e}");
         }
     }
 
     #[test]
-    fn mysql_json_print_escapes_strings() {
-        let json = serde_json::json!({
-            "quote\"": "line\nslash\\tab\t"
-        });
-
-        assert_eq!(
-            mysql_json_print(&json).unwrap(),
-            r#"{"quote\"": "line\nslash\\tab\t"}"#
-        );
+    fn write_mysql_json_string_matches_mysql() {
+        // Expected string is MySQL 8.4 output for the same characters in `JSON_ARRAY()`.
+        let mut out = String::new();
+        write_mysql_json_string(&mut out, "a\u{1f}\u{1}\u{7f}/\u{8}\u{c}\n\r\t\"\\é");
+        assert_eq!(out, "\"a\\u001f\\u0001\u{7f}/\\b\\f\\n\\r\\t\\\"\\\\é\"");
     }
 }

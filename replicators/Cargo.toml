@@ -25,6 +25,7 @@ fail = { workspace = true, optional = true }
 futures = { workspace = true }
 hex = { workspace = true }
 itertools = { workspace = true }
+itoa = { workspace = true }
 metrics = { workspace = true }
 mysql_async = { workspace = true }
 mysql_common = { workspace = true, features = ["binlog"] }

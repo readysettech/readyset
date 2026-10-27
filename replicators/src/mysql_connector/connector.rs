@@ -1,6 +1,7 @@
 use core::str;
 use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
+use std::fmt::Write as _;
 use std::str::FromStr as _;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -30,7 +31,6 @@ use readyset_decimal::Decimal;
 use readyset_sql_parsing::{parse_query_with_config, ParsingConfig, ParsingPreset};
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
-use serde_json::Map;
 use tokio::time::timeout;
 use tracing::{debug, error, info, trace, warn};
 
@@ -52,7 +52,8 @@ use replication_offset::{GtidEvent, GtidSet, GtidSource, ReplicationOffset};
 use uuid::Uuid;
 
 use crate::mysql_connector::utils::{
-    mysql_json_double, mysql_json_print, mysql_pad_binary_column, mysql_pad_char_column,
+    mysql_pad_binary_column, mysql_pad_char_column, write_mysql_json_double,
+    write_mysql_json_string,
 };
 use crate::noria_adapter::{Connector, ReplicationAction};
 use crate::table_filter::TableFilter;
@@ -2338,35 +2339,41 @@ fn binlog_val_to_noria_val(
     }
 }
 
-fn binlog_to_serde_object<T>(v: &ComplexValue<T, Object>) -> ReadySetResult<serde_json::Value>
+fn write_binlog_json_object<T>(out: &mut String, v: &ComplexValue<T, Object>) -> ReadySetResult<()>
 where
     T: StorageFormat,
 {
-    let mut serde_map: Map<String, serde_json::value::Value> =
-        Map::with_capacity(v.element_count() as usize);
-    for e in v.iter() {
+    // Binary JSON keeps keys sorted the way MySQL prints them (by length, then bytewise), since
+    // MySQL binary-searches them, so iteration order is already the output order.
+    out.push('{');
+    for (i, e) in v.iter().enumerate() {
         let (key, val) = e?;
         let key = str::from_utf8(key.value_raw())
             .map_err(|e| internal_err!("Invalid UTF-8 in JSON key: {e}"))?;
-        serde_map.insert(key.into(), binlog_to_serde_jsonb_value(&val)?);
+        if i != 0 {
+            out.push_str(", ");
+        }
+        write_mysql_json_string(out, key);
+        out.push_str(": ");
+        write_binlog_json(out, &val)?;
     }
-    Ok(serde_json::Value::Object(serde_map))
+    out.push('}');
+    Ok(())
 }
 
-fn binlog_to_serde_array<T>(v: &ComplexValue<T, Array>) -> ReadySetResult<serde_json::Value>
+fn write_binlog_json_array<T>(out: &mut String, v: &ComplexValue<T, Array>) -> ReadySetResult<()>
 where
     T: StorageFormat,
 {
-    let mut serde_array: Vec<serde_json::value::Value> =
-        Vec::with_capacity(v.element_count() as usize);
-    for e in v.iter() {
-        serde_array.push(binlog_to_serde_jsonb_value(&e?)?);
+    out.push('[');
+    for (i, e) in v.iter().enumerate() {
+        if i != 0 {
+            out.push_str(", ");
+        }
+        write_binlog_json(out, &e?)?;
     }
-    Ok(serde_json::Value::Array(serde_array))
-}
-
-fn string_to_serde_value(s: &str) -> ReadySetResult<serde_json::Value> {
-    serde_json::from_str::<serde_json::Value>(s).map_err(|e| internal_err!("{e}"))
+    out.push(']');
+    Ok(())
 }
 
 fn slice_to_8bytes_array(data: &[u8]) -> [u8; 8] {
@@ -2451,17 +2458,17 @@ fn mysql_common_value_to_json_string(val: &Value, kind: ColumnType) -> String {
     }
 }
 
-fn binary_temporal_to_serde_value(
+fn binary_temporal_to_json_string(
     data: &[u8],
     kind: ColumnType,
     temporal_from_packed_func: fn(i64) -> Value,
-) -> ReadySetResult<serde_json::Value> {
+) -> String {
     let packed = temporal_packed_from_binary(data);
     let val = temporal_from_packed_func(packed);
-    string_to_serde_value(&mysql_common_value_to_json_string(&val, kind)[..])
+    mysql_common_value_to_json_string(&val, kind)
 }
 
-fn binlog_opaque_to_serde_value(v: &OpaqueValue) -> ReadySetResult<serde_json::Value> {
+fn write_binlog_json_opaque(out: &mut String, v: &OpaqueValue) -> ReadySetResult<()> {
     match v.value_type() {
         ColumnType::MYSQL_TYPE_NEWDECIMAL => {
             let data = v.data_raw();
@@ -2471,55 +2478,67 @@ fn binlog_opaque_to_serde_value(v: &OpaqueValue) -> ReadySetResult<serde_json::V
                 data[1] as usize,
                 false,
             )?;
-            string_to_serde_value(&decimal.to_string())
+            write!(out, "{decimal}").map_err(|e| internal_err!("{e}"))?;
         }
 
-        ColumnType::MYSQL_TYPE_TIME => binary_temporal_to_serde_value(
+        ColumnType::MYSQL_TYPE_TIME => out.push_str(&binary_temporal_to_json_string(
             v.data_raw(),
             v.value_type(),
             binlog::misc::time_from_packed,
-        ),
+        )),
 
         ColumnType::MYSQL_TYPE_DATETIME
         | ColumnType::MYSQL_TYPE_TIMESTAMP
-        | ColumnType::MYSQL_TYPE_DATE => binary_temporal_to_serde_value(
+        | ColumnType::MYSQL_TYPE_DATE => out.push_str(&binary_temporal_to_json_string(
             v.data_raw(),
             v.value_type(),
             binlog::misc::datetime_from_packed,
-        ),
-
-        _ => Err(unsupported_err!(
-            "Can not handle opaque value for column type {:?}",
-            v.value_type()
         )),
+
+        _ => {
+            return Err(unsupported_err!(
+                "Can not handle opaque value for column type {:?}",
+                v.value_type()
+            ));
+        }
     }
+    Ok(())
 }
 
 /// Convert a binlog JSON value into the text MySQL returns for it.
 pub(crate) fn binlog_json_to_df_value(val: &jsonb::Value) -> ReadySetResult<DfValue> {
-    mysql_json_print(&binlog_to_serde_jsonb_value(val)?).map(DfValue::from)
+    let mut out = String::with_capacity(64);
+    write_binlog_json(&mut out, val)?;
+    Ok(DfValue::from(out))
 }
 
-fn binlog_to_serde_jsonb_value(binlog_val: &jsonb::Value) -> ReadySetResult<serde_json::Value> {
-    match binlog_val {
-        jsonb::Value::Null => Ok(serde_json::Value::Null),
-        jsonb::Value::Bool(x) => Ok(serde_json::Value::Bool(*x)),
-        jsonb::Value::I16(x) => Ok((*x).into()),
-        jsonb::Value::U16(x) => Ok((*x).into()),
-        jsonb::Value::I32(x) => Ok((*x).into()),
-        jsonb::Value::U32(x) => Ok((*x).into()),
-        jsonb::Value::I64(x) => Ok((*x).into()),
-        jsonb::Value::U64(x) => Ok((*x).into()),
-        jsonb::Value::F64(x) => string_to_serde_value(&mysql_json_double(*x)),
-        jsonb::Value::String(x) => str::from_utf8(x.str_raw())
-            .map(|s| serde_json::Value::String(s.into()))
-            .map_err(|e| internal_err!("Invalid UTF-8 in JSON value: {e}")),
-        jsonb::Value::SmallArray(x) => binlog_to_serde_array::<Small>(x),
-        jsonb::Value::LargeArray(x) => binlog_to_serde_array::<Large>(x),
-        jsonb::Value::SmallObject(x) => binlog_to_serde_object::<Small>(x),
-        jsonb::Value::LargeObject(x) => binlog_to_serde_object::<Large>(x),
-        jsonb::Value::Opaque(x) => binlog_opaque_to_serde_value(x),
+fn push_int(out: &mut String, x: impl itoa::Integer) {
+    out.push_str(itoa::Buffer::new().format(x));
+}
+
+fn write_binlog_json(out: &mut String, val: &jsonb::Value) -> ReadySetResult<()> {
+    match val {
+        jsonb::Value::Null => out.push_str("null"),
+        jsonb::Value::Bool(x) => out.push_str(if *x { "true" } else { "false" }),
+        jsonb::Value::I16(x) => push_int(out, *x),
+        jsonb::Value::U16(x) => push_int(out, *x),
+        jsonb::Value::I32(x) => push_int(out, *x),
+        jsonb::Value::U32(x) => push_int(out, *x),
+        jsonb::Value::I64(x) => push_int(out, *x),
+        jsonb::Value::U64(x) => push_int(out, *x),
+        jsonb::Value::F64(x) => write_mysql_json_double(out, *x),
+        jsonb::Value::String(x) => write_mysql_json_string(
+            out,
+            str::from_utf8(x.str_raw())
+                .map_err(|e| internal_err!("Invalid UTF-8 in JSON value: {e}"))?,
+        ),
+        jsonb::Value::SmallArray(x) => write_binlog_json_array::<Small>(out, x)?,
+        jsonb::Value::LargeArray(x) => write_binlog_json_array::<Large>(out, x)?,
+        jsonb::Value::SmallObject(x) => write_binlog_json_object::<Small>(out, x)?,
+        jsonb::Value::LargeObject(x) => write_binlog_json_object::<Large>(out, x)?,
+        jsonb::Value::Opaque(x) => write_binlog_json_opaque(out, x)?,
     }
+    Ok(())
 }
 
 /// Converts the values of a row image. `columns` holds the table map column index of each value,
