@@ -21,6 +21,15 @@ use tokio::sync::mpsc::UnboundedSender;
 use tracing::{debug, info};
 
 /// Event notification sent from the replicator to the controller.
+/// Convert a binlog JSON value the way MySQL replication does. Exposed for benchmarks only.
+#[cfg(feature = "bench")]
+#[doc(hidden)]
+pub fn bench_binlog_json_to_df_value(
+    val: &mysql_common::binlog::jsonb::Value,
+) -> readyset_errors::ReadySetResult<readyset_data::DfValue> {
+    mysql_connector::binlog_json_to_df_value(val)
+}
+
 #[derive(Debug, EnumDiscriminants)]
 pub enum ControllerMessage {
     /// The replicator is about to begin a snapshot (initial or re-snapshot)

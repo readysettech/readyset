@@ -69,6 +69,7 @@ replication-offset = { path = "../replication-offset" }
 uuid = { workspace = true, features = ["v4", "serde"] }
 
 [dev-dependencies]
+criterion = { workspace = true }
 bincode = { workspace = true }
 pretty_assertions = { workspace = true }
 proptest = { workspace = true }
@@ -85,6 +86,7 @@ test-strategy = { workspace = true }
 test-utils = { path = "../test-utils" }
 
 [features]
+bench = []
 vertical_tests = []
 failure_injection = [
     "fail",
@@ -92,6 +94,11 @@ failure_injection = [
     "readyset-util/failure_injection",
     "readyset-server/failure_injection",
 ]
+
+[[bench]]
+name = "binlog_json"
+harness = false
+required-features = ["bench"]
 
 [lints]
 workspace = true

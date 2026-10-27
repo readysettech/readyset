@@ -7434,6 +7434,7 @@ dependencies = [
  "bit-vec 0.9.1",
  "bytes",
  "chrono",
+ "criterion",
  "database-utils",
  "deadpool-postgres",
  "fail",

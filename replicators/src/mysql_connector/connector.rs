@@ -2495,6 +2495,11 @@ fn binlog_opaque_to_serde_value(v: &OpaqueValue) -> ReadySetResult<serde_json::V
     }
 }
 
+/// Convert a binlog JSON value into the text MySQL returns for it.
+pub(crate) fn binlog_json_to_df_value(val: &jsonb::Value) -> ReadySetResult<DfValue> {
+    mysql_json_print(&binlog_to_serde_jsonb_value(val)?).map(DfValue::from)
+}
+
 fn binlog_to_serde_jsonb_value(binlog_val: &jsonb::Value) -> ReadySetResult<serde_json::Value> {
     match binlog_val {
         jsonb::Value::Null => Ok(serde_json::Value::Null),
@@ -2561,9 +2566,7 @@ fn binlog_row_to_noria_row(
                         || col.character_set() == CollationId::BINARY as u16;
                     binlog_val_to_noria_val(val, kind, meta, collation, unsigned, binary)
                 }
-                BinlogValue::Jsonb(val) => {
-                    mysql_json_print(&binlog_to_serde_jsonb_value(val)?).map(DfValue::from)
-                }
+                BinlogValue::Jsonb(val) => binlog_json_to_df_value(val),
                 _ => Err(internal_err!("Expected a value in WRITE_ROWS_EVENT")),
             }
         })
