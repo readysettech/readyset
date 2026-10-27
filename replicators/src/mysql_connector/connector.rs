@@ -12,7 +12,7 @@ use metrics::{counter, histogram};
 use mysql::prelude::Queryable;
 use mysql_async as mysql;
 use mysql_common::binlog::events::{OptionalMetaExtractor, StatusVarVal, TableMapEvent};
-use mysql_common::binlog::jsonb::{self, JsonbToJsonError};
+use mysql_common::binlog::jsonb;
 use mysql_common::binlog::jsonb::{
     Array, ComplexValue, Large, Object, OpaqueValue, Small, StorageFormat,
 };
@@ -52,7 +52,7 @@ use replication_offset::{GtidEvent, GtidSet, GtidSource, ReplicationOffset};
 use uuid::Uuid;
 
 use crate::mysql_connector::utils::{
-    mysql_json_print, mysql_pad_binary_column, mysql_pad_char_column,
+    mysql_json_double, mysql_json_print, mysql_pad_binary_column, mysql_pad_char_column,
 };
 use crate::noria_adapter::{Connector, ReplicationAction};
 use crate::table_filter::TableFilter;
@@ -2346,7 +2346,9 @@ where
         Map::with_capacity(v.element_count() as usize);
     for e in v.iter() {
         let (key, val) = e?;
-        serde_map.insert(key.value().into(), binlog_to_serde_jsonb_value(&val)?);
+        let key = str::from_utf8(key.value_raw())
+            .map_err(|e| internal_err!("Invalid UTF-8 in JSON key: {e}"))?;
+        serde_map.insert(key.into(), binlog_to_serde_jsonb_value(&val)?);
     }
     Ok(serde_json::Value::Object(serde_map))
 }
@@ -2503,8 +2505,10 @@ fn binlog_to_serde_jsonb_value(binlog_val: &jsonb::Value) -> ReadySetResult<serd
         jsonb::Value::U32(x) => Ok((*x).into()),
         jsonb::Value::I64(x) => Ok((*x).into()),
         jsonb::Value::U64(x) => Ok((*x).into()),
-        jsonb::Value::F64(x) => Ok((*x).into()),
-        jsonb::Value::String(x) => Ok(serde_json::Value::String(x.str().into())),
+        jsonb::Value::F64(x) => string_to_serde_value(&mysql_json_double(*x)),
+        jsonb::Value::String(x) => str::from_utf8(x.str_raw())
+            .map(|s| serde_json::Value::String(s.into()))
+            .map_err(|e| internal_err!("Invalid UTF-8 in JSON value: {e}")),
         jsonb::Value::SmallArray(x) => binlog_to_serde_array::<Small>(x),
         jsonb::Value::LargeArray(x) => binlog_to_serde_array::<Large>(x),
         jsonb::Value::SmallObject(x) => binlog_to_serde_object::<Small>(x),
@@ -2558,16 +2562,7 @@ fn binlog_row_to_noria_row(
                     binlog_val_to_noria_val(val, kind, meta, collation, unsigned, binary)
                 }
                 BinlogValue::Jsonb(val) => {
-                    let json: Result<serde_json::Value, _> = val.clone().try_into(); // urgh no TryFrom impl
-                    match json {
-                        Ok(val) => mysql_json_print(&val).map(DfValue::from),
-                        Err(JsonbToJsonError::Opaque) => mysql_json_print(
-                            &binlog_to_serde_jsonb_value(val)?,
-                        )
-                        .map(DfValue::from),
-                        Err(JsonbToJsonError::InvalidUtf8(e)) => Err(e.into()),
-                        Err(JsonbToJsonError::InvalidJsonb(e)) => Err(e.into()),
-                    }
+                    mysql_json_print(&binlog_to_serde_jsonb_value(val)?).map(DfValue::from)
                 }
                 _ => Err(internal_err!("Expected a value in WRITE_ROWS_EVENT")),
             }

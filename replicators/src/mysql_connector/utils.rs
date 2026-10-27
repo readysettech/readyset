@@ -109,6 +109,42 @@ pub fn parse_mysql_version(version: &str) -> mysql_async::Result<u32> {
     Ok(major * 10000 + minor * 100 + patch)
 }
 
+/// Format a double the way MySQL renders one inside a JSON value: `my_gcvt()` with the widest
+/// field width, plus a trailing `.0` when the result reads as an integer.
+pub(crate) fn mysql_json_double(x: f64) -> String {
+    // `my_gcvt()` keeps fixed notation while the decimal point lands within `DBL_DIG` places
+    // of the first digit, or while some digit falls after it.
+    const MAX_DECPT_FOR_F_FORMAT: i32 = 15;
+
+    // LowerExp prints the shortest digits that round-trip, as `dtoa()` does for `my_gcvt()`.
+    let sci = format!("{x:e}");
+    let (mantissa, exp) = sci
+        .split_once('e')
+        .expect("LowerExp output has an exponent");
+    let exp: i32 = exp.parse().expect("LowerExp exponent is an integer");
+    let (sign, mantissa) = match mantissa.strip_prefix('-') {
+        Some(m) => ("-", m),
+        None => ("", mantissa),
+    };
+    let digits = mantissa.replacen('.', "", 1);
+    let len = digits.len() as i32;
+    // Position of the decimal point relative to the first digit, as `dtoa()` reports it.
+    let decpt = exp + 1;
+
+    if decpt >= 1 - MAX_DECPT_FOR_F_FORMAT && (decpt <= MAX_DECPT_FOR_F_FORMAT || len > decpt) {
+        if decpt <= 0 {
+            format!("{sign}0.{}{digits}", "0".repeat(-decpt as usize))
+        } else if decpt < len {
+            let (int, frac) = digits.split_at(decpt as usize);
+            format!("{sign}{int}.{frac}")
+        } else {
+            format!("{sign}{digits}{}.0", "0".repeat((decpt - len) as usize))
+        }
+    } else {
+        format!("{sign}{mantissa}e{exp}")
+    }
+}
+
 /// Format JSON the same way MySQL renders a JSON column in a result set.
 pub(crate) fn mysql_json_print(json: &JsonValue) -> ReadySetResult<String> {
     fn write_json_string(output: &mut String, string: &str) -> ReadySetResult<()> {
@@ -148,7 +184,15 @@ pub(crate) fn mysql_json_print(json: &JsonValue) -> ReadySetResult<String> {
                 output.push(']');
             }
             JsonValue::String(string) => write_json_string(output, string)?,
-            JsonValue::Number(number) => output.push_str(&number.to_string()),
+            // serde_json stores a positive exponent as `e+N`, where MySQL writes `eN`.
+            JsonValue::Number(number) => match number.as_str().split_once("e+") {
+                Some((mantissa, exp)) => {
+                    output.push_str(mantissa);
+                    output.push('e');
+                    output.push_str(exp);
+                }
+                None => output.push_str(number.as_str()),
+            },
             JsonValue::Bool(boolean) => output.push_str(if *boolean { "true" } else { "false" }),
             JsonValue::Null => output.push_str("null"),
         }
@@ -208,6 +252,32 @@ mod tests {
             mysql_json_print(&json).unwrap(),
             r#"{"zeta": 1, "alpha": 2, "middle": {"a": 2, "m": 3, "z": 1}, "numeric": {"1": "one", "2": "two", "10": "ten", "20": "twenty"}}"#
         );
+    }
+
+    #[test]
+    fn mysql_json_double_matches_mysql() {
+        // Expected strings are MySQL 8.4 output for `JSON_ARRAY()` of each value as a DOUBLE.
+        let cases = [
+            (0.0, "0.0"),
+            (-0.0, "-0.0"),
+            (1e14, "100000000000000.0"),
+            (1e15, "1e15"),
+            (1e-14, "0.00000000000001"),
+            (1e-15, "0.000000000000001"),
+            (1e-16, "1e-16"),
+            (0.0000001, "0.0000001"),
+            (1234567890123456.7, "1234567890123456.8"),
+            (123456789012345678.0, "1.2345678901234568e17"),
+            (-1.5e300, "-1.5e300"),
+            (1e30, "1e30"),
+            (2.5e-200, "2.5e-200"),
+            (100.0, "100.0"),
+            (0.1, "0.1"),
+            (1e100, "1e100"),
+        ];
+        for (x, expected) in cases {
+            assert_eq!(mysql_json_double(x), expected, "{x:e}");
+        }
     }
 
     #[test]

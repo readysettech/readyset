@@ -3990,7 +3990,8 @@ async fn mysql_replicate_json_field() {
             INSERT INTO j_table (id, data, c) VALUES (4, NULL, 'A');
             INSERT INTO j_table (id, data, c) VALUES (5, '{\"zeta\":1,\"alpha\":2,\"middle\":{\"z\":1,\"a\":2,\"m\":3}}', 'A');
             INSERT INTO j_table (id, data, c) VALUES (6, '{\"10\":\"ten\",\"2\":\"two\",\"1\":\"one\",\"20\":\"twenty\"}', 'A');
-            INSERT INTO j_table (id, data, c) VALUES (7, JSON_ARRAY(CAST('2024-01-01' AS DATE), CAST('2024-01-01 00:00:00' AS DATETIME)), 'A');",
+            INSERT INTO j_table (id, data, c) VALUES (7, JSON_ARRAY(CAST('2024-01-01' AS DATE), CAST('2024-01-01 00:00:00' AS DATETIME)), 'A');
+            INSERT INTO j_table (id, data, c) VALUES (9, JSON_ARRAY(1e15, 1e-7, 1e30, 1.5e0, 100e0, CAST(1.50 AS DECIMAL(4,2))), 'A');",
         )
         .await
         .unwrap();
@@ -4055,11 +4056,16 @@ async fn mysql_replicate_json_field() {
             DfValue::Text("[\"2024-01-01\", \"2024-01-01 00:00:00.000000\"]".into()),
             DfValue::Text("A".into()),
         ],
+        &[
+            DfValue::Int(9),
+            DfValue::Text("[1e15, 0.0000001, 1e30, 1.5, 100.0, 1.50]".into()),
+            DfValue::Text("A".into()),
+        ],
     ],);
 
     // Update the JSON data
     client
-        .query("UPDATE j_table SET c = 'B' WHERE id IN (1, 2, 3, 4, 5, 6, 7); INSERT INTO j_table (id, data, c) VALUES (8, JSON_ARRAY(CAST('2024-01-01' AS DATE), CAST('2024-01-01 00:00:00' AS DATETIME)), 'B');")
+        .query("UPDATE j_table SET c = 'B' WHERE id IN (1, 2, 3, 4, 5, 6, 7, 9); INSERT INTO j_table (id, data, c) VALUES (8, JSON_ARRAY(CAST('2024-01-01' AS DATE), CAST('2024-01-01 00:00:00' AS DATETIME)), 'B');")
         .await
         .unwrap();
 
@@ -4116,6 +4122,11 @@ async fn mysql_replicate_json_field() {
         &[
             DfValue::Int(8),
             DfValue::Text("[\"2024-01-01\", \"2024-01-01 00:00:00.000000\"]".into()),
+            DfValue::Text("B".into()),
+        ],
+        &[
+            DfValue::Int(9),
+            DfValue::Text("[1e15, 0.0000001, 1e30, 1.5, 100.0, 1.50]".into()),
             DfValue::Text("B".into()),
         ],
     ],);
