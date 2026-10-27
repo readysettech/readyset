@@ -36,8 +36,8 @@ use readyset_data::DfValue;
 use readyset_errors::{ReadySetError, ReadySetResult, internal_err, invariant_eq, unsupported};
 use readyset_shallow::{CacheInsertGuard, ContentHash, QueryMetadata};
 use readyset_sql::ast::{
-    Literal, PostgresParameterValue, PostgresParameterValueInner, Relation,
-    SessionAuthorizationValue, SetPostgresParameter, SetPostgresParameterValue,
+    CommitStatement, Literal, PostgresParameterValue, PostgresParameterValueInner, Relation,
+    RollbackStatement, SessionAuthorizationValue, SetPostgresParameter, SetPostgresParameterValue,
     SetSessionAuthorization, SetStatement, SqlIdentifier,
 };
 use readyset_sql::{Dialect, DialectDisplay};
@@ -892,16 +892,23 @@ impl UpstreamDatabase for PostgreSqlUpstream {
     }
 
     /// Handle committing a transaction to the upstream database.
-    async fn commit<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Error> {
+    async fn commit<'a>(
+        &'a mut self,
+        stmt: &CommitStatement,
+    ) -> Result<Self::QueryResult<'a>, Error> {
         Ok(QueryResult::SimpleQuery(
-            self.client.simple_query("COMMIT").await?,
+            self.client.simple_query(&stmt.to_string()).await?,
         ))
     }
 
     /// Handle rolling back the ongoing transaction for this connection to the upstream db.
-    async fn rollback<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Error> {
+    async fn rollback<'a>(
+        &'a mut self,
+        stmt: &RollbackStatement,
+    ) -> Result<Self::QueryResult<'a>, Error> {
+        let query = stmt.display(Dialect::PostgreSQL).to_string();
         Ok(QueryResult::SimpleQuery(
-            self.client.simple_query("ROLLBACK").await?,
+            self.client.simple_query(&query).await?,
         ))
     }
 

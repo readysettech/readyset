@@ -12,7 +12,9 @@ use readyset_data::encoding::Encoding;
 use readyset_data::upstream_system_props::UpstreamCollation;
 use readyset_errors::ReadySetError;
 use readyset_shallow::{CacheInsertGuard, ContentHash, Warning};
-use readyset_sql::ast::{Literal, Relation, SetStatement, SqlIdentifier};
+use readyset_sql::ast::{
+    CommitStatement, Literal, Relation, RollbackStatement, SetStatement, SqlIdentifier,
+};
 use readyset_util::SizeOf;
 
 use crate::shallow_key::ShallowKey;
@@ -309,10 +311,16 @@ pub trait UpstreamDatabase: Sized + Send {
     ) -> Result<Self::QueryResult<'a>, Self::Error>;
 
     /// Handle committing a transaction to the upstream database.
-    async fn commit<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Self::Error>;
+    async fn commit<'a>(
+        &'a mut self,
+        stmt: &CommitStatement,
+    ) -> Result<Self::QueryResult<'a>, Self::Error>;
 
     /// Handle rolling back the ongoing transaction for this connection to the upstream db.
-    async fn rollback<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Self::Error>;
+    async fn rollback<'a>(
+        &'a mut self,
+        stmt: &RollbackStatement,
+    ) -> Result<Self::QueryResult<'a>, Self::Error>;
 
     /// Return whether `result`, the result of a COMMIT, shows that the upstream rolled the
     /// transaction back instead. The default implementation returns false, for upstreams that

@@ -30,7 +30,7 @@ use readyset_data::upstream_system_props::{
 use readyset_data::DfValue;
 use readyset_errors::{internal, unsupported, ReadySetError, ReadySetResult};
 use readyset_shallow::{CacheInsertGuard, ContentHash, MySqlMetadata, QueryMetadata, Warning};
-use readyset_sql::ast::{Literal, Relation, SqlIdentifier};
+use readyset_sql::ast::{CommitStatement, Literal, Relation, RollbackStatement, SqlIdentifier};
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_util::hash::hash;
 use readyset_util::SizeOf;
@@ -921,8 +921,11 @@ impl UpstreamDatabase for MySqlUpstream {
         })
     }
 
-    async fn commit<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Error> {
-        let result = self.conn.query_iter("COMMIT").await?;
+    async fn commit<'a>(
+        &'a mut self,
+        stmt: &CommitStatement,
+    ) -> Result<Self::QueryResult<'a>, Error> {
+        let result = self.conn.query_iter(stmt.to_string()).await?;
         result.drop_result().await?;
 
         Ok(QueryResult::Command {
@@ -931,8 +934,12 @@ impl UpstreamDatabase for MySqlUpstream {
         })
     }
 
-    async fn rollback<'a>(&'a mut self) -> Result<Self::QueryResult<'a>, Error> {
-        let result = self.conn.query_iter("ROLLBACK").await?;
+    async fn rollback<'a>(
+        &'a mut self,
+        stmt: &RollbackStatement,
+    ) -> Result<Self::QueryResult<'a>, Error> {
+        let query = stmt.display(Dialect::MySQL).to_string();
+        let result = self.conn.query_iter(query).await?;
         result.drop_result().await?;
 
         Ok(QueryResult::Command {

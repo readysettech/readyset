@@ -2462,9 +2462,9 @@ where
                 write_tracker.on_start_transaction();
                 Ok(result)
             }
-            SqlQuery::Commit(_) => {
+            SqlQuery::Commit(stmt) => {
                 // A COMMIT ends the transaction even when it fails.
-                let result = upstream.commit().await;
+                let result = upstream.commit(stmt).await;
                 match &result {
                     Ok(result) if !DB::commit_rolled_back(result) => transaction_settings.commit(),
                     _ => transaction_settings.rollback(),
@@ -2473,9 +2473,9 @@ where
                 write_tracker.on_commit();
                 Ok(QueryResult::Upstream(result?, None, None))
             }
-            SqlQuery::Rollback(rollback_stmt) => {
-                if rollback_stmt.ends_transaction() {
-                    let result = QueryResult::Upstream(upstream.rollback().await?, None, None);
+            SqlQuery::Rollback(stmt) => {
+                if stmt.ends_transaction() {
+                    let result = QueryResult::Upstream(upstream.rollback(stmt).await?, None, None);
                     proxy_state.end_transaction();
                     write_tracker.on_rollback();
                     transaction_settings.rollback();
