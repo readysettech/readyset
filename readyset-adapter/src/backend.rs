@@ -2397,7 +2397,9 @@ where
     /// refreshes the timestamp if it is set. A ROLLBACK that ends the transaction clears the
     /// timestamp. When the transaction ends, the session drops its transaction-local settings and
     /// role. A ROLLBACK, a COMMIT whose `result` shows it failed or rolled back, or a ROLLBACK TO
-    /// SAVEPOINT that succeeded makes Readyset read back the settings the transaction changed.
+    /// SAVEPOINT that succeeded makes Readyset read back the settings the transaction changed. A
+    /// COMMIT AND CHAIN or ROLLBACK AND CHAIN that succeeded then starts a transaction as BEGIN
+    /// does.
     fn update_transaction_boundaries(
         proxy_state: &mut ProxyState,
         write_tracker: &mut SessionWriteTracker,
@@ -2411,7 +2413,7 @@ where
                 proxy_state.start_transaction();
                 write_tracker.on_start_transaction();
             }
-            SqlQuery::Commit(_) => {
+            SqlQuery::Commit(stmt) => {
                 proxy_state.end_transaction();
                 write_tracker.on_commit();
                 match result {
@@ -2424,13 +2426,21 @@ where
                 if let Some(session) = session {
                     session.on_trx_end();
                 }
+                if stmt.chain && result.is_ok() {
+                    proxy_state.start_transaction();
+                    write_tracker.on_start_transaction();
+                }
             }
-            SqlQuery::Rollback(rollback_stmt) if rollback_stmt.ends_transaction() => {
+            SqlQuery::Rollback(stmt) if stmt.ends_transaction() => {
                 proxy_state.end_transaction();
                 write_tracker.on_rollback();
                 transaction_settings.rollback();
                 if let Some(session) = session {
                     session.on_trx_end();
+                }
+                if stmt.chain && result.is_ok() {
+                    proxy_state.start_transaction();
+                    write_tracker.on_start_transaction();
                 }
             }
             SqlQuery::Rollback(_) if result.is_ok() => transaction_settings.rollback_to_savepoint(),
@@ -2441,7 +2451,8 @@ where
     /// Should only be called with a SqlQuery that is of type StartTransaction, Commit, or
     /// Rollback. Used to handle transaction boundary queries. Updates the `ProxyState` machine,
     /// the [`SessionWriteTracker`] timestamp lifecycle, and the settings to read back after a
-    /// ROLLBACK.
+    /// ROLLBACK. A COMMIT AND CHAIN or ROLLBACK AND CHAIN that succeeded then starts a
+    /// transaction as BEGIN does.
     async fn handle_transaction_boundaries<'a>(
         upstream: Option<&'a mut DB>,
         proxy_state: &mut ProxyState,
@@ -2471,7 +2482,12 @@ where
                 }
                 proxy_state.end_transaction();
                 write_tracker.on_commit();
-                Ok(QueryResult::Upstream(result?, None, None))
+                let result = result?;
+                if stmt.chain {
+                    proxy_state.start_transaction();
+                    write_tracker.on_start_transaction();
+                }
+                Ok(QueryResult::Upstream(result, None, None))
             }
             SqlQuery::Rollback(stmt) => {
                 if stmt.ends_transaction() {
@@ -2479,6 +2495,10 @@ where
                     proxy_state.end_transaction();
                     write_tracker.on_rollback();
                     transaction_settings.rollback();
+                    if stmt.chain {
+                        proxy_state.start_transaction();
+                        write_tracker.on_start_transaction();
+                    }
                     Ok(result)
                 } else {
                     // ROLLBACK TO SAVEPOINT does NOT end the transaction - it only rolls back
