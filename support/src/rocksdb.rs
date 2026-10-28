@@ -49,10 +49,11 @@ impl Options {
             }
             Operation::DumpData { column_family } => {
                 println!("Dumping data from column family: {column_family}");
-                let db = rocksdb::DB::open_cf(
+                let db = rocksdb::DB::open_cf_for_read_only(
                     &rocksdb::Options::default(),
                     self.datadir,
                     column_families,
+                    false,
                 )
                 .unwrap();
 
