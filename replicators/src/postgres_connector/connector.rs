@@ -212,6 +212,8 @@ pub struct PostgresWalConnector {
     table_filter: TableFilter,
     /// Parsing mode that determines which parser(s) to use and how to handle conflicts
     parsing_config: ParsingConfig,
+    /// The collation that columns with the `default` collation use
+    database_collation: String,
     /// Group commit state: accumulated pending row actions plus the
     /// window-tracking fields that decide when to flush.
     group_commit: GroupCommitState,
@@ -298,6 +300,7 @@ impl PostgresWalConnector {
             ReadySetError::ReplicationFailed(format!("Failed to connect: {e}"))
         })?;
         let connection_handle = tokio::spawn(connection);
+        let database_collation = super::database_collation(&client).await?;
         let status_update_interval = Duration::from_secs(config.status_update_interval_secs as u64);
 
         let mut connector = PostgresWalConnector {
@@ -325,6 +328,7 @@ impl PostgresWalConnector {
             had_table_error: false,
             table_filter,
             parsing_config: parsing_preset.into_config().rate_limit_logging(false),
+            database_collation,
             group_commit: GroupCommitState::new(
                 config.replication_batch_size,
                 config.group_commit_max_trx,
@@ -1050,7 +1054,8 @@ impl Connector for PostgresWalConnector {
                     return Ok((
                         vec![ReplicationAction::DdlChange {
                             schema: ddl_event.schema().to_string(),
-                            changes: vec![ddl_event.try_into_change(self.parsing_config)?],
+                            changes: vec![ddl_event
+                                .try_into_change(self.parsing_config, &self.database_collation)?],
                         }],
                         cur_pos.with_lsn(lsn).into(),
                     ));

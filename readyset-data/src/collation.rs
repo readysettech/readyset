@@ -113,14 +113,14 @@ enum ExternalCollation {
 
     // Postgres byte-order collations. The libc and PG 17+ builtin providers both
     // expose `C` and `POSIX` as raw byte order, which matches `Collation::Binary`
-    // exactly.
+    // exactly. glibc's `C.UTF-8` sorts by code point, which is the byte order of UTF-8.
     PgC,
     PgPosix,
+    PgCUtf8,
+    PgCUtf8Upper,
 
     // Postgres ICU collations. Readyset's `Collation::Utf8` is implemented via
-    // ICU UCA root (Tertiary), so these map onto it cleanly. Glibc-locale-based
-    // Postgres collations (e.g. `en_US.utf8`) are not equivalent and are
-    // intentionally not listed here.
+    // ICU UCA root (Tertiary), so these map onto it cleanly.
     PgUnd,
     PgUndXIcu,
 
@@ -130,10 +130,9 @@ enum ExternalCollation {
     PgEnUsUtf8Upper,
 
     // Postgres "default" collation: the placeholder name (provider 'd') that PG
-    // assigns to columns that inherit the database `lc_collate`. Until Readyset
-    // plumbs `lc_collate` through, we silently approximate as `Utf8` (ICU root
-    // tertiary). This is wrong for databases created with `lc_collate = C`, but
-    // matches our previous behavior for everything else.
+    // assigns to columns that inherit the database `lc_collate`. The replicator
+    // substitutes the database's collation for this name. Tables replicated before
+    // it did keep the approximation as `Utf8` (ICU root tertiary).
     PgDefault,
 }
 
@@ -164,7 +163,7 @@ impl ExternalCollation {
             warn_once!(
                 "column declares PostgreSQL \"default\" collation (inherits the database \
                  lc_collate); approximating as utf8 (ICU root tertiary). This may produce \
-                 incorrect ordering for databases created with lc_collate = C."
+                 incorrect ordering."
             );
         }
         Some(ext.internal())
@@ -187,6 +186,8 @@ impl ExternalCollation {
             | Self::MySqlUtf8mb3UnicodeCi => SqlEngine::MySQL,
             Self::PgC
             | Self::PgPosix
+            | Self::PgCUtf8
+            | Self::PgCUtf8Upper
             | Self::PgUnd
             | Self::PgUndXIcu
             | Self::PgEnUs
@@ -213,6 +214,8 @@ impl ExternalCollation {
             Self::MySqlUtf8mb3UnicodeCi => "utf8mb3_unicode_ci",
             Self::PgC => "C",
             Self::PgPosix => "POSIX",
+            Self::PgCUtf8 => "C.utf8",
+            Self::PgCUtf8Upper => "C.UTF-8",
             Self::PgUnd => "und",
             Self::PgUndXIcu => "und-x-icu",
             Self::PgEnUs => "en_US",
@@ -236,7 +239,7 @@ impl ExternalCollation {
             Self::MySqlUtf8mb4GeneralCi
             | Self::MySqlUtf8mb4UnicodeCi
             | Self::MySqlUtf8mb3UnicodeCi => Collation::Utf8AiCiPad,
-            Self::PgC | Self::PgPosix => Collation::Binary,
+            Self::PgC | Self::PgPosix | Self::PgCUtf8 | Self::PgCUtf8Upper => Collation::Binary,
             Self::PgUnd | Self::PgUndXIcu | Self::PgDefault => Collation::Utf8,
             Self::PgEnUs | Self::PgEnUsUtf8 | Self::PgEnUsUtf8Upper => Collation::Utf8Shifted,
         }
@@ -387,6 +390,8 @@ impl Collation {
             }
         } else if is_libc_locale(name) {
             Some(Self::Utf8Shifted)
+        } else if name.ends_with("-x-icu") {
+            Some(Self::Utf8)
         } else {
             None
         };
@@ -561,7 +566,9 @@ mod tests {
         assert_eq!(Collation::get_or_default(pg, "und"), Collation::Utf8);
         assert_eq!(Collation::get_or_default(pg, "und-x-icu"), Collation::Utf8);
         assert_eq!(Collation::get_or_default(pg, "default"), Collation::Utf8);
-        // Unknown ICU locales fall back to Utf8 with an error_once log.
+        assert_eq!(Collation::get_or_default(pg, "C.utf8"), Collation::Binary);
+        assert_eq!(Collation::get_or_default(pg, "C.UTF-8"), Collation::Binary);
+        // Other ICU locales map to the root collation with a warn_once log.
         assert_eq!(
             Collation::get_or_default(pg, "en-US-x-icu"),
             Collation::Utf8

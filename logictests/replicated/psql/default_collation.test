@@ -1,0 +1,45 @@
+# A column without a COLLATE clause sorts by the database's collation, which is
+# en_US.utf8 in the upstream images. Spaces and punctuation only break ties,
+# and lowercase sorts before uppercase.
+
+statement ok
+CREATE TABLE co_titles (id INT PRIMARY KEY, grp INT NOT NULL, title VARCHAR(40) NOT NULL);
+
+statement ok
+INSERT INTO co_titles VALUES
+  (1, 1, 'item 16 sneaker'), (2, 1, 'item 1670 funko'), (3, 1, 'item 1697 toy'),
+  (4, 1, 'item 1699 card'), (5, 1, 'item-17 pin'), (6, 1, 'item_18 mug'),
+  (7, 1, 'Item 19 cap'), (8, 1, 'item20 bag'), (9, 1, 'apple'), (10, 1, 'Apple'),
+  (11, 1, 'a b'), (12, 1, 'ab'), (13, 1, 'a-c'), (14, 1, 'Zebra'), (15, 1, 'zebra');
+
+query T nosort
+SELECT title FROM co_titles ORDER BY title, id
+----
+a b
+ab
+a-c
+apple
+Apple
+item 1670 funko
+item 1697 toy
+item 1699 card
+item 16 sneaker
+item-17 pin
+item_18 mug
+Item 19 cap
+item20 bag
+zebra
+Zebra
+
+query T nosort
+SELECT title FROM co_titles WHERE grp = $1 ORDER BY title LIMIT 8
+? = 1
+----
+a b
+ab
+a-c
+apple
+Apple
+item 1670 funko
+item 1697 toy
+item 1699 card

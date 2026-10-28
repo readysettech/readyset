@@ -30,7 +30,7 @@ use tokio_postgres as pgsql;
 use tracing::{debug, info, info_span, trace, warn, Instrument};
 
 use super::connector::CreatedSlot;
-use super::pg_column_constraints;
+use super::{database_collation, pg_column_constraints};
 use crate::db_util::CreateSchema;
 use crate::row_diagnostics;
 use crate::table_filter::TableFilter;
@@ -479,6 +479,7 @@ impl TableDescription {
         self,
         parsing_preset: ParsingPreset,
         replica_identity_columns: Option<Vec<SqlIdentifier>>,
+        database_collation: &str,
     ) -> ReadySetResult<Change> {
         // Compute replica_identity_key by comparing RI columns with PK columns.
         // If they match (or no RI override), set None.
@@ -528,8 +529,11 @@ impl TableDescription {
                         .columns
                         .into_iter()
                         .map(|c| {
-                            let constraints =
-                                pg_column_constraints(c.not_null, c.collation_name.as_deref());
+                            let constraints = pg_column_constraints(
+                                c.not_null,
+                                c.collation_name.as_deref(),
+                                database_collation,
+                            );
                             Ok(ColumnSpecification {
                                 column: Column {
                                     name: c.name.into(),
@@ -860,6 +864,7 @@ impl<'a> PostgresReplicator<'a> {
         let table_list = self.get_table_list(TableKind::RegularTable).await?;
         let view_list = self.get_table_list(TableKind::View).await?;
         let custom_types = self.get_custom_types().await?;
+        let database_collation = database_collation(get_transaction!(self).client()).await?;
 
         let (table_list, mut non_replicated) =
             table_list.into_iter().partition::<Vec<_>, _>(|tbl| {
@@ -968,7 +973,7 @@ impl<'a> PostgresReplicator<'a> {
                     future::ready(
                         create_table
                             .clone()
-                            .try_into_change(self.parsing_preset, ri_cols)
+                            .try_into_change(self.parsing_preset, ri_cols, &database_collation)
                             .map(move |change| (change, create_table)),
                     )
                 })
@@ -1649,7 +1654,7 @@ mod tests {
     fn try_into_change_ri_matches_pk_returns_none() {
         let desc = make_table_with_pk(vec!["id"]);
         let change = desc
-            .try_into_change(ParsingPreset::for_tests(), Some(vec!["id".into()]))
+            .try_into_change(ParsingPreset::for_tests(), Some(vec!["id".into()]), "C")
             .unwrap();
 
         match change {
@@ -1676,6 +1681,7 @@ mod tests {
             .try_into_change(
                 ParsingPreset::for_tests(),
                 Some(vec!["id".into(), "email".into()]),
+                "C",
             )
             .unwrap();
 
@@ -1708,7 +1714,7 @@ mod tests {
     fn try_into_change_no_ri_returns_none() {
         let desc = make_table_with_pk(vec!["id"]);
         let change = desc
-            .try_into_change(ParsingPreset::for_tests(), None)
+            .try_into_change(ParsingPreset::for_tests(), None, "C")
             .unwrap();
 
         match change {
@@ -1753,6 +1759,7 @@ mod tests {
             .try_into_change(
                 ParsingPreset::for_tests(),
                 Some(vec!["id".into(), "email".into()]),
+                "C",
             )
             .unwrap();
 

@@ -2206,10 +2206,20 @@ async fn postgresql_snapshot_has_column_collation_internal(url: &str) {
 
     assert_eq!(collation_for("s_c").as_deref(), Some("C"));
     assert_eq!(collation_for("s_posix").as_deref(), Some("POSIX"));
-    // Plain `text` columns inherit the database default, which the catalog reports as the
-    // `pg_collation` row named "default" (provider 'd'). The resolver substitutes the actual
-    // `lc_collate` later.
-    assert_eq!(collation_for("s_default").as_deref(), Some("default"));
+    // Plain `text` columns inherit the database collation, which comes from the libc provider
+    // in the test databases.
+    let DbConnection::PostgreSQL(pg, _) = &client else {
+        unreachable!("test runs against PostgreSQL")
+    };
+    let datcollate: String = pg
+        .query_one(
+            "SELECT datcollate FROM pg_database WHERE datname = current_database()",
+            &[],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(collation_for("s_default"), Some(datcollate));
     // Non-collatable columns (`attcollation = 0`) have no constraint.
     assert_eq!(collation_for("id"), None);
 

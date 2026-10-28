@@ -166,7 +166,11 @@ pub(crate) struct DdlEvent {
 impl DdlEvent {
     /// Convert this [`DdlEvent`] into a SQL DDL statement that can be sent to ReadySet directly
     /// (using the ReadySet-native SQL dialect, not the postgresql dialect!)
-    pub(crate) fn try_into_change(self, parsing_config: ParsingConfig) -> ReadySetResult<Change> {
+    pub(crate) fn try_into_change(
+        self,
+        parsing_config: ParsingConfig,
+        database_collation: &str,
+    ) -> ReadySetResult<Change> {
         match self.data {
             DdlEventData::CreateTable {
                 oid,
@@ -201,6 +205,7 @@ impl DdlEvent {
                         let constraints = super::pg_column_constraints(
                             col.not_null,
                             col.collation_name.as_deref(),
+                            database_collation,
                         );
                         Ok(ColumnSpecification {
                             column: Column {
