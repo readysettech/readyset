@@ -85,3 +85,21 @@ item_18 mug
 Item 19 cap
 6
 item20 bag
+
+# Strings that differ in bytes stay distinct, such as the composed and
+# decomposed forms of é.
+
+statement ok
+CREATE TABLE coll_en_us_ties (
+  id INT PRIMARY KEY,
+  s  TEXT COLLATE "en_US.utf8"
+)
+
+statement ok
+INSERT INTO coll_en_us_ties VALUES (1, 'é'), (2, 'é'), (3, 'é')
+
+query I nosort
+SELECT id FROM coll_en_us_ties WHERE s = 'é' ORDER BY id
+----
+1
+3

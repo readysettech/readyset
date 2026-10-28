@@ -275,7 +275,8 @@ impl Collation {
             Self::Latin1SwedishCi => mysql_latin1_swedish_ci::compare(a, b),
             Self::Utf8Binary => a.chars().cmp(b.chars()),
             Self::Utf8AiCiPad => Self::compare_ai_ci_pad(a, b),
-            Self::Utf8Shifted => UTF8_SHIFTED.with(cmp),
+            // Break ties by comparing bytes, as Postgres does.
+            Self::Utf8Shifted => UTF8_SHIFTED.with(cmp).then_with(|| a.cmp(b)),
         }
     }
 
@@ -318,7 +319,8 @@ impl Collation {
     {
         let mut s = s.as_ref();
         let len = match self {
-            Self::Utf8 | Self::Utf8Binary | Self::Utf8Shifted => s.len() * 4,
+            Self::Utf8 | Self::Utf8Binary => s.len() * 4,
+            Self::Utf8Shifted => s.len() * 5 + 1,
             Self::Utf8Ci => s.len() * 2,
             Self::Utf8AiCi | Self::Utf8AiCiPad | Self::Binary | Self::Latin1SwedishCi => s.len(),
         };
@@ -333,7 +335,11 @@ impl Collation {
             Self::Utf8 => UTF8.with(make),
             Self::Utf8Ci => UTF8_CI.with(make),
             Self::Utf8AiCi | Self::Utf8AiCiPad => UTF8_AI_CI.with(make),
-            Self::Utf8Shifted => UTF8_SHIFTED.with(make),
+            Self::Utf8Shifted => UTF8_SHIFTED.with(make).map(|()| {
+                // Append the bytes to break ties. ICU key bytes are all non-zero.
+                out.push(0);
+                out.extend_from_slice(s.as_bytes());
+            }),
             Self::Binary => {
                 out.extend_from_slice(s.as_bytes());
                 Ok(())
@@ -457,7 +463,9 @@ fn collator_options(strength: Option<Strength>) -> CollatorOptions {
 
 #[cfg(test)]
 mod tests {
+    use proptest::prop_assert_eq;
     use strum::EnumCount;
+    use test_strategy::proptest;
 
     use super::*;
 
@@ -608,6 +616,26 @@ mod tests {
         sorted.reverse();
         sorted.sort_by_key(|s| col.key(s));
         assert_eq!(sorted, expected);
+    }
+
+    #[test]
+    fn utf8_shifted_bytes_break_ties() {
+        let col = Collation::Utf8Shifted;
+        // The composed and decomposed forms of é have different bytes.
+        assert_eq!(col.compare("e\u{301}", "\u{e9}"), Ordering::Less);
+        assert!(col.key("e\u{301}") < col.key("\u{e9}"));
+    }
+
+    /// Under Utf8Shifted, strings compare equal when their bytes are equal, and keys sort in
+    /// the order of compare.
+    #[proptest]
+    fn utf8_shifted_key_agrees_with_compare(
+        #[strategy("[ a-cA-C_.\u{e9}\u{301}-]{0,6}")] s: String,
+        #[strategy("[ a-cA-C_.\u{e9}\u{301}-]{0,6}")] t: String,
+    ) {
+        let col = Collation::Utf8Shifted;
+        prop_assert_eq!(col.compare(&s, &t) == Ordering::Equal, s == t);
+        prop_assert_eq!(col.key(&s).cmp(&col.key(&t)), col.compare(&s, &t));
     }
 
     #[test]
