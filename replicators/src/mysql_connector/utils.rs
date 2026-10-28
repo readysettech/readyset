@@ -110,8 +110,9 @@ pub fn parse_mysql_version(version: &str) -> mysql_async::Result<u32> {
 }
 
 /// Write a double the way MySQL renders one inside a JSON value: `my_gcvt()` with the widest
-/// field width, plus a trailing `.0` when the result reads as an integer.
-pub(crate) fn write_mysql_json_double(out: &mut String, x: f64) {
+/// field width, plus a trailing `.0` when the result reads as an integer and `dot_zero` is set, as
+/// MySQL 8.0 and later do.
+pub(crate) fn write_mysql_json_double(out: &mut String, x: f64, dot_zero: bool) {
     // `my_gcvt()` keeps fixed notation while the decimal point lands within `DBL_DIG` places
     // of the first digit, or while some digit falls after it.
     const MAX_DECPT_FOR_F_FORMAT: i32 = 15;
@@ -153,7 +154,9 @@ pub(crate) fn write_mysql_json_double(out: &mut String, x: f64) {
             }
             if decpt >= len {
                 zeros(out, decpt - len);
-                out.push_str(".0");
+                if dot_zero {
+                    out.push_str(".0");
+                }
             }
         }
     } else {
@@ -242,7 +245,25 @@ mod tests {
         ];
         for (x, expected) in cases {
             let mut out = String::new();
-            write_mysql_json_double(&mut out, x);
+            write_mysql_json_double(&mut out, x, true);
+            assert_eq!(out, expected, "{x:e}");
+        }
+    }
+
+    #[test]
+    fn mysql_json_double_matches_mysql_57() {
+        // Expected strings are MySQL 5.7 output for `JSON_ARRAY()` of each value as a DOUBLE.
+        let cases = [
+            (0.0, "0"),
+            (-0.0, "-0"),
+            (1e14, "100000000000000"),
+            (1e15, "1e15"),
+            (100.0, "100"),
+            (1.5, "1.5"),
+        ];
+        for (x, expected) in cases {
+            let mut out = String::new();
+            write_mysql_json_double(&mut out, x, false);
             assert_eq!(out, expected, "{x:e}");
         }
     }

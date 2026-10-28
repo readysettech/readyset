@@ -27,7 +27,7 @@ use tracing::{debug, info};
 pub fn bench_binlog_json_to_df_value(
     val: &mysql_common::binlog::jsonb::Value,
 ) -> readyset_errors::ReadySetResult<readyset_data::DfValue> {
-    mysql_connector::binlog_json_to_df_value(val)
+    mysql_connector::binlog_json_to_df_value(val, true)
 }
 
 #[derive(Debug, EnumDiscriminants)]

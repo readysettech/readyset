@@ -237,6 +237,8 @@ pub(crate) struct MySqlBinlogConnector {
     /// pending rows. The pending rows are flushed first and this action is
     /// returned on the next call to `next_action_inner`.
     deferred_action: Option<ReplicationAction>,
+    /// Whether the upstream appends `.0` to JSON doubles that print as integers (MySQL 8.0+).
+    json_double_dot_zero: bool,
 }
 
 impl MySqlBinlogConnector {
@@ -482,9 +484,11 @@ impl MySqlBinlogConnector {
             replication_failed!("Unsupported replication offset for MySQL: {start_offset:?}");
         }
 
+        let mut connection = mysql::Conn::new(mysql_opts).await?;
+        let json_double_dot_zero = get_mysql_version(&mut connection).await? >= 80000;
         let mut connector = MySqlBinlogConnector {
             noria,
-            connection: mysql::Conn::new(mysql_opts).await?,
+            connection,
             reader: binlog::EventStreamReader::new(binlog::consts::BinlogVersion::Version4),
             server_id,
             server_uuid: config.replication_server_uuid,
@@ -504,6 +508,7 @@ impl MySqlBinlogConnector {
             group_commit_deadline: None,
             group_commit_trx_count: 0,
             deferred_action: None,
+            json_double_dot_zero,
         };
 
         // Crash recovery: if we have a pending GTID, skip the events that were
@@ -631,7 +636,14 @@ impl MySqlBinlogConnector {
         let values = handle_table_err!(
             self,
             tme,
-            binlog_row_to_noria_row(row_data, columns, tme, collation_vec, signedness_vec)
+            binlog_row_to_noria_row(
+                row_data,
+                columns,
+                tme,
+                collation_vec,
+                signedness_vec,
+                self.json_double_dot_zero,
+            )
         );
         let mut row = vec![DfValue::Default; tme.columns_count() as usize];
         for (&idx, value) in columns.iter().zip(values) {
@@ -850,7 +862,8 @@ impl MySqlBinlogConnector {
                 before_columns,
                 tme,
                 collation_vec,
-                signedness_vec
+                signedness_vec,
+                self.json_double_dot_zero,
             )
         );
 
@@ -864,7 +877,14 @@ impl MySqlBinlogConnector {
         let after_image = handle_table_err!(
             self,
             tme,
-            binlog_row_to_noria_row(after_row, after_columns, tme, collation_vec, signedness_vec)
+            binlog_row_to_noria_row(
+                after_row,
+                after_columns,
+                tme,
+                collation_vec,
+                signedness_vec,
+                self.json_double_dot_zero,
+            )
         );
 
         Ok((before_image, after_image))
@@ -1020,7 +1040,8 @@ impl MySqlBinlogConnector {
                     &columns,
                     tme,
                     &collation_vec,
-                    &signedness_vec
+                    &signedness_vec,
+                    self.json_double_dot_zero,
                 )
             );
 
@@ -2339,7 +2360,11 @@ fn binlog_val_to_noria_val(
     }
 }
 
-fn write_binlog_json_object<T>(out: &mut String, v: &ComplexValue<T, Object>) -> ReadySetResult<()>
+fn write_binlog_json_object<T>(
+    out: &mut String,
+    v: &ComplexValue<T, Object>,
+    dot_zero: bool,
+) -> ReadySetResult<()>
 where
     T: StorageFormat,
 {
@@ -2355,13 +2380,17 @@ where
         }
         write_mysql_json_string(out, key);
         out.push_str(": ");
-        write_binlog_json(out, &val)?;
+        write_binlog_json(out, &val, dot_zero)?;
     }
     out.push('}');
     Ok(())
 }
 
-fn write_binlog_json_array<T>(out: &mut String, v: &ComplexValue<T, Array>) -> ReadySetResult<()>
+fn write_binlog_json_array<T>(
+    out: &mut String,
+    v: &ComplexValue<T, Array>,
+    dot_zero: bool,
+) -> ReadySetResult<()>
 where
     T: StorageFormat,
 {
@@ -2370,7 +2399,7 @@ where
         if i != 0 {
             out.push_str(", ");
         }
-        write_binlog_json(out, &e?)?;
+        write_binlog_json(out, &e?, dot_zero)?;
     }
     out.push(']');
     Ok(())
@@ -2505,10 +2534,14 @@ fn write_binlog_json_opaque(out: &mut String, v: &OpaqueValue) -> ReadySetResult
     Ok(())
 }
 
-/// Convert a binlog JSON value into the text MySQL returns for it.
-pub(crate) fn binlog_json_to_df_value(val: &jsonb::Value) -> ReadySetResult<DfValue> {
+/// Convert a binlog JSON value into the text MySQL returns for it. `dot_zero` is passed to
+/// [`write_mysql_json_double`].
+pub(crate) fn binlog_json_to_df_value(
+    val: &jsonb::Value,
+    dot_zero: bool,
+) -> ReadySetResult<DfValue> {
     let mut out = String::with_capacity(64);
-    write_binlog_json(&mut out, val)?;
+    write_binlog_json(&mut out, val, dot_zero)?;
     Ok(DfValue::from(out))
 }
 
@@ -2516,7 +2549,7 @@ fn push_int(out: &mut String, x: impl itoa::Integer) {
     out.push_str(itoa::Buffer::new().format(x));
 }
 
-fn write_binlog_json(out: &mut String, val: &jsonb::Value) -> ReadySetResult<()> {
+fn write_binlog_json(out: &mut String, val: &jsonb::Value, dot_zero: bool) -> ReadySetResult<()> {
     match val {
         jsonb::Value::Null => out.push_str("null"),
         jsonb::Value::Bool(x) => out.push_str(if *x { "true" } else { "false" }),
@@ -2526,16 +2559,16 @@ fn write_binlog_json(out: &mut String, val: &jsonb::Value) -> ReadySetResult<()>
         jsonb::Value::U32(x) => push_int(out, *x),
         jsonb::Value::I64(x) => push_int(out, *x),
         jsonb::Value::U64(x) => push_int(out, *x),
-        jsonb::Value::F64(x) => write_mysql_json_double(out, *x),
+        jsonb::Value::F64(x) => write_mysql_json_double(out, *x, dot_zero),
         jsonb::Value::String(x) => write_mysql_json_string(
             out,
             str::from_utf8(x.str_raw())
                 .map_err(|e| internal_err!("Invalid UTF-8 in JSON value: {e}"))?,
         ),
-        jsonb::Value::SmallArray(x) => write_binlog_json_array::<Small>(out, x)?,
-        jsonb::Value::LargeArray(x) => write_binlog_json_array::<Large>(out, x)?,
-        jsonb::Value::SmallObject(x) => write_binlog_json_object::<Small>(out, x)?,
-        jsonb::Value::LargeObject(x) => write_binlog_json_object::<Large>(out, x)?,
+        jsonb::Value::SmallArray(x) => write_binlog_json_array::<Small>(out, x, dot_zero)?,
+        jsonb::Value::LargeArray(x) => write_binlog_json_array::<Large>(out, x, dot_zero)?,
+        jsonb::Value::SmallObject(x) => write_binlog_json_object::<Small>(out, x, dot_zero)?,
+        jsonb::Value::LargeObject(x) => write_binlog_json_object::<Large>(out, x, dot_zero)?,
         jsonb::Value::Opaque(x) => write_binlog_json_opaque(out, x)?,
     }
     Ok(())
@@ -2550,6 +2583,7 @@ fn binlog_row_to_noria_row(
     tme: &binlog::events::TableMapEvent<'static>,
     collation_vec: &[Option<u16>],
     signedness_vec: &[Option<bool>],
+    json_double_dot_zero: bool,
 ) -> ReadySetResult<Vec<DfValue>> {
     if binlog_row.len() != columns.len() {
         return Err(internal_err!(
@@ -2585,7 +2619,7 @@ fn binlog_row_to_noria_row(
                         || col.character_set() == CollationId::BINARY as u16;
                     binlog_val_to_noria_val(val, kind, meta, collation, unsigned, binary)
                 }
-                BinlogValue::Jsonb(val) => binlog_json_to_df_value(val),
+                BinlogValue::Jsonb(val) => binlog_json_to_df_value(val, json_double_dot_zero),
                 _ => Err(internal_err!("Expected a value in WRITE_ROWS_EVENT")),
             }
         })

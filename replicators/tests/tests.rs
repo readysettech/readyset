@@ -3996,6 +3996,16 @@ async fn mysql_replicate_json_field() {
         .await
         .unwrap();
 
+    // How doubles print inside JSON depends on the MySQL version, so expect what the server prints.
+    let DbConnection::MySQL(conn) = &mut client else {
+        unreachable!("mysql_replicate_json_field runs against MySQL")
+    };
+    let doubles: String = conn
+        .query_first("SELECT data FROM j_table WHERE id = 9")
+        .await
+        .unwrap()
+        .unwrap();
+
     let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
         .await
         .unwrap();
@@ -4058,7 +4068,7 @@ async fn mysql_replicate_json_field() {
         ],
         &[
             DfValue::Int(9),
-            DfValue::Text("[1e15, 0.0000001, 1e30, 1.5, 100.0, 1.50]".into()),
+            DfValue::Text(doubles.as_str().into()),
             DfValue::Text("A".into()),
         ],
     ],);
@@ -4126,7 +4136,7 @@ async fn mysql_replicate_json_field() {
         ],
         &[
             DfValue::Int(9),
-            DfValue::Text("[1e15, 0.0000001, 1e30, 1.5, 100.0, 1.50]".into()),
+            DfValue::Text(doubles.as_str().into()),
             DfValue::Text("B".into()),
         ],
     ],);
