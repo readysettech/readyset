@@ -42,3 +42,46 @@ apple
 apple-pie
 4
 applepie
+
+# A column declared `COLLATE "en_US.utf8"` sorts like glibc, where spaces and
+# punctuation only break ties between strings that otherwise compare equal.
+
+statement ok
+CREATE TABLE coll_en_us (
+  id INT PRIMARY KEY,
+  s  TEXT COLLATE "en_US.utf8"
+)
+
+statement ok
+INSERT INTO coll_en_us VALUES
+  (1, 'item 16 sneaker'),
+  (2, 'item 1670 funko'),
+  (3, 'item-17 pin'),
+  (4, 'item_18 mug'),
+  (5, 'Item 19 cap'),
+  (6, 'item20 bag'),
+  (7, 'a b'),
+  (8, 'ab'),
+  (9, 'a-c')
+
+query IT nosort
+SELECT id, s FROM coll_en_us ORDER BY s
+----
+7
+a b
+8
+ab
+9
+a-c
+2
+item 1670 funko
+1
+item 16 sneaker
+3
+item-17 pin
+4
+item_18 mug
+5
+Item 19 cap
+6
+item20 bag

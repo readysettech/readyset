@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::fmt::Display;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-use icu::collator::options::{CollatorOptions, Strength};
+use icu::collator::options::{AlternateHandling, CollatorOptions, Strength};
 use icu::collator::{Collator, CollatorBorrowed};
 use log_once::{error_once, warn_once};
 use serde::{Deserialize, Serialize};
@@ -32,6 +32,12 @@ thread_local! {
         collator_options(Some(Strength::Primary))
     )
     .expect("cannot create UTF8_AI_CI collator!");
+    static UTF8_SHIFTED: CollatorBorrowed<'static> = Collator::try_new(Default::default(), {
+        let mut options = collator_options(Some(Strength::Quaternary));
+        options.alternate_handling = Some(AlternateHandling::Shifted);
+        options
+    })
+    .expect("cannot create UTF8_SHIFTED collator!");
 }
 
 /// Description for how string values should be compared against each other for ordering and
@@ -82,6 +88,10 @@ pub enum Collation {
 
     /// Like Utf8Ci, but trailing spaces are ignored (for a few legacy MySQL collations).
     Utf8AiCiPad,
+
+    /// UTF-8 where spaces and punctuation only break ties. This approximates glibc collations
+    /// such as Postgres's `en_US.utf8`.
+    Utf8Shifted,
 }
 
 /// External collation names supported per SQL engine.
@@ -113,6 +123,11 @@ enum ExternalCollation {
     // intentionally not listed here.
     PgUnd,
     PgUndXIcu,
+
+    // Postgres libc collations for glibc's `en_US` locale.
+    PgEnUs,
+    PgEnUsUtf8,
+    PgEnUsUtf8Upper,
 
     // Postgres "default" collation: the placeholder name (provider 'd') that PG
     // assigns to columns that inherit the database `lc_collate`. Until Readyset
@@ -170,9 +185,14 @@ impl ExternalCollation {
             | Self::MySqlUtf8mb4GeneralCi
             | Self::MySqlUtf8mb4UnicodeCi
             | Self::MySqlUtf8mb3UnicodeCi => SqlEngine::MySQL,
-            Self::PgC | Self::PgPosix | Self::PgUnd | Self::PgUndXIcu | Self::PgDefault => {
-                SqlEngine::PostgreSQL
-            }
+            Self::PgC
+            | Self::PgPosix
+            | Self::PgUnd
+            | Self::PgUndXIcu
+            | Self::PgEnUs
+            | Self::PgEnUsUtf8
+            | Self::PgEnUsUtf8Upper
+            | Self::PgDefault => SqlEngine::PostgreSQL,
         }
     }
 
@@ -195,6 +215,9 @@ impl ExternalCollation {
             Self::PgPosix => "POSIX",
             Self::PgUnd => "und",
             Self::PgUndXIcu => "und-x-icu",
+            Self::PgEnUs => "en_US",
+            Self::PgEnUsUtf8 => "en_US.utf8",
+            Self::PgEnUsUtf8Upper => "en_US.UTF-8",
             Self::PgDefault => "default",
         }
     }
@@ -215,6 +238,7 @@ impl ExternalCollation {
             | Self::MySqlUtf8mb3UnicodeCi => Collation::Utf8AiCiPad,
             Self::PgC | Self::PgPosix => Collation::Binary,
             Self::PgUnd | Self::PgUndXIcu | Self::PgDefault => Collation::Utf8,
+            Self::PgEnUs | Self::PgEnUsUtf8 | Self::PgEnUsUtf8Upper => Collation::Utf8Shifted,
         }
     }
 }
@@ -229,6 +253,7 @@ impl Display for Collation {
             Self::Latin1SwedishCi => write!(f, "latin1_swedish_ci"),
             Self::Utf8Binary => write!(f, "utf8_binary"),
             Self::Utf8AiCiPad => write!(f, "utf8_ai_ci(pad)"),
+            Self::Utf8Shifted => write!(f, "utf8_shifted"),
         }
     }
 }
@@ -250,6 +275,7 @@ impl Collation {
             Self::Latin1SwedishCi => mysql_latin1_swedish_ci::compare(a, b),
             Self::Utf8Binary => a.chars().cmp(b.chars()),
             Self::Utf8AiCiPad => Self::compare_ai_ci_pad(a, b),
+            Self::Utf8Shifted => UTF8_SHIFTED.with(cmp),
         }
     }
 
@@ -292,7 +318,7 @@ impl Collation {
     {
         let mut s = s.as_ref();
         let len = match self {
-            Self::Utf8 | Self::Utf8Binary => s.len() * 4,
+            Self::Utf8 | Self::Utf8Binary | Self::Utf8Shifted => s.len() * 4,
             Self::Utf8Ci => s.len() * 2,
             Self::Utf8AiCi | Self::Utf8AiCiPad | Self::Binary | Self::Latin1SwedishCi => s.len(),
         };
@@ -307,6 +333,7 @@ impl Collation {
             Self::Utf8 => UTF8.with(make),
             Self::Utf8Ci => UTF8_CI.with(make),
             Self::Utf8AiCi | Self::Utf8AiCiPad => UTF8_AI_CI.with(make),
+            Self::Utf8Shifted => UTF8_SHIFTED.with(make),
             Self::Binary => {
                 out.extend_from_slice(s.as_bytes());
                 Ok(())
@@ -352,6 +379,8 @@ impl Collation {
             } else {
                 None
             }
+        } else if is_libc_locale(name) {
+            Some(Self::Utf8Shifted)
         } else {
             None
         };
@@ -381,7 +410,7 @@ impl Collation {
     /// collation gives ILIKE semantics.
     pub fn to_insensitive(self) -> Self {
         match self {
-            Self::Utf8 | Self::Binary | Self::Utf8Binary => Self::Utf8Ci,
+            Self::Utf8 | Self::Binary | Self::Utf8Binary | Self::Utf8Shifted => Self::Utf8Ci,
             Self::Utf8Ci | Self::Utf8AiCi | Self::Latin1SwedishCi | Self::Utf8AiCiPad => self,
         }
     }
@@ -391,9 +420,12 @@ impl Collation {
         match self {
             Self::Latin1SwedishCi => CharsetFamily::Latin1,
             Self::Binary => CharsetFamily::Binary,
-            Self::Utf8 | Self::Utf8Ci | Self::Utf8AiCi | Self::Utf8Binary | Self::Utf8AiCiPad => {
-                CharsetFamily::Utf8
-            }
+            Self::Utf8
+            | Self::Utf8Ci
+            | Self::Utf8AiCi
+            | Self::Utf8Binary
+            | Self::Utf8AiCiPad
+            | Self::Utf8Shifted => CharsetFamily::Utf8,
         }
     }
 }
@@ -404,6 +436,17 @@ pub enum CharsetFamily {
     Latin1,
     Utf8,
     Binary,
+}
+
+/// Return whether `name` has the `language_TERRITORY` form of a libc locale, such as `de_DE.utf8`.
+fn is_libc_locale(name: &str) -> bool {
+    let base = name.split(['.', '@']).next().unwrap_or(name);
+    base.split_once('_').is_some_and(|(language, territory)| {
+        (2..=3).contains(&language.len())
+            && language.bytes().all(|b| b.is_ascii_lowercase())
+            && territory.len() == 2
+            && territory.bytes().all(|b| b.is_ascii_uppercase())
+    })
 }
 
 fn collator_options(strength: Option<Strength>) -> CollatorOptions {
@@ -515,11 +558,56 @@ mod tests {
             Collation::get_or_default(pg, "en-US-x-icu"),
             Collation::Utf8
         );
-        // Unknown libc collations also fall back.
+        assert_eq!(
+            Collation::get_or_default(pg, "en_US.utf8"),
+            Collation::Utf8Shifted
+        );
         assert_eq!(
             Collation::get_or_default(pg, "en_US.UTF-8"),
-            Collation::Utf8
+            Collation::Utf8Shifted
         );
+        // Other libc locales map to the en_US approximation with a warn_once log.
+        assert_eq!(
+            Collation::get_or_default(pg, "de_DE.utf8"),
+            Collation::Utf8Shifted
+        );
+        assert_eq!(
+            Collation::get_or_default(pg, "sr_RS@latin"),
+            Collation::Utf8Shifted
+        );
+    }
+
+    /// The order Postgres 16 gives these strings under `en_US.utf8`.
+    #[test]
+    fn utf8_shifted_ordering() {
+        let expected = [
+            "a b",
+            "ab",
+            "a-c",
+            "apple",
+            "Apple",
+            "eclair",
+            "éclair",
+            "Éclair",
+            "item 1670 funko",
+            "item 1697 toy",
+            "item 1699 card",
+            "item 16 sneaker",
+            "item-17 pin",
+            "item_18 mug",
+            "Item 19 cap",
+            "item20 bag",
+            "zebra",
+            "Zebra",
+        ];
+        let col = Collation::Utf8Shifted;
+        let mut sorted = expected;
+        sorted.reverse();
+        sorted.sort_by(|a, b| col.compare(a, b));
+        assert_eq!(sorted, expected);
+        sorted.reverse();
+        sorted.sort_by_key(|s| col.key(s));
+        assert_eq!(sorted, expected);
     }
 
     #[test]

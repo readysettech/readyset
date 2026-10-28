@@ -14,4 +14,7 @@ PostgreSQL=>C
 PostgreSQL=>POSIX
 PostgreSQL=>und
 PostgreSQL=>und-x-icu
+PostgreSQL=>en_US
+PostgreSQL=>en_US.utf8
+PostgreSQL=>en_US.UTF-8
 PostgreSQL=>default

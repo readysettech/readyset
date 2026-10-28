@@ -85,9 +85,10 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
         DfType::Unknown => Ok(Type::TEXT), // The default type for "unknown" in pgsql is TEXT
         DfType::Bool => Ok(Type::BOOL),
         DfType::Char(..) => Ok(Type::BPCHAR),
-        DfType::VarChar(_, Collation::Utf8 | Collation::Binary | Collation::Utf8Binary) => {
-            Ok(Type::VARCHAR)
-        }
+        DfType::VarChar(
+            _,
+            Collation::Utf8 | Collation::Binary | Collation::Utf8Binary | Collation::Utf8Shifted,
+        ) => Ok(Type::VARCHAR),
         DfType::VarChar(_, Collation::Utf8Ci) => {
             // TODO: use the right CITEXT type
             Ok(Type::VARCHAR)
@@ -101,7 +102,9 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
         DfType::SmallInt => Ok(Type::INT2),
         DfType::Float => Ok(Type::FLOAT4),
         DfType::Double => Ok(Type::FLOAT8),
-        DfType::Text(Collation::Utf8 | Collation::Binary | Collation::Utf8Binary) => Ok(Type::TEXT),
+        DfType::Text(
+            Collation::Utf8 | Collation::Binary | Collation::Utf8Binary | Collation::Utf8Shifted,
+        ) => Ok(Type::TEXT),
         DfType::Text(Collation::Utf8Ci) => Ok(Type::TEXT), // TODO: use the right CITEXT type
         DfType::Text(Collation::Utf8AiCi | Collation::Latin1SwedishCi | Collation::Utf8AiCiPad) => {
             unreachable!("not used by Postgres")
@@ -156,9 +159,13 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
                 }
                 DfType::Bool => Ok(Type::BOOL_ARRAY),
                 DfType::Char(..) => Ok(Type::BPCHAR_ARRAY),
-                DfType::VarChar(_, Collation::Utf8 | Collation::Binary | Collation::Utf8Binary) => {
-                    Ok(Type::VARCHAR_ARRAY)
-                }
+                DfType::VarChar(
+                    _,
+                    Collation::Utf8
+                    | Collation::Binary
+                    | Collation::Utf8Binary
+                    | Collation::Utf8Shifted,
+                ) => Ok(Type::VARCHAR_ARRAY),
                 DfType::VarChar(_, Collation::Utf8Ci) => {
                     // TODO: use the right CITEXT type
                     Ok(Type::VARCHAR_ARRAY)
@@ -172,9 +179,12 @@ pub fn type_to_pgsql(col_type: &DfType) -> Result<pgsql::types::Type, Error> {
                 DfType::SmallInt => Ok(Type::INT2_ARRAY),
                 DfType::Float => Ok(Type::FLOAT4_ARRAY),
                 DfType::Double => Ok(Type::FLOAT8_ARRAY),
-                DfType::Text(Collation::Utf8 | Collation::Binary | Collation::Utf8Binary) => {
-                    Ok(Type::TEXT_ARRAY)
-                }
+                DfType::Text(
+                    Collation::Utf8
+                    | Collation::Binary
+                    | Collation::Utf8Binary
+                    | Collation::Utf8Shifted,
+                ) => Ok(Type::TEXT_ARRAY),
                 DfType::Text(Collation::Utf8Ci) => {
                     // TODO: use the right CITEXT_ARRAY type
                     Ok(Type::TEXT_ARRAY)
