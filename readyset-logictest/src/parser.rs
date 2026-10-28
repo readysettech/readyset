@@ -8,6 +8,7 @@
 
 use std::convert::TryInto;
 use std::io;
+use std::str;
 use std::str::FromStr;
 
 use anyhow::{anyhow, bail, Context};
@@ -18,7 +19,7 @@ use nom::bytes::complete::{tag, tag_no_case};
 use nom::character::complete::{
     alphanumeric1, anychar, char, digit1, line_ending, not_line_ending, one_of, space0, space1,
 };
-use nom::combinator::{complete, eof, map, map_opt, map_parser, opt, peek, recognize};
+use nom::combinator::{complete, eof, map, map_opt, map_parser, map_res, opt, peek, recognize};
 use nom::multi::{count, fold_many1, many0, many1, many_till};
 use nom::sequence::{delimited, pair, preceded, terminated, tuple};
 use nom::IResult;
@@ -98,9 +99,21 @@ fn end_of_statement(i: &[u8]) -> IResult<&[u8], ()> {
     ))(i)
 }
 
+/// Return the UTF-8 text before `end`, leaving `end` unconsumed.
+fn text_till<'a, F, O>(end: F) -> impl FnMut(&'a [u8]) -> IResult<&'a [u8], String>
+where
+    F: FnMut(&'a [u8]) -> IResult<&'a [u8], O>,
+{
+    map(
+        map_res(recognize(many_till(anychar, peek(end))), str::from_utf8),
+        str::to_owned,
+    )
+}
+
 fn statement_command(i: &[u8]) -> IResult<&[u8], String> {
-    let (i, s) = many_till(anychar, end_of_statement)(i)?;
-    Ok((i, s.0.into_iter().collect()))
+    let (i, s) = text_till(end_of_statement)(i)?;
+    let (i, _) = end_of_statement(i)?;
+    Ok((i, s))
 }
 
 fn statement(i: &[u8]) -> IResult<&[u8], Statement> {
@@ -358,9 +371,8 @@ fn query(i: &[u8]) -> IResult<&[u8], Query> {
         ))(i)?
     };
     let (i, _) = line_ending(i)?;
-    let (i, query) = map(many_till(anychar, end_of_query), |(s, _)| {
-        s.into_iter().collect::<String>()
-    })(i)?;
+    let (i, query) = text_till(end_of_query)(i)?;
+    let (i, _) = end_of_query(i)?;
     let (i, params) = query_params(i)?;
     let (i, _) = tag("----")(i)?;
     let (i, _) = opt(pair(line_ending, comment))(i)?;
@@ -564,6 +576,23 @@ CREATE TABLE t1(a INTEGER, b INTEGER, c INTEGER, d INTEGER, e INTEGER)";
                 command: "CREATE TABLE t1(a INTEGER, b INTEGER, c INTEGER, d INTEGER, e INTEGER)"
                     .to_string()
             }
+        );
+    }
+
+    #[test]
+    fn parse_non_ascii_text() {
+        let input = "statement ok\nINSERT INTO t VALUES ('\u{e9}')";
+        assert_eq!(
+            complete(statement)(input.as_bytes()).unwrap().1.command,
+            "INSERT INTO t VALUES ('\u{e9}')"
+        );
+
+        let input = "query T\nSELECT '\u{e9}'\n----\n\u{e9}\n";
+        let query = complete(query)(input.as_bytes()).unwrap().1;
+        assert_eq!(query.query, "SELECT '\u{e9}'");
+        assert_eq!(
+            query.results,
+            QueryResults::Results(vec![Value::Text("\u{e9}".into())])
         );
     }
 
