@@ -1,0 +1,72 @@
+# A three-valued-logic probe is a join added to the statement that asked for it, and it is
+# remembered by the shape of the right-hand side it probes.  Those two facts agree only while one
+# statement is asking.  Each query below has two subqueries probing the same right-hand side from
+# different statements, so a probe remembered across them is read by a statement that does not
+# join it.
+
+statement ok
+create table p (pn int);
+
+statement ok
+create table s (sn int);
+
+statement ok
+create table j (jn int);
+
+statement ok
+create table spj (sn int);
+
+statement ok
+insert into p values (1), (2), (3), (4);
+
+statement ok
+insert into s values (2), (3), (4);
+
+statement ok
+insert into j values (1), (5), (6);
+
+statement ok
+insert into spj values (1), (2);
+
+# The outer statement projects an IN over `spj` while a subquery of its WHERE reads a NOT IN over
+# the same `spj`.  The projected one is the reference that escapes: the guard that rejects a
+# predicate naming a relation outside the FROM reads the WHERE clause, and this one is in the
+# select list.
+query I rowsort
+select (p.pn in (select spj.sn from spj)) as c from p
+where p.pn in (select s.sn from s where s.sn not in (select spj.sn from spj));
+----
+0
+0
+
+# Two projected subqueries probing the same right-hand side.  They are two statements, so each
+# owes itself the join, and neither may answer with the other's.
+query III rowsort
+select p.pn,
+       (select count(*) from s where s.sn not in (select spj.sn from spj)) as c,
+       (select count(*) from j where j.jn not in (select spj.sn from spj)) as d
+from p;
+----
+1
+2
+2
+2
+2
+2
+3
+2
+2
+4
+2
+2
+
+# A NULL on the probed side is what the probe exists to find: NOT IN over it is never true, so the
+# count is zero rather than the row count.  Reading another statement's probe here answers from the
+# wrong relation's nulls.
+statement ok
+insert into spj values (null);
+
+query I nosort
+select (select count(*) from s where s.sn not in (select spj.sn from spj)) as c from p where p.pn = 1;
+----
+0

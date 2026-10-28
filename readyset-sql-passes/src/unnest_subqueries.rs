@@ -2645,6 +2645,20 @@ pub(crate) fn unnest_all_subqueries<U: UniqueColumnsSchema>(
         unsupported!("Subquery in GROUP BY is not supported");
     }
 
+    // The three passes below rewrite this statement, and a probe one of them builds is a join
+    // this statement carries.  Give the statement a registry of its own so the three share what
+    // they build for it, while a statement nested inside any of them starts from nothing and
+    // builds the probes it reads itself.
+    let outer_probes = mem::replace(&mut ctx.probes, ProbeRegistry::new());
+    let statuses = unnest_subqueries_at_this_level(stmt, ctx);
+    ctx.probes = outer_probes;
+    statuses
+}
+
+fn unnest_subqueries_at_this_level<U: UniqueColumnsSchema>(
+    stmt: &mut SelectStatement,
+    ctx: &mut UnnestContext<U>,
+) -> ReadySetResult<RewriteStatus> {
     let status1 = unnest_subqueries_in_where(stmt, ctx)?;
     let status2 = unnest_subqueries_in_fields(stmt, ctx)?;
     let status3 = unnest_lateral_subqueries(stmt, ctx)?;

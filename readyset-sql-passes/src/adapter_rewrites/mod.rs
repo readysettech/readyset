@@ -5023,5 +5023,70 @@ mod tests {
                 "MySQL table should be qualified with database name"
             );
         }
+
+        /// A three-valued-logic probe is remembered by the shape of the right-hand side it probes,
+        /// and it is a join added to the statement that asked for it.  Those two facts only agree
+        /// while one statement is asking: here the inner subquery's `NOT IN` builds the probe, and
+        /// the outer `IN` asks for the same shape, so it is handed an alias for a join it does not
+        /// carry.  Postgres reads the result as `missing FROM-clause entry`.
+        #[test]
+        fn a_probe_joined_into_one_statement_is_not_handed_to_another() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT (qa.p.pn IN (SELECT qa.spj.sn FROM qa.spj)) AS c FROM qa.p \
+                 WHERE qa.p.pn IN (SELECT qa.s.sn FROM qa.s WHERE qa.s.sn NOT IN \
+                 (SELECT qa.spj.sn FROM qa.spj))",
+                Dialect::PostgreSQL,
+            );
+
+            rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                .expect("rewrite should succeed");
+
+            assert!(
+                !crate::util::is_correlated(&query),
+                "the statement reads a relation it does not select from: {}",
+                query.display(Dialect::PostgreSQL)
+            );
+        }
+
+        /// Two projected subqueries probing the same right-hand side are two statements, each
+        /// needing the probe joined into itself.  Where the reference lands in a WHERE clause the
+        /// correlation check refuses the statement, so this reads as a query that cannot be
+        /// cached rather than as a wrong one.
+        #[test]
+        fn probed_subqueries_sharing_a_right_hand_side_each_get_their_own() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT qa.p.pn, (SELECT COUNT(*) FROM qa.s WHERE qa.s.sn NOT IN \
+                 (SELECT qa.spj.sn FROM qa.spj)) AS c, (SELECT COUNT(*) FROM qa.j WHERE qa.j.jn \
+                 NOT IN (SELECT qa.spj.jn FROM qa.spj)) AS d FROM qa.p",
+                Dialect::PostgreSQL,
+            );
+
+            rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                .expect("each statement should build the probe it reads");
+        }
+
+        /// The same, with one of the two probes belonging to the statement being rewritten rather
+        /// than to a subquery of it.
+        #[test]
+        fn a_probe_in_a_subquery_and_one_in_its_outer_statement_stay_separate() {
+            let context = SchemaAwareTestContext::new(Dialect::PostgreSQL);
+            let mut query = parse_select_statement(
+                "SELECT qa.p.pn, (SELECT COUNT(*) FROM qa.s WHERE qa.s.sn NOT IN \
+                 (SELECT qa.spj.sn FROM qa.spj)) AS c FROM qa.p \
+                 WHERE qa.p.pn NOT IN (SELECT qa.spj.sn FROM qa.spj)",
+                Dialect::PostgreSQL,
+            );
+
+            rewrite_equivalent_deep(&mut query, rewrite_params(Dialect::PostgreSQL), context)
+                .expect("each statement should build the probe it reads");
+
+            assert!(
+                !crate::util::is_correlated(&query),
+                "the statement reads a relation it does not select from: {}",
+                query.display(Dialect::PostgreSQL)
+            );
+        }
     }
 }
