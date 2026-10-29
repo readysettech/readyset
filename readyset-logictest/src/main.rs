@@ -236,7 +236,7 @@ struct Verify {
         long,
         env = "PARSING_PRESET",
         value_enum,
-        default_value = "both-prefer-nom",
+        default_value = "only-sqlparser",
         hide = true,
         conflicts_with_all = ["database_url", "readyset_url", "mysql", "postgresql"],
     )]
