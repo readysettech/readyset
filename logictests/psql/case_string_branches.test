@@ -86,7 +86,7 @@ CREATE CACHE FROM SELECT
     ELSE 'high'
   END AS bucket
 FROM case_inf
-WHERE category = ?
+WHERE category = $1
 
 query IT rowsort
 SELECT
