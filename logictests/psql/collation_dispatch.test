@@ -96,10 +96,10 @@ CREATE TABLE coll_en_us_ties (
 )
 
 statement ok
-INSERT INTO coll_en_us_ties VALUES (1, 'é'), (2, 'é'), (3, 'é')
+INSERT INTO coll_en_us_ties VALUES (1, U&'\00E9'), (2, U&'e\0301'), (3, U&'\00E9')
 
 query I nosort
-SELECT id FROM coll_en_us_ties WHERE s = 'é' ORDER BY id
+SELECT id FROM coll_en_us_ties WHERE s = U&'\00E9' ORDER BY id
 ----
 1
 3
