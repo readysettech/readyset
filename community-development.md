@@ -132,8 +132,8 @@ cargo test --skip integration_serial
 ### Building binary packages
 
 Linux distribution packages can be built that will install Readyset as a `systemd` service.  The
-current configurations have been tested with Fedora 39, Ubuntu 22.04, Debian 12, and Amazon Linux
-2023. However, they may work just fine on other distros as well.  In addition to the set-up steps
+current configurations have been tested with Ubuntu 22.04, Debian 12, and Amazon Linux 2023.
+However, they may work just fine on other distros as well.  In addition to the set-up steps
 for building Readyset, the following dependencies are required:
 
 For `deb`:

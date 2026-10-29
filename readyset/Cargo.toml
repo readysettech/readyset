@@ -110,6 +110,11 @@ assets = [
 #pre_uninstall_script = ...
 #post_uninstall_script = ...
 
+# The pre-install scriptlet creates the service user with useradd, provided by shadow-utils which is
+# normally available on an actual host but may not be present in a docker container.
+[package.metadata.generate-rpm.requires]
+shadow-utils = "*"
+
 # Debug symbols, packaged separately so they can be installed alongside the application rpm.
 [package.metadata.generate-rpm.variants.debuginfo]
 name = "readyset-debuginfo"
