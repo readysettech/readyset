@@ -815,13 +815,10 @@ impl TryFromDialect<sqlparser::ast::Query> for SelectSpecification {
             sqlparser::ast::SetExpr::Select(_) => {
                 Ok(Self::Simple(value.try_into_dialect(dialect)?))
             }
-            sqlparser::ast::SetExpr::SetOperation { op, .. } => match op {
-                sqlparser::ast::SetOperator::Union => {
-                    Ok(Self::Compound(value.try_into_dialect(dialect)?))
-                }
-                op => unsupported!("Unsupported set operation {op}"),
-            },
-            _ => failed!("Should only be called on a SELECT or UNION statement"),
+            sqlparser::ast::SetExpr::SetOperation { .. } => {
+                Ok(Self::Compound(value.try_into_dialect(dialect)?))
+            }
+            _ => failed!("Should only be called on a SELECT or set operation"),
         }
     }
 }

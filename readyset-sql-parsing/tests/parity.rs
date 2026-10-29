@@ -1410,6 +1410,8 @@ fn create_view() {
     check_parse_postgres!(
         r#"CREATE VIEW "v1" AS SELECT t1.i FROM (t1 JOIN t2 ON ((t1.i = t2.j)))"#
     );
+    check_parse_both!("CREATE VIEW v AS SELECT a FROM b INTERSECT SELECT c FROM d");
+    check_parse_both!("CREATE VIEW v AS SELECT a FROM b EXCEPT SELECT c FROM d");
 }
 
 #[test]
