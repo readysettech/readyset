@@ -1,0 +1,23 @@
+# U& string literals decode Unicode escapes.
+
+statement ok
+CREATE TABLE ustr (id INT PRIMARY KEY, s TEXT)
+
+statement ok
+INSERT INTO ustr VALUES (1, U&'caf\00E9'), (2, U&'\+01F600'), (3, U&'it''s \\ ok')
+
+query IT nosort
+SELECT id, s FROM ustr WHERE s = U&'caf\00E9'
+----
+1
+café
+
+query II nosort
+SELECT id, octet_length(s) FROM ustr ORDER BY id
+----
+1
+5
+2
+4
+3
+9

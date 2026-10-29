@@ -204,7 +204,7 @@ impl TryFrom<sqlparser::ast::Value> for Literal {
                     Ok(Self::Number(s))
                 }
             }
-            Value::EscapedStringLiteral(s) => Ok(Self::String(s)),
+            Value::EscapedStringLiteral(s) | Value::UnicodeStringLiteral(s) => Ok(Self::String(s)),
             Value::SingleQuotedByteStringLiteral(s) => {
                 let mut bitvec = BitVec::new();
                 for byte in s.as_bytes() {
