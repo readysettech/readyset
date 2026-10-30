@@ -581,7 +581,10 @@ impl Materializations {
                             if let Some(m) = self.have.get(node) {
                                 // We've found an already-materialized node along our path - we can
                                 // use that as the source of our eventual replay path
-                                if !m.contains(index) {
+                                //
+                                // Nodes in `new` start out empty, so they need the index even if
+                                // `have` already lists it.
+                                if !m.contains(index) || new.contains(node) {
                                     // we need to add an index to this materialization to make that
                                     // happen
                                     add.entry(*node)

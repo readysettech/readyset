@@ -3367,6 +3367,72 @@ async fn write_during_reader_migration_is_not_dropped() {
     shutdown_tx.shutdown().await;
 }
 
+#[cfg(feature = "failure_injection")]
+#[tokio::test(flavor = "multi_thread")]
+async fn domain_recovery_rebuilds_replay_index() {
+    use readyset_util::failpoints::HANDLE_PACKET;
+
+    // Recovery reopens the base, which keeps its rows only when persisted
+    let dir = tempfile::tempdir().unwrap();
+    let mut builder = builder_for_tests();
+    builder.set_persistence(get_persistence_params_in_tmp_dir(
+        "domain_recovery_rebuilds_index",
+        dir.path().to_str().unwrap(),
+    ));
+    let (mut g, shutdown_tx) = builder.start_local().await.unwrap();
+    eventually! {
+        g.extend_recipe(
+            ChangeList::from_strings(vec!["CREATE TABLE t (a int, b int)"], Dialect::DEFAULT_MYSQL)
+                .unwrap(),
+        )
+        .await
+        .is_ok()
+    };
+    // The aggregate is indexed on (a, b) for itself and on a for the reader's replays
+    g.extend_recipe(
+        ChangeList::from_strings(
+            vec!["CREATE CACHE q FROM SELECT a, b, count(*) FROM t WHERE a = ? GROUP BY a, b"],
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+    let mut t = g.table("t").await.unwrap();
+    t.insert_many(vec![
+        vec![DfValue::from(1), 1.into()],
+        vec![1.into(), 2.into()],
+    ])
+    .await
+    .unwrap();
+    sleep().await;
+
+    // Fail domain 0, which holds the base and the aggregate, on the next write. Nothing has read
+    // from the cache yet, so the lookup below has to replay from the recovered aggregate.
+    fail::cfg(HANDLE_PACKET, "return(0)").unwrap();
+    t.insert(vec![DfValue::from(2), 1.into()])
+        .await
+        .unwrap_err();
+    fail::cfg(HANDLE_PACKET, "off").unwrap();
+
+    let expected = vec![
+        vec![DfValue::from(1), 1.into(), 1.into()],
+        vec![1.into(), 2.into(), 1.into()],
+    ];
+    eventually! {
+        let Ok(view) = g.view("q").await else { return false };
+        let mut q = view.into_reader_handle().unwrap();
+        let key = [DfValue::from(1)];
+        let lookup = q.lookup(&key, Dialect::DEFAULT_MYSQL);
+        match tokio::time::timeout(Duration::from_secs(5), lookup).await {
+            Ok(Ok(rows)) => rows.into_vec().into_iter().sorted().collect::<Vec<_>>() == expected,
+            _ => false,
+        }
+    };
+
+    shutdown_tx.shutdown().await;
+}
+
 /// REA-6688 follow-up: the replay-start barrier must not disable a union's deduplication. `a OR a`
 /// lowers to a deduplicating (bag) union across two branches that match the same rows, so each row
 /// must appear once. When the cache fills by a full-replay reader migration, one barrier crosses
