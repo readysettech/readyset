@@ -610,7 +610,6 @@ fn coerce_key_if_needed(
     columns: &[usize],
     key: &PointKey,
 ) -> ReadySetResult<Option<PointKey>> {
-    debug_assert!(col_defs.len() >= columns.len());
     debug_assert!(key.len() == columns.len());
 
     let coerced_key: PointKey;
@@ -910,6 +909,22 @@ mod tests {
     use vec1::vec1;
 
     use super::*;
+
+    /// A join key may bind the same column of one relation twice, so a lookup key can carry more
+    /// entries than the probed parent has columns while every index stays in range.
+    #[test]
+    fn coerce_key_tolerates_a_repeated_key_column() {
+        let col_defs = [Column::new("pn".into(), DfType::Int, None)];
+        let key = PointKey::from([DfValue::from(1), DfValue::from(1)]);
+
+        let coerced = coerce_key_if_needed(&col_defs, &[0, 0], &key)
+            .expect("a repeated in-range index is a valid lookup key");
+
+        assert!(
+            coerced.is_none(),
+            "an integer key against an int column needs no coercion"
+        );
+    }
 
     /// Regression test for when a partial replay carries only `Equal` keys,
     /// `MissBuilder::build` never enters the range-cover loop. The resulting miss's replay
