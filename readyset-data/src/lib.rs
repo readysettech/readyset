@@ -843,6 +843,28 @@ impl DfValue {
             (DfValue::TinyText(t), DfType::Binary(_) | DfType::VarBinary(_)) => {
                 return Ok(DfValue::ByteArray(t.as_bytes().to_vec().into()))
             }
+            // MySQL and Postgres compare a string that's longer than the column's type without
+            // truncating it, so 'abcd' doesn't match the varchar(3) value 'abc'. Do the same here.
+            // Trailing spaces don't count toward a CHAR's length. A MySQL client binds a string
+            // parameter as bytes, which are handled the same way.
+            (
+                DfValue::Text(_) | DfValue::TinyText(_) | DfValue::ByteArray(_),
+                DfType::VarChar(len, collation) | DfType::Char(len, collation),
+            ) => {
+                let s = match self {
+                    DfValue::ByteArray(bytes) => std::str::from_utf8(bytes).ok(),
+                    _ => self.as_str(),
+                };
+                if let Some(s) = s {
+                    let counted = match to_ty {
+                        DfType::Char(..) => s.trim_end_matches(' '),
+                        _ => s,
+                    };
+                    if counted.chars().count() > *len as usize {
+                        return Ok(DfValue::from_str_and_collation(s, *collation));
+                    }
+                }
+            }
             _ => {}
         }
         self.coerce_to(to_ty, &DfType::Unknown)
@@ -5073,6 +5095,41 @@ mod tests {
                 DfValue::TinyText(TinyText::from_arr(b"abc")),
                 DfType::VarBinary(10),
                 DfValue::ByteArray(Arc::new(b"abc".to_vec())),
+            );
+        }
+
+        #[test]
+        fn text_longer_than_its_type_is_compared_without_truncating() {
+            let utf8 = Collation::Utf8;
+            check_comparison!(
+                DfValue::from("abcd"),
+                DfType::VarChar(3, utf8),
+                DfValue::from("abcd")
+            );
+            check_comparison!(
+                DfValue::from(b"abcd".to_vec()),
+                DfType::VarChar(3, utf8),
+                DfValue::from("abcd")
+            );
+            check_comparison!(
+                DfValue::from("abc"),
+                DfType::VarChar(3, utf8),
+                DfValue::from("abc")
+            );
+            check_comparison!(
+                DfValue::from("abcd"),
+                DfType::Char(3, utf8),
+                DfValue::from("abcd")
+            );
+            check_comparison!(
+                DfValue::from("abc  "),
+                DfType::Char(3, utf8),
+                DfValue::from("abc")
+            );
+            check_comparison!(
+                DfValue::from("ab"),
+                DfType::Char(3, utf8),
+                DfValue::from("ab ")
             );
         }
 
