@@ -1,0 +1,21 @@
+statement ok
+CREATE TABLE t (id int PRIMARY KEY, x double)
+
+statement ok
+INSERT INTO t VALUES (1, 0.5), (2, 1.5), (3, 2.5), (4, -2.5)
+
+query I nosort
+SELECT CAST(x AS SIGNED) FROM t ORDER BY id
+----
+0
+2
+2
+-2
+
+query R nosort
+SELECT round(x) FROM t ORDER BY id
+----
+0
+2
+2
+-2

@@ -1055,8 +1055,8 @@ impl BuiltinFunction {
                 let rnd_prec = match non_null!(param2) {
                     DfValue::Int(inner) => inner as i32,
                     DfValue::UnsignedInt(inner) => inner as i32,
-                    DfValue::Float(f) => f.round() as i32,
-                    DfValue::Double(f) => f.round() as i32,
+                    DfValue::Float(f) => f.round_ties_even() as i32,
+                    DfValue::Double(f) => f.round_ties_even() as i32,
                     // XXX(mvzink): Yes, MySQL does round the second argument (up) if it's a decimal
                     // before using that to round the first argument. However, Postgres throws an
                     // error, so we are not matching that.
@@ -1074,7 +1074,8 @@ impl BuiltinFunction {
                             // type as a float. We never return greater precision than was
                             // stored so we choose the minimum of stored precision or rounded
                             // precision.
-                            let rounded_float = ($real * base.powf(rnd_prec as $real_type)).round()
+                            let rounded_float = ($real * base.powf(rnd_prec as $real_type))
+                                .round_ties_even()
                                 / base.powf(rnd_prec as $real_type);
                             let real = DfValue::try_from(rounded_float).unwrap();
                             Ok(real)
@@ -1082,7 +1083,7 @@ impl BuiltinFunction {
                             // Rounding precision is negative, so we need to zero out some
                             // digits.
                             let rounded_float = (($real / base.powf(-rnd_prec as $real_type))
-                                .round()
+                                .round_ties_even()
                                 * base.powf(-rnd_prec as $real_type));
                             let real = DfValue::try_from(rounded_float).unwrap();
                             Ok(real)
@@ -2389,6 +2390,30 @@ mod tests {
         let param1 = DfValue::try_from(number).unwrap();
         let want = DfValue::try_from(4.123_f32).unwrap();
         assert_eq!(expr.eval::<DfValue>(&[param1, param2]).unwrap(), want);
+    }
+
+    // The expected values come from MySQL 8.0.46 and PostgreSQL 15.
+    #[test]
+    fn eval_call_round_float_half_to_even() {
+        let round = parse_and_lower("round(c0)", PostgreSQL);
+        for (val, want) in [(0.5, 0.0), (2.5, 2.0), (3.5, 4.0), (-2.5, -2.0)] {
+            assert_eq!(
+                round.eval(&[DfValue::Double(val)]).unwrap(),
+                DfValue::Double(want),
+                "round({val})"
+            );
+        }
+        let round = parse_and_lower("round(c0, c1)", MySQL);
+        for (val, precision, want) in [(0.125, 2.0, 0.12), (25.0, -1.0, 20.0), (1.23456, 2.5, 1.23)]
+        {
+            assert_eq!(
+                round
+                    .eval(&[DfValue::Double(val), DfValue::Double(precision)])
+                    .unwrap(),
+                DfValue::Double(want),
+                "round({val}, {precision})"
+            );
+        }
     }
 
     #[test]

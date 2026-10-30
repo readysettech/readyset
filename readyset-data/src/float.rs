@@ -17,7 +17,7 @@ where
         return None;
     }
 
-    (val.round() as i64).try_into().ok()
+    (val.round_ties_even() as i64).try_into().ok()
 }
 
 fn coerce_f64_to_uint<I>(val: f64) -> Option<I>
@@ -32,7 +32,7 @@ where
         return None;
     }
 
-    (val.round() as u64).try_into().ok()
+    (val.round_ties_even() as u64).try_into().ok()
 }
 
 /// PostgreSQL renders non-finite floats as `Infinity`, `-Infinity` and `NaN`, where Rust's
@@ -231,8 +231,8 @@ pub(crate) fn coerce_decimal(
         details: "out of bounds".to_string(),
     };
 
-    // Although in `ROUND()`, both MySQL and PostgreSQL use "banker's rounding", when casting to
-    // integer types, they round away from zero if the fractional part is .5 or more.
+    // When converting a decimal to an integer, MySQL and Postgres both round halves away from zero:
+    // 2.5 becomes 3.
     let val = if to_ty.is_any_int() {
         &val.round_dp_with_strategy(0, readyset_decimal::RoundingMode::HalfUp)
     } else {
@@ -427,6 +427,20 @@ mod tests {
             .is_err());
     }
 
+    #[test]
+    fn float_to_integer_rounds_half_to_even() {
+        for (val, int) in [(0.5, 0), (1.5, 2), (2.5, 2), (-0.5, 0), (-2.5, -2)] {
+            assert_eq!(
+                DfValue::Double(val).coerce_to(&DfType::Int, &DfType::Unknown),
+                Ok(DfValue::Int(int))
+            );
+        }
+        assert_eq!(
+            DfValue::Double(2.5).coerce_to(&DfType::UnsignedBigInt, &DfType::Unknown),
+            Ok(DfValue::UnsignedInt(2))
+        );
+    }
+
     #[tags(no_retry)]
     #[proptest]
     fn float_to_tinyint(val: f32) {
@@ -437,7 +451,7 @@ mod tests {
         } else {
             assert_eq!(
                 DfValue::Double(val as f64).coerce_to(&DfType::TinyInt, &DfType::Unknown),
-                Ok(DfValue::Int(val.round() as i64))
+                Ok(DfValue::Int(val.round_ties_even() as i64))
             );
         }
         // Yes, this is indeed the valid range for MySQL float to u8 conversion
@@ -448,7 +462,7 @@ mod tests {
         } else {
             assert_eq!(
                 DfValue::Double(val as f64).coerce_to(&DfType::UnsignedTinyInt, &DfType::Unknown),
-                Ok(DfValue::UnsignedInt(val.round() as u64))
+                Ok(DfValue::UnsignedInt(val.round_ties_even() as u64))
             );
         }
     }
@@ -463,7 +477,7 @@ mod tests {
         } else {
             assert_eq!(
                 DfValue::Double(val as f64).coerce_to(&DfType::SmallInt, &DfType::Unknown),
-                Ok(DfValue::Int(val.round() as i64))
+                Ok(DfValue::Int(val.round_ties_even() as i64))
             );
         }
         if val < -0.5f32 || val >= u16::MAX as f32 + 0.5 {
@@ -473,7 +487,7 @@ mod tests {
         } else {
             assert_eq!(
                 DfValue::Double(val as f64).coerce_to(&DfType::UnsignedSmallInt, &DfType::Unknown),
-                Ok(DfValue::UnsignedInt(val.round() as u64))
+                Ok(DfValue::UnsignedInt(val.round_ties_even() as u64))
             );
         }
     }
@@ -488,7 +502,7 @@ mod tests {
         } else {
             assert_eq!(
                 DfValue::Double(val as f64).coerce_to(&DfType::MediumInt, &DfType::Unknown),
-                Ok(DfValue::Int(val.round() as i64))
+                Ok(DfValue::Int(val.round_ties_even() as i64))
             );
         }
         if val < -0.5f32 || val >= ((1u32 << 24) - 1) as f32 + 0.5 {
@@ -498,7 +512,7 @@ mod tests {
         } else {
             assert_eq!(
                 DfValue::Double(val as f64).coerce_to(&DfType::UnsignedMediumInt, &DfType::Unknown),
-                Ok(DfValue::UnsignedInt(val.round() as u64))
+                Ok(DfValue::UnsignedInt(val.round_ties_even() as u64))
             );
         }
     }
@@ -513,7 +527,7 @@ mod tests {
         } else {
             assert_eq!(
                 DfValue::Double(val).coerce_to(&DfType::Int, &DfType::Unknown),
-                Ok(DfValue::Int(val.round() as i64))
+                Ok(DfValue::Int(val.round_ties_even() as i64))
             );
         }
         if val < -0.5f64 || val >= u32::MAX as f64 + 0.5 {
@@ -523,7 +537,7 @@ mod tests {
         } else {
             assert_eq!(
                 DfValue::Double(val).coerce_to(&DfType::UnsignedInt, &DfType::Unknown),
-                Ok(DfValue::UnsignedInt(val.round() as u64))
+                Ok(DfValue::UnsignedInt(val.round_ties_even() as u64))
             );
         }
     }
@@ -538,7 +552,7 @@ mod tests {
         } else {
             assert_eq!(
                 DfValue::Double(val).coerce_to(&DfType::BigInt, &DfType::Unknown),
-                Ok(DfValue::Int(val.round() as i64))
+                Ok(DfValue::Int(val.round_ties_even() as i64))
             );
         }
         if val < -0.5f64 || val >= u64::MAX as f64 + 0.5 {
@@ -548,7 +562,7 @@ mod tests {
         } else {
             assert_eq!(
                 DfValue::Double(val).coerce_to(&DfType::UnsignedBigInt, &DfType::Unknown),
-                Ok(DfValue::UnsignedInt(val.round() as u64))
+                Ok(DfValue::UnsignedInt(val.round_ties_even() as u64))
             );
         }
     }
@@ -640,7 +654,7 @@ mod tests {
 
         assert_eq!(
             DfValue::Float(0.5).coerce_to(&DfType::UnsignedTinyInt, &DfType::Unknown),
-            Ok(DfValue::UnsignedInt(1))
+            Ok(DfValue::UnsignedInt(0))
         );
 
         assert_eq!(
