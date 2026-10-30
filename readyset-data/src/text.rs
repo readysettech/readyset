@@ -461,6 +461,9 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
     /// Get the inner str from the DfValue
     fn try_str(&self) -> ReadySetResult<&str>;
 
+    /// The collation of the text
+    fn collation(&self) -> Collation;
+
     /// Print the DfValue name for error reporting
     fn type_name() -> String;
 
@@ -559,9 +562,22 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
     ) -> ReadySetResult<DfValue> {
         let mut str = self.try_str()?;
         // A char's trailing blanks are padding, which a conversion to a variable-length string
-        // drops.
+        // drops. A value with nothing to drop keeps its storage when the target already fits it.
         if from_ty.is_char() && matches!(to_ty, DfType::Text(_) | DfType::VarChar(..)) {
-            str = str.trim_end_matches(' ');
+            let trimmed = str.trim_end_matches(' ');
+            if trimmed.len() == str.len() {
+                let fits = match *to_ty {
+                    DfType::Text(c) => self.collation() == c,
+                    DfType::VarChar(l, c) => {
+                        self.collation() == c && l as usize >= str.chars().count()
+                    }
+                    _ => false,
+                };
+                if fits {
+                    return Ok(self.clone().into());
+                }
+            }
+            str = trimmed;
         }
 
         match *to_ty {
@@ -792,6 +808,10 @@ impl TextCoerce for TinyText {
         Ok(self.as_str())
     }
 
+    fn collation(&self) -> Collation {
+        TinyText::collation(self)
+    }
+
     fn type_name() -> String {
         "TinyText".into()
     }
@@ -800,6 +820,10 @@ impl TextCoerce for TinyText {
 impl TextCoerce for Text {
     fn try_str(&self) -> ReadySetResult<&str> {
         Ok(self.as_str())
+    }
+
+    fn collation(&self) -> Collation {
+        Text::collation(self)
     }
 
     fn type_name() -> String {
@@ -1042,6 +1066,21 @@ mod tests {
             padded.coerce_to(&char3, &char3).unwrap(),
             DfValue::from("ch ")
         );
+    }
+
+    #[test]
+    fn char_without_padding_keeps_its_text_storage() {
+        let char20 = DfType::Char(20, Collation::Utf8);
+        let value = DfValue::from("a string over fourteen bytes");
+        let DfValue::Text(before) = &value else {
+            panic!("expected a heap-backed text value");
+        };
+        for to_ty in [DfType::DEFAULT_TEXT, DfType::VarChar(40, Collation::Utf8)] {
+            let DfValue::Text(after) = value.coerce_to(&to_ty, &char20).unwrap() else {
+                panic!("expected a heap-backed text value");
+            };
+            assert!(std::ptr::eq(before.as_bytes(), after.as_bytes()));
+        }
     }
 
     #[test]
