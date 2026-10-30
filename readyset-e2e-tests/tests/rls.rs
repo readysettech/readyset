@@ -2808,6 +2808,313 @@ async fn pg_rls_shallow_cache_rls_enabled_beneath_view_hierarchy_extended() {
     run_rls_enabled_beneath_view_hierarchy(Protocol::Extended).await;
 }
 
+/// Create `stmts` on the upstream database `test_name`, panicking on the first failure.
+async fn run_upstream(test_name: &str, stmts: &[&str]) -> Client {
+    let mut upstream_cfg = psql_helpers::upstream_config();
+    upstream_cfg.dbname(test_name);
+    let upstream = psql_helpers::connect(upstream_cfg).await;
+    for stmt in stmts {
+        upstream
+            .simple_query(stmt)
+            .await
+            .unwrap_or_else(|e| panic!("upstream `{stmt}` failed: {e}"));
+    }
+    upstream
+}
+
+/// Poll `sql` until bob's read returns only his row from the shallow cache, after a change beneath
+/// a cached view turned it from plain to scoped.
+async fn wait_for_bob_scoped(rs: &Client, proto: Protocol, sql: &str, ctx: &str) {
+    let mut cached = false;
+    for _ in 0..40 {
+        if try_read_owner_ids(rs, proto, sql).await.ok() == Some(vec!["bob".to_string()])
+            && matches!(
+                psql_helpers::last_query_info(rs).await.destination,
+                QueryDestination::ReadysetShallow(_)
+            )
+        {
+            cached = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    assert!(cached, "bob's scoped read never came from the cache {ctx}");
+}
+
+/// A plain cache over view -> function -> table must be dropped when RLS turns on for the table.
+/// The view depends only on the function, so the cache has to be registered against the table the
+/// function reads. `security_invoker` requires Postgres 15.
+async fn run_rls_enabled_beneath_view_function(proto: Protocol) {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    PostgreSQLAdapter::recreate_database(&test_name).await;
+    setup_todos_upstream(&test_name).await;
+    let upstream = run_upstream(
+        &test_name,
+        &[
+            "CREATE FUNCTION api.doc_owners() RETURNS SETOF text STABLE LANGUAGE sql \
+             BEGIN ATOMIC SELECT owner_id FROM api.docs; END",
+            "CREATE VIEW api.owners_v WITH (security_invoker = true) AS \
+             SELECT 0 AS id, o AS owner_id FROM api.doc_owners() o",
+            "GRANT SELECT ON api.owners_v TO PUBLIC",
+        ],
+    )
+    .await;
+
+    let (rs, _handle, shutdown_tx) = connect_rls(&test_name).await;
+    let view = "SELECT * FROM api.owners_v";
+    rs.simple_query("SET ROLE authenticated")
+        .await
+        .expect("set role");
+    set_sub_claim(&rs, proto, "bob").await;
+    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {view}"))
+        .await
+        .expect("create cache");
+    assert_owner_ids_cached(&rs, proto, view, &["alice", "bob"], "plain cache before RLS").await;
+
+    // Enable RLS and add the policy in one transaction, so no poll observes RLS without a policy.
+    upstream
+        .simple_query(
+            "BEGIN; \
+             ALTER TABLE api.docs ENABLE ROW LEVEL SECURITY; \
+             CREATE POLICY docs_owner ON api.docs FOR SELECT TO public USING \
+             (owner_id = ((current_setting('request.jwt.claims'::text, true))::json \
+             ->> 'sub'::text)); \
+             COMMIT",
+        )
+        .await
+        .expect("enable rls");
+
+    wait_for_bob_scoped(&rs, proto, view, "after enabling RLS").await;
+    set_sub_claim(&rs, proto, "alice").await;
+    assert_owner_ids_cached(&rs, proto, view, &["alice"], "alice after RLS").await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres, 15)]
+async fn pg_rls_shallow_cache_rls_enabled_beneath_view_function_simple() {
+    run_rls_enabled_beneath_view_function(Protocol::Simple).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres, 15)]
+async fn pg_rls_shallow_cache_rls_enabled_beneath_view_function_extended() {
+    run_rls_enabled_beneath_view_function(Protocol::Extended).await;
+}
+
+/// A plain cache over view -> function -> table must be dropped when the function is redefined to
+/// read an RLS-active table. `CREATE OR REPLACE FUNCTION` keeps the function's OID and leaves the
+/// view untouched, so only the function's own fingerprint observes the change. `security_invoker`
+/// requires Postgres 15.
+async fn run_function_redefined_beneath_view(proto: Protocol) {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    PostgreSQLAdapter::recreate_database(&test_name).await;
+    setup_todos_upstream(&test_name).await;
+    let upstream = run_upstream(
+        &test_name,
+        &[
+            "CREATE FUNCTION api.owners() RETURNS SETOF text STABLE LANGUAGE sql \
+             BEGIN ATOMIC SELECT owner_id FROM api.projects; END",
+            "CREATE VIEW api.owners_v WITH (security_invoker = true) AS \
+             SELECT 0 AS id, o AS owner_id FROM api.owners() o",
+            "GRANT SELECT ON api.owners_v TO PUBLIC",
+        ],
+    )
+    .await;
+
+    let (rs, _handle, shutdown_tx) = connect_rls(&test_name).await;
+    let view = "SELECT * FROM api.owners_v";
+    rs.simple_query("SET ROLE authenticated")
+        .await
+        .expect("set role");
+    set_sub_claim(&rs, proto, "bob").await;
+    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {view}"))
+        .await
+        .expect("create cache");
+    // api.projects has no RLS, so the cache is plain and serves every row.
+    assert_owner_ids_cached(&rs, proto, view, &["alice", "bob"], "plain cache before redefine")
+        .await;
+
+    upstream
+        .simple_query(
+            "CREATE OR REPLACE FUNCTION api.owners() RETURNS SETOF text STABLE LANGUAGE sql \
+             BEGIN ATOMIC SELECT owner_id FROM api.todos; END",
+        )
+        .await
+        .expect("redefine function");
+
+    wait_for_bob_scoped(&rs, proto, view, "after redefining the function").await;
+    set_sub_claim(&rs, proto, "alice").await;
+    assert_owner_ids_cached(&rs, proto, view, &["alice", "alice"], "alice after redefine").await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres, 15)]
+async fn pg_rls_shallow_cache_function_redefined_beneath_view_simple() {
+    run_function_redefined_beneath_view(Protocol::Simple).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres, 15)]
+async fn pg_rls_shallow_cache_function_redefined_beneath_view_extended() {
+    run_function_redefined_beneath_view(Protocol::Extended).await;
+}
+
+/// Assert that creating a cache over `query` is refused with `code`, and that reads of it keep
+/// returning `expected` from the upstream.
+async fn assert_cache_refused(
+    rs: &Client,
+    proto: Protocol,
+    query: &str,
+    code: &str,
+    expected: &[&str],
+) {
+    let err = rs
+        .simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {query}"))
+        .await
+        .expect_err("the cache must be refused");
+    assert!(
+        err.as_db_error()
+            .is_some_and(|e| e.message().contains(&format!("code={code}"))),
+        "{query}: unexpected refusal: {err:?}",
+    );
+    for read in ["first read", "repeat"] {
+        assert_eq!(read_owner_ids(rs, proto, query).await, expected, "{query}: {read}");
+        assert_dest(rs, QueryDestination::Upstream, &format!("{query}: {read}")).await;
+    }
+}
+
+/// A view over a VOLATILE function is refused and served upstream, even when the function reads
+/// only a plain table. `security_invoker` requires Postgres 15.
+async fn run_volatile_function_beneath_view(proto: Protocol) {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    PostgreSQLAdapter::recreate_database(&test_name).await;
+    setup_todos_upstream(&test_name).await;
+    run_upstream(
+        &test_name,
+        &[
+            "CREATE FUNCTION api.doc_owners() RETURNS SETOF text VOLATILE LANGUAGE sql \
+             BEGIN ATOMIC SELECT owner_id FROM api.docs; END",
+            "CREATE VIEW api.owners_v WITH (security_invoker = true) AS \
+             SELECT 0 AS id, o AS owner_id FROM api.doc_owners() o",
+            "GRANT SELECT ON api.owners_v TO PUBLIC",
+        ],
+    )
+    .await;
+
+    let (rs, _handle, shutdown_tx) = connect_rls(&test_name).await;
+    rs.simple_query("SET ROLE authenticated")
+        .await
+        .expect("set role");
+    set_sub_claim(&rs, proto, "bob").await;
+    assert_cache_refused(
+        &rs,
+        proto,
+        "SELECT * FROM api.owners_v",
+        "volatile_function",
+        &["alice", "bob"],
+    )
+    .await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres, 15)]
+async fn pg_rls_shallow_cache_volatile_function_beneath_view_simple() {
+    run_volatile_function_beneath_view(Protocol::Simple).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres, 15)]
+async fn pg_rls_shallow_cache_volatile_function_beneath_view_extended() {
+    run_volatile_function_beneath_view(Protocol::Extended).await;
+}
+
+/// A view without `security_invoker` over a SECURITY DEFINER function reads the function's table
+/// as the function's owner. Over a plain table every caller gets the same rows, so the cache is
+/// plain; over an RLS-active table the policies do not run as the caller, so the cache is refused.
+/// `security_invoker` requires Postgres 15.
+async fn run_security_definer_function_beneath_view(proto: Protocol) {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    PostgreSQLAdapter::recreate_database(&test_name).await;
+    setup_todos_upstream(&test_name).await;
+    run_upstream(
+        &test_name,
+        &[
+            "CREATE FUNCTION api.doc_owners() RETURNS SETOF text STABLE SECURITY DEFINER \
+             LANGUAGE sql BEGIN ATOMIC SELECT owner_id FROM api.docs; END",
+            "CREATE FUNCTION api.todo_owners() RETURNS SETOF text STABLE SECURITY DEFINER \
+             LANGUAGE sql BEGIN ATOMIC SELECT owner_id FROM api.todos; END",
+            "CREATE VIEW api.doc_owners_v AS \
+             SELECT 0 AS id, o AS owner_id FROM api.doc_owners() o",
+            "CREATE VIEW api.todo_owners_v AS \
+             SELECT 0 AS id, o AS owner_id FROM api.todo_owners() o",
+            "GRANT SELECT ON api.doc_owners_v, api.todo_owners_v TO PUBLIC",
+        ],
+    )
+    .await;
+
+    let (rs, _handle, shutdown_tx) = connect_rls(&test_name).await;
+    rs.simple_query("SET ROLE authenticated")
+        .await
+        .expect("set role");
+    set_sub_claim(&rs, proto, "bob").await;
+
+    let plain = "SELECT * FROM api.doc_owners_v";
+    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {plain}"))
+        .await
+        .expect("create cache");
+    assert_owner_ids_cached(&rs, proto, plain, &["alice", "bob"], "bob over a plain table").await;
+    set_sub_claim(&rs, proto, "alice").await;
+    assert_owner_ids_cached(&rs, proto, plain, &["alice", "bob"], "alice over a plain table")
+        .await;
+
+    // The function's owner is the superuser that created it, so upstream returns every row.
+    set_sub_claim(&rs, proto, "bob").await;
+    assert_cache_refused(
+        &rs,
+        proto,
+        "SELECT * FROM api.todo_owners_v",
+        "rls_table_in_owner_context",
+        &["alice", "alice", "bob"],
+    )
+    .await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres, 15)]
+async fn pg_rls_shallow_cache_security_definer_function_beneath_view_simple() {
+    run_security_definer_function_beneath_view(Protocol::Simple).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres, 15)]
+async fn pg_rls_shallow_cache_security_definer_function_beneath_view_extended() {
+    run_security_definer_function_beneath_view(Protocol::Extended).await;
+}
+
 /// Toggling `security_invoker` on a view over an RLS-active table must be observed. Turning it off
 /// makes the view owner-context, which is not representable per session, so reads must go
 /// upstream; turning it back on must make the view cacheable per tenant again. `security_invoker`
