@@ -1825,6 +1825,14 @@ where
             session.reset_all();
         }
 
+        if result.is_ok()
+            && let Some(q) = cached_statement.parsed_query.as_deref()
+            && (matches!(q, SqlQuery::ResetAll)
+                || matches!(q, SqlQuery::Discard(d) if d.object_type == DiscardObject::All))
+        {
+            self.state.transaction_settings.record_reset::<Handler>();
+        }
+
         if let Some(q) = &cached_statement.parsed_query {
             Self::update_transaction_boundaries(
                 &mut self.state.proxy_state,

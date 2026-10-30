@@ -527,6 +527,8 @@ where
             Ok(SqlQuery::ResetAll) => connectors.session.clone(),
             _ => None,
         };
+        let resets_settings = matches!(&parsed, Ok(SqlQuery::ResetAll))
+            || matches!(&parsed, Ok(SqlQuery::Discard(d)) if d.object_type == DiscardObject::All);
 
         if let Some(result) = Self::check_readyset_schema_routing(settings, state, &parsed)? {
             return Ok(result);
@@ -784,6 +786,9 @@ where
                 .transaction_settings
                 .record_reset_all(state.proxy_state, &session);
             session.reset_all();
+        }
+        if result.is_ok() && resets_settings {
+            state.transaction_settings.record_reset::<Handler>();
         }
         result
     }

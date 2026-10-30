@@ -329,6 +329,13 @@ pub trait QueryHandler: Sized + Send {
         None
     }
 
+    /// Return the names of the session settings that `RESET ALL` and `DISCARD ALL` reset, other
+    /// than those the `SessionContext` holds. The default implementation returns none, for
+    /// upstreams without those statements.
+    fn settings_reset_by_reset_all() -> &'static [&'static str] {
+        &[]
+    }
+
     /// Return a query whose rows are the names and global values of the session variables that
     /// affect cached results, or `None` for upstreams that have no such query.
     fn session_defaults_query() -> Option<String> {

@@ -6,6 +6,7 @@ use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter, last_query_info};
 use readyset_client_test_helpers::{TestBuilder, TestShutdownSender};
 use readyset_server::Handle;
+use readyset_sql_parsing::ParsingPreset;
 use readyset_util::eventually;
 use test_utils::{tags, upstream};
 use tokio_postgres::{Client, Config, SimpleQueryMessage};
@@ -21,6 +22,7 @@ async fn setup(
     readyset_tracing::init_test_logging();
     let (opts, handle, shutdown_tx) = TestBuilder::default()
         .fallback(true)
+        .parsing_preset(ParsingPreset::for_prod())
         .build::<PostgreSQLAdapter>()
         .await;
     let conn = psql_helpers::connect(opts.clone()).await;
@@ -152,6 +154,58 @@ async fn timezone_abbreviations_partitions_entries() {
         .unwrap();
     assert_eq!(simple_ids(&b, QUERY).await, vec![1]);
     assert_hit(&b).await;
+
+    shutdown_tx.shutdown().await;
+}
+
+/// `RESET ALL` and `DISCARD ALL` return `timezone_abbreviations` to the value the session started
+/// with, so the session reads the entry of a session that never set it.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn timezone_abbreviations_reset_by_reset_all_and_discard_all() {
+    const QUERY: &str = "SELECT id FROM events WHERE at = '2026-01-15 10:00 CST' ORDER BY id";
+    let (a, _upstream, opts, _handle, shutdown_tx) = setup(QUERY, "").await;
+
+    assert_eq!(simple_ids(&a, QUERY).await, vec![1]);
+    assert_filled(&a).await;
+
+    let b = psql_helpers::connect(opts).await;
+    for reset in ["RESET ALL", "DISCARD ALL"] {
+        b.simple_query("SET timezone_abbreviations = 'Australia'")
+            .await
+            .unwrap();
+        assert_eq!(simple_ids(&b, QUERY).await, vec![2]);
+        b.simple_query(reset).await.unwrap();
+        assert_eq!(simple_ids(&b, QUERY).await, vec![1], "{reset}");
+        assert_hit(&b).await;
+    }
+
+    shutdown_tx.shutdown().await;
+}
+
+/// A `RESET ALL` inside a transaction reverts at ROLLBACK, so the session reads the entry for the
+/// `timezone_abbreviations` it set before the transaction.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn timezone_abbreviations_reset_all_in_rolled_back_transaction() {
+    const QUERY: &str = "SELECT id FROM events WHERE at = '2026-01-15 10:00 CST' ORDER BY id";
+    let (a, _upstream, _opts, _handle, shutdown_tx) = setup(QUERY, "").await;
+
+    a.simple_query("SET timezone_abbreviations = 'Australia'")
+        .await
+        .unwrap();
+    assert_eq!(simple_ids(&a, QUERY).await, vec![2]);
+    assert_filled(&a).await;
+
+    a.simple_query("BEGIN").await.unwrap();
+    a.simple_query("RESET ALL").await.unwrap();
+    assert_eq!(simple_ids(&a, QUERY).await, vec![1]);
+    a.simple_query("ROLLBACK").await.unwrap();
+
+    assert_eq!(simple_ids(&a, QUERY).await, vec![2]);
+    assert_hit(&a).await;
 
     shutdown_tx.shutdown().await;
 }

@@ -538,6 +538,10 @@ impl QueryHandler for PostgreSqlQueryHandler {
         }
     }
 
+    fn settings_reset_by_reset_all() -> &'static [&'static str] {
+        &["search_path"]
+    }
+
     fn session_defaults(raw: &BTreeMap<String, String>) -> BTreeMap<String, Literal> {
         raw.iter()
             .map(|(name, value)| (name.clone(), Literal::from(value.as_str())))

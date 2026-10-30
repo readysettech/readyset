@@ -2441,6 +2441,111 @@ async fn pg_rls_shallow_cache_search_path_set_local_outside_transaction_extended
     run_search_path_set_local(Protocol::Extended, SET_LOCAL_OUTSIDE_TRANSACTION).await;
 }
 
+/// `reset` returns `search_path` to its default, so `documents` resolves to `public.documents`.
+/// The partition of `private.documents` for bob is filled first, so a read that resolves
+/// `documents` with the old path returns bob's row.
+async fn run_search_path_reset(proto: Protocol, reset: &str) {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    PostgreSQLAdapter::recreate_database(&test_name).await;
+    setup_todos_upstream(&test_name).await;
+    let (rs, _handle, shutdown_tx) = connect_rls(&test_name).await;
+
+    rs.simple_query("SET search_path = private, public")
+        .await
+        .expect("set search_path");
+    rs.simple_query("SET ROLE authenticated")
+        .await
+        .expect("set role");
+    let docs = "SELECT * FROM documents";
+    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {docs}"))
+        .await
+        .expect("create cache");
+    set_sub_claim(&rs, proto, "bob").await;
+    assert_owner_ids_cached(&rs, proto, docs, &["bob"], "bob before reset").await;
+
+    run_stmt(&rs, proto, reset).await;
+    run_stmt(&rs, proto, "SET ROLE authenticated").await;
+    set_sub_claim(&rs, proto, "bob").await;
+    assert_eq!(read_owner_ids(&rs, proto, docs).await, ["decoy"], "{reset}");
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_search_path_reset_all_simple() {
+    run_search_path_reset(Protocol::Simple, "RESET ALL").await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_search_path_reset_all_extended() {
+    run_search_path_reset(Protocol::Extended, "RESET ALL").await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_search_path_discard_all_simple() {
+    run_search_path_reset(Protocol::Simple, "DISCARD ALL").await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_search_path_discard_all_extended() {
+    run_search_path_reset(Protocol::Extended, "DISCARD ALL").await;
+}
+
+/// A `RESET ALL` inside a transaction reverts at ROLLBACK, so `documents` still resolves to the
+/// RLS-active `private.documents`.
+async fn run_search_path_reset_all_in_rolled_back_transaction(proto: Protocol) {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    PostgreSQLAdapter::recreate_database(&test_name).await;
+    setup_todos_upstream(&test_name).await;
+    let (rs, _handle, shutdown_tx) = connect_rls(&test_name).await;
+
+    rs.simple_query("SET search_path = private, public")
+        .await
+        .expect("set search_path");
+    rs.simple_query("SET ROLE authenticated")
+        .await
+        .expect("set role");
+    let docs = "SELECT * FROM documents";
+    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {docs}"))
+        .await
+        .expect("create cache");
+
+    run_stmt(&rs, proto, "BEGIN").await;
+    run_stmt(&rs, proto, "RESET ALL").await;
+    run_stmt(&rs, proto, "ROLLBACK").await;
+
+    set_sub_claim(&rs, proto, "bob").await;
+    assert_owner_ids_cached(&rs, proto, docs, &["bob"], "bob after ROLLBACK").await;
+
+    shutdown_tx.shutdown().await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_search_path_reset_all_in_rolled_back_transaction_simple() {
+    run_search_path_reset_all_in_rolled_back_transaction(Protocol::Simple).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_search_path_reset_all_in_rolled_back_transaction_extended() {
+    run_search_path_reset_all_in_rolled_back_transaction(Protocol::Extended).await;
+}
+
 #[test]
 #[tags(serial)]
 #[upstream(postgres)]

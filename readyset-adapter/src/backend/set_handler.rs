@@ -109,6 +109,9 @@ pub(super) struct TransactionSettings {
     local: BTreeSet<String>,
     /// Settings to read back from upstream before the next statement.
     reread: BTreeSet<String>,
+    /// Whether Readyset's copy of the session variables should return to the values the session
+    /// started with before the next statement.
+    reset_session_vars: bool,
 }
 
 impl TransactionSettings {
@@ -151,6 +154,20 @@ impl TransactionSettings {
         if proxy_state.in_transaction() {
             self.changed.extend(session.setting_names());
         }
+    }
+
+    /// Note that `RESET ALL` or `DISCARD ALL` reset the settings Readyset keeps outside the
+    /// `SessionContext`, so they should be read back from upstream before the next statement, and
+    /// the session variables should return to the values the session started with.
+    pub(super) fn record_reset<H>(&mut self)
+    where
+        H: QueryHandler,
+    {
+        let names = H::settings_reset_by_reset_all()
+            .iter()
+            .map(|&name| name.to_owned());
+        self.reread.extend(names);
+        self.reset_session_vars = true;
     }
 
     /// The open transaction committed and keeps the settings it changed, except the
@@ -323,14 +340,18 @@ where
         }
     }
 
-    /// Read back from upstream the settings a rolled-back transaction reverted, and apply them to
-    /// Readyset's copy of the session state. If that fails, the copy can't be trusted, so RLS reads
-    /// go upstream and the session proxies all queries.
+    /// Read back from upstream the settings a rolled-back transaction reverted or a `RESET ALL` or
+    /// `DISCARD ALL` reset, and apply them to Readyset's copy of the session state. If that fails,
+    /// the copy can't be trusted, so RLS reads go upstream and the session proxies all queries.
     pub(super) async fn reread_settings(
         connectors: &mut BackendConnectors<DB>,
         settings: &BackendSettings,
         state: &mut BackendState<DB>,
     ) {
+        if mem::take(&mut state.transaction_settings.reset_session_vars) {
+            let defaults = Self::session_defaults(connectors, state);
+            connectors.noria.extend_session_vars(defaults);
+        }
         if state.transaction_settings.reread.is_empty() {
             return;
         }
@@ -353,7 +374,7 @@ where
                 }
             }
             Err(error) => {
-                debug!(%error, "Failed to read session settings back after a rollback");
+                debug!(%error, "Failed to read session settings back from upstream");
                 if let Some(session) = connectors.session.as_ref() {
                     session.mark_session_untrusted();
                 }
