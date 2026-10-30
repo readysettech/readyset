@@ -99,11 +99,14 @@ impl PendingSetState {
 }
 
 /// Names of the session settings a transaction changed. A rollback reverts them upstream, so
-/// Readyset reads them back before the next statement.
+/// Readyset reads them back before the next statement. The end of the transaction reverts
+/// transaction-local settings, so Readyset reads those back after a commit too.
 #[derive(Debug, Default)]
 pub(super) struct TransactionSettings {
     /// Settings the open transaction changed.
     changed: BTreeSet<String>,
+    /// Settings the open transaction changed until it ends.
+    local: BTreeSet<String>,
     /// Settings to read back from upstream before the next statement.
     reread: BTreeSet<String>,
 }
@@ -118,6 +121,14 @@ impl TransactionSettings {
             && let Some(name) = H::setting_reverted_by_rollback(set)
         {
             self.changed.insert(name);
+        }
+        if let Some(name) = H::setting_reverted_at_transaction_end(set) {
+            // Outside a transaction, a transaction-local change has no effect upstream.
+            if proxy_state.in_transaction() {
+                self.local.insert(name);
+            } else {
+                self.reread.insert(name);
+            }
         }
     }
 
@@ -142,21 +153,25 @@ impl TransactionSettings {
         }
     }
 
-    /// The open transaction committed and keeps the settings it changed.
+    /// The open transaction committed and keeps the settings it changed, except the
+    /// transaction-local ones, which should be read back from upstream.
     pub(super) fn commit(&mut self) {
         self.changed.clear();
+        self.reread.append(&mut self.local);
     }
 
     /// The open transaction rolled back, so the settings it changed should be read back from
     /// upstream.
     pub(super) fn rollback(&mut self) {
         self.reread.append(&mut self.changed);
+        self.reread.append(&mut self.local);
     }
 
     /// The open transaction rolled back to a savepoint, so the settings it changed should be read
     /// back from upstream. They stay recorded, since the transaction can still roll back.
     pub(super) fn rollback_to_savepoint(&mut self) {
-        self.reread.extend(self.changed.iter().cloned());
+        self.reread
+            .extend(self.changed.iter().chain(&self.local).cloned());
     }
 }
 
@@ -412,5 +427,32 @@ mod tests {
         settings.rollback();
         assert!(settings.reread.is_empty());
         assert!(session.is_session_untrusted());
+    }
+
+    #[test]
+    fn committed_local_setting_is_reread() {
+        let mut settings = TransactionSettings::default();
+        settings.local.insert("search_path".to_owned());
+        settings.commit();
+        assert!(settings.reread.contains("search_path"));
+        assert!(settings.local.is_empty());
+    }
+
+    #[test]
+    fn rolled_back_local_setting_is_reread() {
+        let mut settings = TransactionSettings::default();
+        settings.local.insert("search_path".to_owned());
+        settings.rollback();
+        assert!(settings.reread.contains("search_path"));
+        assert!(settings.local.is_empty());
+    }
+
+    #[test]
+    fn local_setting_rolled_back_to_savepoint_stays_recorded() {
+        let mut settings = TransactionSettings::default();
+        settings.local.insert("search_path".to_owned());
+        settings.rollback_to_savepoint();
+        assert!(settings.reread.contains("search_path"));
+        assert!(settings.local.contains("search_path"));
     }
 }

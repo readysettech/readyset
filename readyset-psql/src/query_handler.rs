@@ -528,6 +528,18 @@ impl QueryHandler for PostgreSqlQueryHandler {
         }
     }
 
+    fn setting_reverted_at_transaction_end(stmt: &SetStatement) -> Option<String> {
+        match stmt {
+            SetStatement::PostgresParameter(SetPostgresParameter { scope, name, .. })
+                if *scope == Some(PostgresParameterScope::Local)
+                    && name.eq_ignore_ascii_case("search_path") =>
+            {
+                Some("search_path".to_owned())
+            }
+            _ => None,
+        }
+    }
+
     fn session_defaults(raw: &BTreeMap<String, String>) -> BTreeMap<String, Literal> {
         raw.iter()
             .map(|(name, value)| (name.clone(), Literal::from(value.as_str())))

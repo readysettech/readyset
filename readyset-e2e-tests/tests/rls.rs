@@ -2261,6 +2261,89 @@ async fn pg_rls_shallow_cache_search_path_in_rolled_back_transaction_extended() 
     run_search_path_in_rolled_back_transaction(Protocol::Extended).await;
 }
 
+/// A `SET LOCAL search_path` reverts when its transaction ends and has no effect outside one, so
+/// after `stmts` run, `documents` still resolves to the RLS-active `private.documents`. The entry
+/// for `public.documents` is filled first, so a read that resolves `documents` with the `SET
+/// LOCAL` path returns the decoy row.
+async fn run_search_path_set_local(proto: Protocol, stmts: &[&str]) {
+    init_test_logging();
+
+    let test_name = derive_test_name();
+    PostgreSQLAdapter::recreate_database(&test_name).await;
+    setup_todos_upstream(&test_name).await;
+    let (rs, _handle, shutdown_tx) = connect_rls(&test_name).await;
+
+    rs.simple_query("SET search_path = private, public")
+        .await
+        .expect("set search_path");
+    rs.simple_query("SET ROLE authenticated")
+        .await
+        .expect("set role");
+    let docs = "SELECT * FROM documents";
+    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {docs}"))
+        .await
+        .expect("create cache");
+    set_sub_claim(&rs, proto, "bob").await;
+    run_stmt(&rs, proto, "SET search_path = public").await;
+    assert_owner_ids_cached(&rs, proto, docs, &["decoy"], "decoy before SET LOCAL").await;
+    run_stmt(&rs, proto, "SET search_path = private, public").await;
+
+    for stmt in stmts {
+        run_stmt(&rs, proto, stmt).await;
+    }
+
+    set_sub_claim(&rs, proto, "bob").await;
+    assert_owner_ids_cached(&rs, proto, docs, &["bob"], &stmts.join("; ")).await;
+
+    shutdown_tx.shutdown().await;
+}
+
+const SET_LOCAL_COMMIT: &[&str] = &["BEGIN", "SET LOCAL search_path = public", "COMMIT"];
+const SET_LOCAL_ROLLBACK: &[&str] = &["BEGIN", "SET LOCAL search_path = public", "ROLLBACK"];
+const SET_LOCAL_OUTSIDE_TRANSACTION: &[&str] = &["SET LOCAL search_path = public"];
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_search_path_set_local_commit_simple() {
+    run_search_path_set_local(Protocol::Simple, SET_LOCAL_COMMIT).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_search_path_set_local_commit_extended() {
+    run_search_path_set_local(Protocol::Extended, SET_LOCAL_COMMIT).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_search_path_set_local_rollback_simple() {
+    run_search_path_set_local(Protocol::Simple, SET_LOCAL_ROLLBACK).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_search_path_set_local_rollback_extended() {
+    run_search_path_set_local(Protocol::Extended, SET_LOCAL_ROLLBACK).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_search_path_set_local_outside_transaction_simple() {
+    run_search_path_set_local(Protocol::Simple, SET_LOCAL_OUTSIDE_TRANSACTION).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_search_path_set_local_outside_transaction_extended() {
+    run_search_path_set_local(Protocol::Extended, SET_LOCAL_OUTSIDE_TRANSACTION).await;
+}
+
 #[test]
 #[tags(serial)]
 #[upstream(postgres)]

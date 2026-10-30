@@ -322,6 +322,13 @@ pub trait QueryHandler: Sized + Send {
         None
     }
 
+    /// Return the name of the session setting that `stmt` changes, if Readyset should read it back
+    /// from upstream when the transaction ends. The default implementation returns `None`, for
+    /// upstreams without transaction-local settings.
+    fn setting_reverted_at_transaction_end(_stmt: &SetStatement) -> Option<String> {
+        None
+    }
+
     /// Return a query whose rows are the names and global values of the session variables that
     /// affect cached results, or `None` for upstreams that have no such query.
     fn session_defaults_query() -> Option<String> {
