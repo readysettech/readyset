@@ -349,6 +349,7 @@ where
                     SqlQuery::CompoundSelect(_)
                     | SqlQuery::Show(_)
                     | SqlQuery::Discard(_)
+                    | SqlQuery::ResetAll
                     | SqlQuery::Savepoint(_)
                     | SqlQuery::ReleaseSavepoint(_)
                     | SqlQuery::Comment(_) => {
@@ -436,7 +437,8 @@ where
                     | SqlQuery::ReleaseSavepoint(_)
                     | SqlQuery::Use(_)
                     | SqlQuery::Comment(_)
-                    | SqlQuery::Discard(_) => Ok(noria_connector::QueryResult::Empty),
+                    | SqlQuery::Discard(_)
+                    | SqlQuery::ResetAll => Ok(noria_connector::QueryResult::Empty),
                     q => {
                         error!(query = ?q, "unsupported query");
                         unsupported!("query type unsupported: {q:?}");
@@ -514,11 +516,15 @@ where
         };
 
         // `DISCARD ALL` / `RESET ALL` reset the SessionContext only after upstream accepts them.
-        // Upstream rejects them inside a transaction.
+        // Upstream rejects `DISCARD ALL` inside a transaction.
         let discard_all_session = match &parsed {
             Ok(SqlQuery::Discard(d)) if d.object_type == DiscardObject::All => {
                 connectors.session.clone()
             }
+            _ => None,
+        };
+        let reset_all_session = match &parsed {
+            Ok(SqlQuery::ResetAll) => connectors.session.clone(),
             _ => None,
         };
 
@@ -770,6 +776,11 @@ where
             && let Some(session) = discard_all_session
         {
             session.discard_all();
+        }
+        if result.is_ok()
+            && let Some(session) = reset_all_session
+        {
+            session.reset_all();
         }
         result
     }

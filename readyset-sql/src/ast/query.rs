@@ -47,6 +47,9 @@ pub enum SqlQuery {
     // generation; mirrors the other `#[weight(0)]` variants here.
     #[weight(0)]
     Discard(DiscardStatement),
+    /// Postgres `RESET ALL` resets the session's run-time parameters to their defaults.
+    #[weight(0)]
+    ResetAll,
     // Unfortunately, weight(0) is a special case that removes this option from the generated
     // `prop_oneof!`, but actually having a weight of 0 is not supported. If that worked, we could
     // generate this only for PostgreSQL like so:
@@ -103,6 +106,7 @@ impl DialectDisplay for SqlQuery {
             Self::Show(show) => write!(f, "{}", show.display(dialect)),
             Self::Explain(explain) => write!(f, "{}", explain.display(dialect)),
             Self::Discard(discard) => write!(f, "{discard}"),
+            Self::ResetAll => write!(f, "RESET ALL"),
             Self::Comment(c) => write!(f, "{}", c.display(dialect)),
             Self::DropAllProxiedQueries(drop) => write!(f, "{}", drop.display(dialect)),
             Self::Deallocate(dealloc) => write!(f, "{}", dealloc.display(dialect)),
@@ -287,15 +291,9 @@ impl TryFromDialect<sqlparser::ast::Statement> for SqlQuery {
             Discard { object_type } => Ok(Self::Discard(DiscardStatement {
                 object_type: object_type.try_into()?,
             })),
-            // `RESET ALL` resets all run-time parameters; PG documents it as a
-            // strict subset of `DISCARD ALL`. Readyset observes it only to reset
-            // mirrored session state and proxies the original text upstream
-            // verbatim, so model it as the session reset it triggers.
             Reset(sqlparser::ast::ResetStatement {
                 reset: sqlparser::ast::Reset::ALL,
-            }) => Ok(Self::Discard(DiscardStatement {
-                object_type: DiscardObject::All,
-            })),
+            }) => Ok(Self::ResetAll),
             // `RESET <name>` is `SET <name> TO DEFAULT` in Postgres; model it as
             // such so the session mirror resets the parameter (the role or a
             // policy-keyed GUC) through the same path as an explicit
@@ -394,6 +392,7 @@ impl SqlQuery {
             Self::Show(_) => "SHOW",
             Self::Explain(_) => "EXPLAIN",
             Self::Discard(_) => "DISCARD",
+            Self::ResetAll => "RESET ALL",
             Self::Comment(_) => "COMMENT",
             Self::Deallocate(_) => "DEALLOCATE",
             Self::Truncate(_) => "TRUNCATE",
@@ -456,6 +455,7 @@ impl SqlQuery {
             | Self::Show(_)
             | Self::Explain(_)
             | Self::Discard(_)
+            | Self::ResetAll
             | Self::Comment(_)
             | Self::Use(_)
             | Self::Deallocate(_)
@@ -540,6 +540,7 @@ impl SqlQuery {
             | SqlQuery::Use(_)
             | SqlQuery::Truncate(_)
             | SqlQuery::Discard(_)
+            | SqlQuery::ResetAll
             | SqlQuery::Comment(_) => false,
         }
     }

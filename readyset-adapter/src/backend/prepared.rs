@@ -23,8 +23,8 @@ use readyset_errors::ReadySetError::{self, PreparedStatementMissing};
 use readyset_errors::{ReadySetResult, internal, internal_err, unsupported, unsupported_err};
 use readyset_sql::DialectDisplay;
 use readyset_sql::ast::{
-    CacheType, DiscardObject, DiscardStatement, LimitClause, ReadysetHintDirective,
-    SelectStatement, SetStatement, SqlIdentifier, SqlQuery, TrxCachePolicy,
+    CacheType, DiscardObject, LimitClause, ReadysetHintDirective, SelectStatement, SetStatement,
+    SqlIdentifier, SqlQuery, TrxCachePolicy,
 };
 use readyset_sql_passes::adapter_rewrites::{self, DfQueryParameters, ShallowQueryParameters};
 use readyset_util::SizeOf;
@@ -79,8 +79,8 @@ enum PrepareMeta {
         upstream_rewrite: UpstreamSetRewrite,
         set_state: PendingSetState,
     },
-    /// A `DISCARD` / `RESET ALL` full-session reset
-    Discard { stmt: DiscardStatement },
+    /// A `DISCARD` or `RESET ALL` resets the session's state.
+    Discard { stmt: SqlQuery },
 }
 
 #[derive(Debug)]
@@ -617,8 +617,8 @@ where
         Ok(res)
     }
 
-    /// Prepare a `DISCARD` / `RESET ALL` on the upstream. Executing `DISCARD ALL` resets the
-    /// `SessionContext` once upstream accepts it.
+    /// Prepare a `DISCARD` / `RESET ALL` on the upstream. Executing `DISCARD ALL` or `RESET ALL`
+    /// resets the `SessionContext` once upstream accepts it.
     async fn prepare_discard(
         &mut self,
         query: &str,
@@ -866,7 +866,7 @@ where
                     set_state,
                 }
             }
-            Ok(SqlQuery::Discard(d)) => PrepareMeta::Discard { stmt: d },
+            Ok(stmt @ (SqlQuery::Discard(_) | SqlQuery::ResetAll)) => PrepareMeta::Discard { stmt },
             Ok(pq) => {
                 debug!(
                     statement = %pq.display(self.settings.dialect),
@@ -970,7 +970,9 @@ where
         prepare_proxy_reason: Option<&'static str>,
     ) -> PreparedStatement<DB> {
         match prepare_meta {
-            PrepareMeta::Write { stmt } | PrepareMeta::Transaction { stmt } => PreparedStatement {
+            PrepareMeta::Write { stmt }
+            | PrepareMeta::Transaction { stmt }
+            | PrepareMeta::Discard { stmt } => PreparedStatement {
                 query_id: None,
                 prep: PrepareResult::new(statement_id, prep),
                 migration_state: MigrationState::Successful(CacheType::Deep),
@@ -995,22 +997,6 @@ where
                 execution_info: None,
                 parsed_query: Some(Arc::new(SqlQuery::Set(stmt))),
                 set_state: Some(set_state),
-                view_request: None,
-                shallow: None,
-                trx_cache_policy: TrxCachePolicy::Never,
-                params: None,
-                is_skip_cache,
-                inline_literal_shapes: Vec::new(),
-                inline_literal_caches_generation: 0,
-                prepare_proxy_reason,
-            },
-            PrepareMeta::Discard { stmt } => PreparedStatement {
-                query_id: None,
-                prep: PrepareResult::new(statement_id, prep),
-                migration_state: MigrationState::Successful(CacheType::Deep),
-                execution_info: None,
-                parsed_query: Some(Arc::new(SqlQuery::Discard(stmt))),
-                set_state: None,
                 view_request: None,
                 shallow: None,
                 trx_cache_policy: TrxCachePolicy::Never,
@@ -1827,6 +1813,13 @@ where
             && d.object_type == DiscardObject::All
         {
             session.discard_all();
+        }
+
+        if result.is_ok()
+            && let Some(session) = self.connectors.session.as_ref()
+            && let Some(SqlQuery::ResetAll) = cached_statement.parsed_query.as_deref()
+        {
+            session.reset_all();
         }
 
         if let Some(q) = &cached_statement.parsed_query {

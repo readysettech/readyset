@@ -842,45 +842,20 @@ async fn pg_rls_shallow_cache_set_namespaced_extended() {
     shutdown_tx.shutdown().await;
 }
 
-/// `RESET ALL` resets run-time GUCs but, per Postgres semantics, does NOT revert
-/// the role set by `SET ROLE` (verified: `current_user` persists). It clears the
-/// keyed claim to an empty string, so the partition re-bases to the role's
-/// claim-less context. With the JSON-cast test policy an empty claim errors
-/// (`''::json`) -- upstream-faithful but untestable here -- so this is
-/// `#[ignore]`'d pending a claim-tolerant policy (F8).
-async fn run_reset_all(proto: Protocol) {
+/// `RESET ALL` keeps the role. The partition for the login role with alice's claims is filled
+/// first, so a read keyed to it returns every row.
+async fn run_reset_all_keeps_role(proto: Protocol) {
     init_test_logging();
+    let (rs, _handle, shutdown_tx) = connect_as_bob_after_alice(proto).await;
 
-    let test_name = derive_test_name();
-    PostgreSQLAdapter::recreate_database(&test_name).await;
-    setup_todos_upstream(&test_name).await;
-    let (rs, _handle, shutdown_tx) = connect_rls(&test_name).await;
+    run_stmt(&rs, proto, "RESET ROLE").await;
+    set_sub_claim(&rs, proto, "alice").await;
+    assert_served_from_cache(&rs, proto, &["alice", "alice", "bob"], "login partition").await;
+    run_stmt(&rs, proto, "SET ROLE authenticated").await;
 
-    rs.simple_query("SET ROLE authenticated")
-        .await
-        .expect("set role");
-    rs.simple_query("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM SELECT * FROM api.todos")
-        .await
-        .expect("create cache");
-    set_sub_claim(&rs, proto, "bob").await;
-    assert_eq!(read_todos(&rs, proto).await, vec!["bob"], "bob scoped");
-    assert_dest(&rs, QueryDestination::ReadysetThenUpstream(None), "bob fills").await;
-
-    // RESET ALL keeps the role (authenticated) and clears the claim to empty, so
-    // the policy yields no rows -- a re-based, claim-less partition.
     run_stmt(&rs, proto, "RESET ALL").await;
-    let empty: Vec<String> = vec![];
-    assert_eq!(
-        read_todos(&rs, proto).await,
-        empty,
-        "RESET ALL clears the claim -> no rows",
-    );
-    assert_dest(
-        &rs,
-        QueryDestination::ReadysetThenUpstream(None),
-        "re-based partition fills after RESET ALL",
-    )
-    .await;
+    set_sub_claim(&rs, proto, "alice").await;
+    assert_served_from_cache(&rs, proto, &["alice", "alice"], "alice after RESET ALL").await;
 
     shutdown_tx.shutdown().await;
 }
@@ -888,20 +863,15 @@ async fn run_reset_all(proto: Protocol) {
 #[test]
 #[tags(serial)]
 #[upstream(postgres)]
-#[ignore = "Postgres RESET ALL keeps the role and clears the claim to ''; the \
-            JSON-cast test policy errors on ''::json (upstream-faithful). Needs \
-            a claim-tolerant policy"]
-async fn pg_rls_shallow_cache_reset_all_simple() {
-    run_reset_all(Protocol::Simple).await;
+async fn pg_rls_shallow_cache_reset_all_keeps_role_simple() {
+    run_reset_all_keeps_role(Protocol::Simple).await;
 }
 
 #[test]
 #[tags(serial)]
 #[upstream(postgres)]
-#[ignore = "same empty-claim policy limitation as the simple case; the extended \
-            path now proxies+mirrors RESET ALL identically"]
-async fn pg_rls_shallow_cache_reset_all_extended() {
-    run_reset_all(Protocol::Extended).await;
+async fn pg_rls_shallow_cache_reset_all_keeps_role_extended() {
+    run_reset_all_keeps_role(Protocol::Extended).await;
 }
 
 /// `RESET ROLE` reverts the effective role to the superuser login (leaving GUCs

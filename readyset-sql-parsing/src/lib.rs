@@ -2404,19 +2404,10 @@ mod tests {
     }
 
     #[test]
-    fn reset_all_models_as_full_discard() {
-        use readyset_sql::ast::{DiscardObject, DiscardStatement};
-
-        // `RESET ALL` is modeled as the session reset it triggers so the
-        // adapter mirrors it the same way as `DISCARD ALL`; the original text
-        // is still proxied upstream verbatim.
+    fn reset_all_round_trips() {
         let query = parse_pg_sqlparser("RESET ALL");
-        assert_eq!(
-            query,
-            SqlQuery::Discard(DiscardStatement {
-                object_type: DiscardObject::All
-            })
-        );
+        assert_eq!(query, SqlQuery::ResetAll);
+        assert_eq!(query.display(Dialect::PostgreSQL).to_string(), "RESET ALL");
     }
 
     #[test]

@@ -68,9 +68,10 @@ struct SessionInner {
     /// not clear it, since it re-establishes only the GUCs it names.
     trx_untrusted: bool,
     /// Session-scoped trust gap: a `SET SESSION AUTHORIZATION` (an identity change we cannot mirror)
-    /// or a malformed `set_config(...)` batch with any session-scoped or unresolvable call. Survives
-    /// transaction end and a clean `set_config(...)` batch, so it clears only at `DISCARD ALL` /
-    /// `RESET ALL`. While either flag is set `rls_input_values` returns `None`, routing off-cache.
+    /// or a malformed `set_config(...)` batch with any session-scoped or unresolvable call. It
+    /// survives transaction end, a clean `set_config(...)` batch and `RESET ALL`, so it clears only
+    /// at `DISCARD ALL`. While either flag is set `rls_input_values` returns `None`, routing
+    /// off-cache.
     session_untrusted: bool,
     /// Login-time snapshot of the connection role's default GUCs (`ALTER ROLE ... SET`). Postgres
     /// applies these at login keyed on the login role and freezes them, so this is captured once and
@@ -184,8 +185,9 @@ impl SessionContext {
     }
 
     /// Mark a session-scoped trust gap: a `SET SESSION AUTHORIZATION`, or a malformed
-    /// `set_config(...)` batch with any session-scoped or unresolvable call. Survives transaction
-    /// end and a clean `set_config(...)` batch, so it clears only at `DISCARD ALL` / `RESET ALL`.
+    /// `set_config(...)` batch with any session-scoped or unresolvable call. The gap survives
+    /// transaction end, a clean `set_config(...)` batch and `RESET ALL`, so it clears only at
+    /// `DISCARD ALL`.
     pub fn mark_session_untrusted(&self) {
         self.inner.write().session_untrusted = true;
     }
@@ -234,7 +236,17 @@ impl SessionContext {
         inner.trx_local_gucs.remove(name);
     }
 
-    /// Clear all session and transaction-local GUC state. Used for `DISCARD ALL` and `RESET ALL`.
+    /// Clear all session and transaction-local GUC state for `RESET ALL`, which keeps the role,
+    /// the session authorization and the trust flags.
+    pub fn reset_all(&self) {
+        let mut inner = self.inner.write();
+        inner.session_gucs.clear();
+        inner.trx_local_gucs.clear();
+        inner.jwt_claims = None;
+    }
+
+    /// Clear all session and transaction-local GUC state for `DISCARD ALL`, and return the role
+    /// and session user to the startup user.
     pub fn discard_all(&self) {
         let mut inner = self.inner.write();
         inner.session_gucs.clear();
@@ -856,14 +868,15 @@ mod tests {
         assert!(s.rls_input_values(&g).is_some());
     }
 
-    /// A session-scoped trust gap (`SET SESSION AUTHORIZATION`) survives both
-    /// transaction end and a clean batch; only `DISCARD ALL` / `RESET ALL`
-    /// (modeled by `discard_all`) clears it.
+    /// A session-scoped trust gap (`SET SESSION AUTHORIZATION`) survives transaction end, a clean
+    /// batch and `RESET ALL`, and only `DISCARD ALL` clears it.
     #[test]
     fn session_scoped_untrust_clears_only_on_discard_all() {
         let s = ctx();
         s.mark_session_untrusted();
         s.on_trx_end();
+        assert!(s.is_untrusted());
+        s.reset_all();
         assert!(s.is_untrusted());
         s.discard_all();
         assert!(!s.is_untrusted());
@@ -995,6 +1008,19 @@ mod tests {
         s.discard_all();
 
         assert_eq!(s.effective_role().as_str(), "authenticator");
+        assert!(!s.has_session_gucs());
+        assert!(!s.has_trx_local_gucs());
+    }
+
+    #[test]
+    fn reset_all_keeps_role_and_clears_gucs() {
+        let s = ctx();
+        s.set_session_guc("a", "1");
+        s.set_trx_local_guc("b", "2");
+        s.set_effective_role(SqlIdentifier::from("authenticated"), false);
+        s.reset_all();
+
+        assert_eq!(s.effective_role().as_str(), "authenticated");
         assert!(!s.has_session_gucs());
         assert!(!s.has_trx_local_gucs());
     }

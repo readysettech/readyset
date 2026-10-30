@@ -1547,7 +1547,8 @@ where
             | SqlQuery::Savepoint(_)
             | SqlQuery::ReleaseSavepoint(_)
             | SqlQuery::Comment(_)
-            | SqlQuery::Discard(_),
+            | SqlQuery::Discard(_)
+            | SqlQuery::ResetAll,
         ) = query
         {
             return false;

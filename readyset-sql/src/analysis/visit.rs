@@ -1531,6 +1531,7 @@ pub fn walk_sql_query<'a, V: Visitor<'a>>(
         | SqlQuery::DropMcpToken(_)
         | SqlQuery::AlterMcpToken(_)
         | SqlQuery::Discard(_)
+        | SqlQuery::ResetAll
         | SqlQuery::Savepoint(_)
         | SqlQuery::ReleaseSavepoint(_) => Ok(()),
     }

@@ -118,6 +118,7 @@ fn is_ddl(query: &SqlQuery) -> bool {
         | SqlQuery::Deallocate(_)
         | SqlQuery::Truncate(_)
         | SqlQuery::Discard(_)
+        | SqlQuery::ResetAll
         | SqlQuery::Comment(_)
         | SqlQuery::CreateMcpToken(_)
         | SqlQuery::DropMcpToken(_)

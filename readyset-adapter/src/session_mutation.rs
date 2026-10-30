@@ -298,7 +298,7 @@ fn apply_set_config(
     // reverse an unmirrorable identity change (SET SESSION AUTHORIZATION leaves `session_user`
     // diverged and set_config never touches it), nor vouch for session writes a malformed batch
     // left applied upstream. A transaction-scoped gap clears at the transaction boundary; a
-    // session-scoped gap only at DISCARD ALL / RESET ALL.
+    // session-scoped gap only at DISCARD ALL.
 }
 
 fn render_dfvalue(v: &DfValue) -> String {
@@ -567,7 +567,7 @@ mod tests {
 
     /// A clean batch does NOT clear a session-scoped gap: it applies its
     /// GUCs but cannot reverse the unmirrorable session-level divergence, so
-    /// the session stays untrusted until `DISCARD ALL` / `RESET ALL`.
+    /// the session stays untrusted until `DISCARD ALL`.
     #[test]
     fn clean_batch_does_not_clear_session_scoped_gap() {
         // `is_local = false` makes the malformed batch session-scoped.
