@@ -843,6 +843,13 @@ impl DfValue {
             (DfValue::TinyText(t), DfType::Binary(_) | DfType::VarBinary(_)) => {
                 return Ok(DfValue::ByteArray(t.as_bytes().to_vec().into()))
             }
+            // Keep an integer that doesn't fit the column's type as it is. It can't equal any value
+            // of that type, and it sorts past all of them.
+            (DfValue::Int(_) | DfValue::UnsignedInt(_), int_types!()) => {
+                return Ok(self
+                    .coerce_to(to_ty, &DfType::Unknown)
+                    .unwrap_or_else(|_| self.clone()));
+            }
             // MySQL and Postgres compare a string that's longer than the column's type without
             // truncating it, so 'abcd' doesn't match the varchar(3) value 'abc'. Do the same here.
             // Trailing spaces don't count toward a CHAR's length. A MySQL client binds a string
@@ -5096,6 +5103,18 @@ mod tests {
                 DfType::VarBinary(10),
                 DfValue::ByteArray(Arc::new(b"abc".to_vec())),
             );
+        }
+
+        #[test]
+        fn integer_out_of_range_for_its_type_is_compared_as_is() {
+            check_comparison!(
+                DfValue::Int(5_000_000_000),
+                DfType::Int,
+                DfValue::Int(5_000_000_000)
+            );
+            check_comparison!(DfValue::Int(40_000), DfType::SmallInt, DfValue::Int(40_000));
+            check_comparison!(DfValue::Int(-1), DfType::UnsignedInt, DfValue::Int(-1));
+            check_comparison!(DfValue::Int(3), DfType::SmallInt, DfValue::Int(3));
         }
 
         #[test]

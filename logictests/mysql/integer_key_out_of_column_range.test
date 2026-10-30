@@ -1,0 +1,25 @@
+statement ok
+CREATE TABLE t (id int PRIMARY KEY, n int, u int unsigned)
+
+statement ok
+INSERT INTO t VALUES (1, 1, 1), (2, 2147483647, 4294967295)
+
+query I nosort
+SELECT id FROM t WHERE n = 5000000000
+----
+
+query I rowsort
+SELECT id FROM t WHERE n < 5000000000
+----
+1
+2
+
+query I nosort
+SELECT id FROM t WHERE u = -1
+----
+
+query I rowsort
+SELECT id FROM t WHERE u > -1
+----
+1
+2
