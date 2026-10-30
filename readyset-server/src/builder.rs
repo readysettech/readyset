@@ -66,6 +66,7 @@ impl Builder {
     ) -> anyhow::Result<Self> {
         let mut builder = Self::default();
         let memory_limit = opts.effective_memory_limit();
+        let block_cache_bytes = opts.effective_block_cache_bytes();
         if memory_limit > 0 {
             builder.set_memory_limit(memory_limit, Duration::from_millis(opts.memory_check_freq));
         }
@@ -113,7 +114,7 @@ impl Builder {
                 .status_update_interval_secs
                 .into(),
         );
-        persistence_params.block_cache_bytes = (opts.rocksdb_block_cache_mb as usize) * 1024 * 1024;
+        persistence_params.block_cache_bytes = block_cache_bytes;
         builder.set_persistence(persistence_params);
 
         builder.set_replicator_config(opts.replicator_config);
