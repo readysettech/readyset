@@ -924,14 +924,23 @@ impl DfQueryParameters {
 
         let mut get_param = |lit: &Literal| -> ReadySetResult<usize> {
             match lit {
-                Literal::Placeholder(_) => match params_iter
-                    .next()
-                    .ok_or_else(|| invalid_query_err!("Wrong number of parameters"))
-                    .and_then(|v| v.coerce_to(&DfType::UnsignedBigInt, &DfType::Unknown))?
-                {
-                    DfValue::UnsignedInt(v) => Ok(v as usize),
-                    _ => unreachable!("Successfully coerced"),
-                },
+                Literal::Placeholder(_) => {
+                    let count = params_iter
+                        .next()
+                        .ok_or_else(|| invalid_query_err!("Wrong number of parameters"))?;
+                    // Only serve a count that's a non-negative integer. Anything else (NULL, a
+                    // float, a string, a negative number) fails here so the read goes to the
+                    // upstream, which handles each case its own way: MySQL rejects a float, and
+                    // Postgres treats a NULL LIMIT as no limit.
+                    count
+                        .as_int()
+                        .and_then(|count| usize::try_from(count).ok())
+                        .ok_or_else(|| {
+                            invalid_query_err!(
+                                "LIMIT and OFFSET must be non-negative integers, got {count}"
+                            )
+                        })
+                }
                 Literal::Integer(v) => usize::try_from(*v)
                     .map_err(|_| invalid_query_err!("Non negative integer expected")),
                 Literal::UnsignedInteger(v) => Ok(*v as usize),
