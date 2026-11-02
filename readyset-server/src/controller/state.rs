@@ -1435,6 +1435,46 @@ impl DfState {
         Ok(res)
     }
 
+    /// *Test only API*
+    /// Evicts `key` from the partial index of `node` and propagates the eviction downstream, as
+    /// memory pressure can. Returns whether the eviction freed anything.
+    pub(super) async fn evict_key(
+        &self,
+        node: NodeIndex,
+        key: Vec<DfValue>,
+    ) -> ReadySetResult<bool> {
+        let bad_request =
+            |reason| ReadySetError::BadRequest(format!("node {}: {reason}", node.index()));
+        let tag = {
+            let mut paths = self
+                .materializations
+                .paths
+                .get(&node)
+                .filter(|_| self.materializations.is_partial(node))
+                .into_iter()
+                .flat_map(|p| p.iter());
+            let Some((tag, (index, _))) = paths.next() else {
+                return Err(bad_request("no partial index"));
+            };
+            if paths.any(|(_, (other, _))| other != index) {
+                return Err(bad_request("more than one partial index"));
+            }
+            if key.len() != index.columns.len() {
+                return Err(bad_request("the key does not fit the partial index"));
+            }
+            u32::from(*tag)
+        };
+        let domain_idx = self
+            .domain_for_node(&node)
+            .ok_or_else(|| internal_err!("Cannot find the Domain for node {:?}", node))?;
+        let eviction = SingleKeyEviction {
+            domain_idx,
+            tag,
+            key,
+        };
+        Ok(self.evict_single(Some(eviction)).await?.is_some())
+    }
+
     /// Iterate over all nodes stored in `self::domain_nodes` to find the [`Domain`] that owns the
     /// given `node`.
     ///

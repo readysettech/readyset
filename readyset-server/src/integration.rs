@@ -33,6 +33,7 @@ use dataflow::utils::{dataflow_column, make_columns};
 use dataflow::{
     BinaryOperator, DurabilityMode, Expr as DfExpr, PersistenceParameters, ReaderProcessing,
 };
+use petgraph::graph::NodeIndex;
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_client::internal::DomainIndex;
 use readyset_client::recipe::changelist::{Change, ChangeList, CreateCache};
@@ -5028,6 +5029,20 @@ async fn cache_rows(g: &mut crate::Handle, read: &CacheRead) -> Vec<Vec<DfValue>
         .collect::<Vec<Vec<DfValue>>>();
     rows.sort();
     rows
+}
+
+/// The one partially materialized node of `cache` whose description starts with `prefix`.
+async fn partial_node(g: &mut crate::Handle, cache: &str, prefix: &str) -> NodeIndex {
+    let nodes = g
+        .materialization_info_for_cache(cache.into())
+        .await
+        .unwrap();
+    nodes
+        .iter()
+        .filter(|m| m.partial && m.node_description.starts_with(prefix))
+        .exactly_one()
+        .unwrap_or_else(|_| panic!("expected one partial {prefix} node in {nodes:#?}"))
+        .node_index
 }
 
 /// Applies `writes` in order and, after each, requires every read to hold exactly the rows
@@ -10994,6 +11009,62 @@ async fn evict_single() {
         .into_vec();
     assert_eq!(res, vec![vec![DfValue::from(1)]]);
 
+    shutdown_tx.shutdown().await;
+}
+
+/// `evict_key` takes one key out of one node and leaves the node's other keys. The evicted key is
+/// a hole there until a read fills it again. `evict_key` refuses a fully materialized node and a
+/// key that does not fit the node's index.
+#[tokio::test(flavor = "multi_thread")]
+async fn evict_key() {
+    let (mut g, shutdown_tx) = start_simple_unsharded("evict_key").await;
+    g.extend_recipe(
+        ChangeList::from_strings(
+            vec![
+                "CREATE TABLE t (id int PRIMARY KEY, y int)",
+                "CREATE CACHE q FROM SELECT count(*) AS n FROM t WHERE y = ?",
+                "CREATE TABLE u (id int PRIMARY KEY, y int)",
+                "CREATE CACHE f FROM SELECT y, count(*) AS n FROM u GROUP BY y",
+            ],
+            Dialect::DEFAULT_MYSQL,
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+    let mut t = g.table("t").await.unwrap();
+    t.insert(int_row(&[1, 2])).await.unwrap();
+    t.insert(int_row(&[2, 3])).await.unwrap();
+    let (read, other) = (CacheRead::at("q", 2, &["n"]), CacheRead::at("q", 3, &["n"]));
+    eventually!(
+        run_test: { (cache_rows(&mut g, &read).await, cache_rows(&mut g, &other).await) },
+        then_assert: |rows| assert_eq!(rows, (vec![int_row(&[1])], vec![int_row(&[1])]))
+    );
+
+    let full = g.materialization_info_for_cache("f".into()).await.unwrap();
+    let full = full
+        .iter()
+        .find(|m| !m.partial && m.node_description.starts_with("|*|"))
+        .unwrap_or_else(|| panic!("expected a fully materialized |*| node in {full:#?}"))
+        .node_index;
+    g.evict_key(full, vec![2.into()]).await.unwrap_err();
+
+    let count = partial_node(&mut g, "q", "|*|").await;
+    g.evict_key(count, vec![]).await.unwrap_err();
+    g.evict_key(count, vec![2.into(), 3.into()])
+        .await
+        .unwrap_err();
+    assert!(g.evict_key(count, vec![2.into()]).await.unwrap());
+    assert!(!g.evict_key(count, vec![2.into()]).await.unwrap());
+    assert!(g.evict_key(count, vec![3.into()]).await.unwrap());
+    // A read fills the hole only once the reader has dropped the key, after the call returns.
+    eventually!(
+        run_test: {
+            assert_eq!(cache_rows(&mut g, &read).await, vec![int_row(&[1])]);
+            g.evict_key(count, vec![2.into()]).await.unwrap()
+        },
+        then_assert: |evicted| assert!(evicted)
+    );
     shutdown_tx.shutdown().await;
 }
 

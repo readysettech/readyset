@@ -889,6 +889,11 @@ impl Leader {
                 let key = ds.evict_single(body).await?;
                 return_serialized!(key);
             }
+            (&Method::POST, "/evict_key") => {
+                let (node, key) = bincode::deserialize(&body)?;
+                let ds = self.dataflow_state_handle.read().await;
+                return_serialized!(ds.evict_key(node, key).await?);
+            }
             (&Method::POST, "/flush_partial") => {
                 let ret = {
                     let mut writer = self.dataflow_state_handle.write().await;

@@ -11,6 +11,7 @@ use bytes::Bytes;
 use deadpool::managed::{Manager, Metrics, Object, Pool, RecycleResult};
 use futures_util::future;
 use petgraph::graph::NodeIndex;
+use readyset_data::DfValue;
 use readyset_errors::{
     internal, internal_err, rpc_err, rpc_err_no_downcast, ReadySetError, ReadySetResult,
 };
@@ -1122,6 +1123,13 @@ impl ReadySetHandle {
         /// key and partial index will be selected. Returns a [`SingleKeyEviction`] if an eviction
         /// occurred.
         evict_single(eviction_request: Option<SingleKeyEviction>) -> Option<SingleKeyEviction>
+    );
+
+    simple_request!(
+        /// *Test only API*
+        /// Evict `key` from the partial index of `node` and propagate the eviction downstream, as
+        /// memory pressure can. Returns whether the eviction freed anything.
+        evict_key(node: NodeIndex, key: Vec<DfValue>,) -> bool
     );
 
     simple_request!(
