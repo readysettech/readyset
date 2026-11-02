@@ -783,23 +783,17 @@ impl Ingredient for Window {
     }
 
     fn column_source(&self, cols: &[usize]) -> ColumnSource {
-        // Check if the output column (the window function result) is in the requested columns
-        let non_output_cols: Vec<usize> = cols
-            .iter()
-            .copied()
-            .filter(|c| *c != self.output_col_index)
-            .collect();
-
-        if non_output_cols.len() == cols.len() {
-            // Early exit: the requested columns don't include the output column; they all belong to the
-            // parent and can be traced back directly
+        // Only a key made of the group by and partition by columns replays whole partitions. A
+        // replay on any other key brings part of a partition, and the window would add those rows
+        // to it again.
+        if cols.iter().all(|c| self.lookup_key.contains(c)) {
             return ColumnSource::ExactCopy(ColumnRef {
                 node: self.src.as_global(),
                 columns: cols.to_vec(),
             });
         }
 
-        // If the output column is in the requested columns, we need a full replay.
+        // Keys on the output column or on columns outside the partition need a full replay.
         //
         // Partial materialization (GeneratedFromColumns) would require:
         // 1. Prefix-matching partial index support in dataflow-state
@@ -810,11 +804,11 @@ impl Ingredient for Window {
         // Memory impact: loads entire parent table for queries like WHERE rn <= ?
         //
         // TODO(REA-6327): Re-enable partial materialization once dataflow-state
-        // supports prefix-matching indexes (see branch change-11630).
+        // supports prefix-matching indexes.
         tracing::debug!(
             requested_cols = ?cols,
             output_col = self.output_col_index,
-            "Window using full replay for query with output column filter"
+            "Window using full replay for a key outside its partition"
         );
         ColumnSource::RequiresFullReplay(vec1![self.src.as_global()])
     }
@@ -1455,21 +1449,27 @@ mod tests {
     // - column_source_output_with_lookup_key_cols_generated
     // - handle_upquery_for_output_col_query
     // These tested partial materialization paths that required prefix-matching
-    // partial index support (see REA-6327, branch change-11630).
+    // partial index support (see REA-6327).
 
-    /// Test that column_source returns ExactCopy for non-output columns.
     #[test]
-    fn column_source_non_output_exact_copy() {
+    fn column_source_lookup_key_exact_copy() {
         let (g, s) = setup_row_number(vec![0], vec![1]);
-        // Request only the order column (2)
-        let src = g.node().column_source(&[2]);
+        let src = g.node().column_source(&[1]);
         assert_eq!(
             src,
             ColumnSource::ExactCopy(ColumnRef {
                 node: s.as_global(),
-                columns: vec![2],
+                columns: vec![1],
             })
         );
+    }
+
+    #[test]
+    fn column_source_non_lookup_key_requires_full_replay() {
+        let (g, s) = setup_row_number(vec![0], vec![1]);
+        // The order column (2) isn't a partition column
+        let src = g.node().column_source(&[2]);
+        assert_eq!(src, ColumnSource::RequiresFullReplay(vec1![s.as_global()]));
     }
 
     #[test]

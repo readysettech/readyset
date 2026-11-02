@@ -887,3 +887,33 @@ ORDER BY order_col, id;
 6
 5
 25
+
+statement ok
+CREATE TABLE books (id INT PRIMARY KEY, author_id INT, price INT);
+
+statement ok
+INSERT INTO books VALUES (1, 1, 20), (2, 1, 25), (3, 2, 10);
+
+query II nosort
+SELECT t.id, t.rn FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY author_id ORDER BY price, id) AS rn FROM books) t WHERE t.id = ?;
+? = 2
+----
+2
+2
+
+query II nosort
+SELECT t.id, t.rn FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY author_id ORDER BY price, id) AS rn FROM books) t WHERE t.id = ?;
+? = 1
+----
+1
+1
+
+statement ok
+UPDATE books SET author_id = NULL WHERE id = 1;
+
+query II nosort
+SELECT t.id, t.rn FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY author_id ORDER BY price, id) AS rn FROM books) t WHERE t.id = ?;
+? = 2
+----
+2
+1
