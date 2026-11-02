@@ -12,7 +12,7 @@ use readyset_errors::{
 };
 use readyset_sql::ast::{
     ArrayArguments, BinaryOperator as SqlBinaryOperator, CollationName, Column, Expr as AstExpr,
-    FunctionExpr, InValue, Relation, SqlType, UnaryOperator,
+    FunctionExpr, InValue, Literal, Relation, SqlType, UnaryOperator,
 };
 use readyset_sql::{DialectDisplay, TryIntoDialect as _};
 use readyset_util::redacted::Sensitive;
@@ -1240,6 +1240,20 @@ fn psql_numeric_output_type(left: &DfType, op: &BinaryOperator, right: &DfType) 
     }
 }
 
+/// The type MySQL gives a decimal literal. MySQL counts every digit written, except that a run of
+/// leading zeros counts as one, so `0.5` is DECIMAL(2,1) and `.5` is DECIMAL(1,1). It keeps at most
+/// 30 digits after the point.
+fn mysql_decimal_literal_type(literal: &str) -> DfType {
+    let literal = literal.trim_start_matches(['-', '+']);
+    let (int, frac) = literal.split_once('.').unwrap_or((literal, ""));
+    let int_digits = int.trim_start_matches('0').len() + usize::from(int.starts_with('0'));
+    let scale = frac.len().min(30);
+    DfType::Numeric {
+        prec: u16::try_from(int_digits + scale).unwrap_or(u16::MAX),
+        scale: scale as u8,
+    }
+}
+
 /// Returns the digits of a MySQL DECIMAL or integer type, and how many of them are after the point,
 /// or `None` for other types. MySQL treats an integer as a DECIMAL of its type's precision, such as
 /// 10 digits for an INT.
@@ -2037,7 +2051,7 @@ impl Expr {
             ),
             AstExpr::Literal(lit) => {
                 let is_string_literal = lit.is_string();
-                let val: DfValue = lit.try_into_dialect(dialect.into())?;
+                let val: DfValue = (&lit).try_into_dialect(dialect.into())?;
                 // TODO: Infer type from SQL
                 let ty = match (&val, dialect.engine()) {
                     (_, SqlEngine::PostgreSQL) if is_string_literal => DfType::Unknown,
@@ -2052,6 +2066,10 @@ impl Expr {
                     {
                         DfType::Int
                     }
+                    (DfValue::Numeric(_), SqlEngine::MySQL) => match &lit {
+                        Literal::Number(digits) => mysql_decimal_literal_type(digits),
+                        _ => val.infer_dataflow_type(),
+                    },
                     _ => val.infer_dataflow_type(),
                 };
 
@@ -3104,12 +3122,13 @@ pub(crate) mod tests {
             &MYSQL_TEXT
         );
         // The THEN(s) are not NULL and ELSE is missing
-        assert_eq!(
+        // MySQL types this as a DECIMAL.
+        assert!(matches!(
             get_case_result_type("case when 1=1 then 2 else 2.5 end")
                 .unwrap()
                 .ty(),
-            &DfType::Double
-        );
+            DfType::Numeric { .. }
+        ));
         // The THEN(s) are not NULL and ELSE is explicit NULL
         assert_eq!(
             get_case_result_type(

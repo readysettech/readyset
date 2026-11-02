@@ -1,0 +1,83 @@
+statement ok
+CREATE TABLE t (id int PRIMARY KEY, a int, b int, d decimal(10,2))
+
+statement ok
+INSERT INTO t VALUES (1, 0, 2, 1.25), (2, 1, 1, NULL), (3, 1, 0, 3.10)
+
+query  rowsort
+SELECT id, 0.1 + 0.2 FROM t
+----
+1
+0.3
+2
+0.3
+3
+0.3
+
+query  rowsort
+SELECT id, b + 1.5 FROM t
+----
+1
+3.5
+2
+2.5
+3
+1.5
+
+query  rowsort
+SELECT id, b / 1.5 FROM t
+----
+1
+1.3333
+2
+0.6667
+3
+0
+
+query  rowsort
+SELECT a, 1.0 + avg(b) FROM t GROUP BY a
+----
+0
+3.0000
+1
+1.5000
+
+query  rowsort
+SELECT id, GREATEST(b, 0.5) FROM t
+----
+1
+2.0
+2
+1.0
+3
+0.5
+
+query  rowsort
+SELECT id, ROUND(b + 0.55, 1) FROM t
+----
+1
+2.6
+2
+1.6
+3
+0.6
+
+query  rowsort
+SELECT id, COALESCE(d, 2.255) FROM t
+----
+1
+1.250
+2
+2.255
+3
+3.100
+
+query  rowsort
+SELECT id, CAST(1.50 AS CHAR) FROM t
+----
+1
+1.50
+2
+1.50
+3
+1.50

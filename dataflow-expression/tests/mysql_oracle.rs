@@ -149,6 +149,24 @@ async fn example_exprs_type_same_as_mysql() {
         "ROUND(CAST(1.55 AS DECIMAL(3,2)))",
         "ROUND(CAST(1.555 AS DECIMAL(4,3)), 2)",
         "ROUND(CAST(15.5 AS DECIMAL(3,1)), -1)",
+        // A decimal literal has as many digits as it's written with, and arithmetic on decimals
+        // is sized from both sides.
+        "0.5",
+        ".5",
+        "012.5",
+        "5.",
+        "1.000",
+        "-1.5",
+        "0.1 + 0.2",
+        "1.5 - 1.25",
+        "1.5 * 1.5 * 1.5",
+        "1.5 / 1.25",
+        "1.5 + CAST(1 AS DECIMAL(10,2))",
+        "1.5 + '2'",
+        "CASE WHEN 1 = 1 THEN 2 ELSE 2.5 END",
+        "COALESCE(1.5, 2)",
+        "GREATEST(1, 2.5)",
+        "ROUND(2.55, 1)",
     ] {
         compare_type(expr, &mut conn).await;
     }
@@ -256,6 +274,16 @@ async fn example_exprs_eval_same_as_mysql() {
         // GREATEST and LEAST compare numbers as decimals when one is a DECIMAL.
         "LEAST(10, CAST(9.5 AS DECIMAL(2,1)))",
         "GREATEST(0, CAST(0.5 AS DECIMAL(2,1)))",
+        // MySQL reads a number with a decimal point and no exponent as an exact DECIMAL.
+        "0.1 + 0.2",
+        "1.10",
+        ".5",
+        "02.5",
+        "CAST(.5 AS SIGNED)",
+        "CAST(5. AS SIGNED)",
+        "ROUND(2.5)",
+        "ROUND(-2.5)",
+        "ROUND(.5)",
     ] {
         compare_eval(expr, &mut conn).await;
     }

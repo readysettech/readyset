@@ -1560,9 +1560,18 @@ impl TryFromDialect<&Literal> for DfValue {
                         readyset_sql::failed_err!("Could not parse number literal as decimal: {e}")
                     })?,
                 ))),
-                readyset_sql::Dialect::MySQL => Ok(DfValue::Double(s.parse().map_err(|e| {
-                    readyset_sql::failed_err!("Could not parse number literal as double: {e}")
-                })?)),
+                // MySQL reads a number written with an exponent, like 2.5e0, as a DOUBLE, and any
+                // other, like 2.5 or an integer too big for 64 bits, as an exact DECIMAL.
+                readyset_sql::Dialect::MySQL if s.contains(['e', 'E']) => {
+                    Ok(DfValue::Double(s.parse().map_err(|e| {
+                        readyset_sql::failed_err!("Could not parse number literal as double: {e}")
+                    })?))
+                }
+                readyset_sql::Dialect::MySQL => Ok(DfValue::Numeric(Arc::new(
+                    Decimal::from_str(s).map_err(|e| {
+                        readyset_sql::failed_err!("Could not parse number literal as decimal: {e}")
+                    })?,
+                ))),
             },
             Literal::Blob(b) => Ok(DfValue::from(b.to_vec())),
             Literal::ByteArray(b) => Ok(DfValue::ByteArray(Arc::new(b.clone()))),
@@ -4211,6 +4220,33 @@ mod tests {
             arr.sql_type(),
             Some(SqlType::Array(Box::new(SqlType::BigInt(None))))
         );
+    }
+
+    #[test]
+    fn mysql_number_literals() {
+        let value = |s: &str| {
+            DfValue::try_from_dialect(&Literal::Number(s.into()), readyset_sql::Dialect::MySQL)
+                .unwrap()
+        };
+        for s in [
+            "2.5",
+            "2.50",
+            "02.5",
+            ".5",
+            "5.",
+            "18446744073709551616",
+            "1234567890123456789012345678901234567890123456789012345678901234567890.5",
+            "0.1234567890123456789012345678901234567890",
+        ] {
+            assert_eq!(
+                value(s),
+                DfValue::from(Decimal::from_str(s).unwrap()),
+                "{s}"
+            );
+        }
+        for s in ["2.5e0", "2.5E0", "25e-1", ".25e1", "1.e5", "2.5e+0", "1e3"] {
+            assert_eq!(value(s), DfValue::Double(s.parse().unwrap()), "{s}");
+        }
     }
 
     mod coerce_to {
