@@ -685,6 +685,16 @@ impl DfValue {
             DfValue::Text(t) => t.coerce_to(to_ty, from_ty, dialect),
             DfValue::TinyText(tt) => tt.coerce_to(to_ty, from_ty, dialect),
             DfValue::TimestampTz(tz) => tz.coerce_to(to_ty),
+            // Postgres casts a boolean to the text 'true' or 'false'. MySQL booleans are plain
+            // integers, so on MySQL this falls through to the integer arm and gives '1' or '0'.
+            DfValue::Int(_) | DfValue::UnsignedInt(_)
+                if from_ty.is_bool()
+                    && to_ty.is_any_text()
+                    && dialect.map(|d| d.engine()) == Some(SqlEngine::PostgreSQL) =>
+            {
+                let text = if self.is_truthy() { "true" } else { "false" };
+                DfValue::from(text).coerce_to_inner(to_ty, &DfType::DEFAULT_TEXT, dialect)
+            }
             DfValue::Int(v) => handle_enum_or_coerce_int!(v, to_ty, from_ty),
             DfValue::UnsignedInt(v) => handle_enum_or_coerce_int!(v, to_ty, from_ty),
             DfValue::Float(f) => float::coerce_f64(f64::from(*f), to_ty, from_ty),
@@ -4525,6 +4535,29 @@ mod tests {
                     .unwrap(),
                 DfValue::from("20070523  "),
             );
+        }
+
+        #[test]
+        fn bool_to_text() {
+            let cast = |b: bool, to_ty: &DfType, dialect: Dialect| {
+                DfValue::from(b)
+                    .coerce_to_with_dialect(to_ty, &DfType::Bool, dialect)
+                    .unwrap()
+            };
+            let postgres = Dialect::DEFAULT_POSTGRESQL;
+            assert_eq!(
+                cast(true, &DfType::DEFAULT_TEXT, postgres),
+                DfValue::from("true")
+            );
+            assert_eq!(
+                cast(false, &DfType::DEFAULT_TEXT, postgres),
+                DfValue::from("false")
+            );
+            let varchar = DfType::VarChar(2, Collation::Utf8);
+            assert_eq!(cast(false, &varchar, postgres), DfValue::from("fa"));
+            let mysql = Dialect::DEFAULT_MYSQL;
+            assert_eq!(cast(true, &DfType::DEFAULT_TEXT, mysql), DfValue::from("1"));
+            assert_eq!(cast(false, &varchar, mysql), DfValue::from("0"));
         }
 
         #[test]

@@ -1,0 +1,25 @@
+# On Postgres, a boolean cast to text is 'true' or 'false'.
+
+statement ok
+create table bt (id int primary key, b boolean);
+
+statement ok
+insert into bt values (1, true), (2, false);
+
+query T nosort
+select b::text from bt where id = $1
+$1 = 1
+----
+true
+
+query T nosort
+select cast(b as varchar(2)) from bt where id = $1
+$1 = 2
+----
+fa
+
+query T nosort
+select (id > 1)::text from bt where id = $1
+$1 = 2
+----
+true
