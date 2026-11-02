@@ -37,6 +37,8 @@ pub enum SqlQuery {
     StartTransaction(StartTransactionStatement),
     Commit(CommitStatement),
     Rollback(RollbackStatement),
+    Savepoint(SavepointStatement),
+    ReleaseSavepoint(ReleaseSavepointStatement),
     RenameTable(RenameTableStatement),
     Use(UseStatement),
     Show(ShowStatement),
@@ -94,6 +96,8 @@ impl DialectDisplay for SqlQuery {
             Self::StartTransaction(tx) => write!(f, "{tx}"),
             Self::Commit(commit) => write!(f, "{commit}"),
             Self::Rollback(rollback) => write!(f, "{}", rollback.display(dialect)),
+            Self::Savepoint(savepoint) => write!(f, "{}", savepoint.display(dialect)),
+            Self::ReleaseSavepoint(release) => write!(f, "{}", release.display(dialect)),
             Self::RenameTable(rename) => write!(f, "{}", rename.display(dialect)),
             Self::Use(use_db) => write!(f, "{use_db}"),
             Self::Show(show) => write!(f, "{}", show.display(dialect)),
@@ -228,6 +232,12 @@ impl TryFromDialect<sqlparser::ast::Statement> for SqlQuery {
                 savepoint: savepoint.map(|ident| SqlIdentifier::from(ident.value)),
             })),
             Commit { .. } => Ok(Self::Commit(CommitStatement {})),
+            Savepoint { name } => Ok(Self::Savepoint(SavepointStatement {
+                name: name.value.into(),
+            })),
+            ReleaseSavepoint { name } => Ok(Self::ReleaseSavepoint(ReleaseSavepointStatement {
+                name: name.value.into(),
+            })),
             alter @ AlterTable { .. } => Ok(Self::AlterTable(alter.try_into_dialect(dialect)?)),
             truncate @ Truncate { .. } => Ok(Self::Truncate(truncate.try_into_dialect(dialect)?)),
             CreateDatabase { .. } => skipped!("CREATE DATABASE"),
@@ -377,6 +387,8 @@ impl SqlQuery {
             Self::StartTransaction(_) => "START TRANSACTION",
             Self::Commit(_) => "COMMIT",
             Self::Rollback(_) => "ROLLBACK",
+            Self::Savepoint(_) => "SAVEPOINT",
+            Self::ReleaseSavepoint(_) => "RELEASE SAVEPOINT",
             Self::RenameTable(_) => "RENAME",
             Self::Use(_) => "USE",
             Self::Show(_) => "SHOW",
@@ -450,6 +462,8 @@ impl SqlQuery {
             | Self::StartTransaction(_)
             | Self::Commit(_)
             | Self::Rollback(_)
+            | Self::Savepoint(_)
+            | Self::ReleaseSavepoint(_)
             | Self::DropAllProxiedQueries(_)
             | Self::CreateMcpToken(_)
             | Self::DropMcpToken(_)
@@ -520,6 +534,8 @@ impl SqlQuery {
             | SqlQuery::StartTransaction(_)
             | SqlQuery::Commit(_)
             | SqlQuery::Rollback(_)
+            | SqlQuery::Savepoint(_)
+            | SqlQuery::ReleaseSavepoint(_)
             | SqlQuery::RenameTable(_)
             | SqlQuery::Use(_)
             | SqlQuery::Truncate(_)

@@ -59,6 +59,37 @@ impl DialectDisplay for RollbackStatement {
     }
 }
 
+/// `SAVEPOINT`, which marks a point in the transaction that ROLLBACK TO SAVEPOINT returns to.
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub struct SavepointStatement {
+    pub name: SqlIdentifier,
+}
+
+impl DialectDisplay for SavepointStatement {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| write!(f, "SAVEPOINT {}", dialect.quote_identifier(&self.name)))
+    }
+}
+
+/// `RELEASE SAVEPOINT`, which removes a savepoint and keeps the changes made after the savepoint
+/// was set.
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
+pub struct ReleaseSavepointStatement {
+    pub name: SqlIdentifier,
+}
+
+impl DialectDisplay for ReleaseSavepointStatement {
+    fn display(&self, dialect: Dialect) -> impl fmt::Display + '_ {
+        fmt_with(move |f| {
+            write!(
+                f,
+                "RELEASE SAVEPOINT {}",
+                dialect.quote_identifier(&self.name)
+            )
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

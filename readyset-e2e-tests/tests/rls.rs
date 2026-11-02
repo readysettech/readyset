@@ -1204,8 +1204,6 @@ async fn run_set_after_savepoint_rolled_back(proto: Protocol) {
 #[test]
 #[tags(serial)]
 #[upstream(postgres)]
-#[ignore = "SAVEPOINT does not parse, so the simple protocol counts it as a write and an \
-            UNTIL WRITE cache stops serving reads for the rest of the transaction"]
 async fn pg_rls_shallow_cache_set_after_savepoint_rolled_back_simple() {
     run_set_after_savepoint_rolled_back(Protocol::Simple).await;
 }

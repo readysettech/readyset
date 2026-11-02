@@ -349,6 +349,8 @@ where
                     SqlQuery::CompoundSelect(_)
                     | SqlQuery::Show(_)
                     | SqlQuery::Discard(_)
+                    | SqlQuery::Savepoint(_)
+                    | SqlQuery::ReleaseSavepoint(_)
                     | SqlQuery::Comment(_) => {
                         event.sql_type = SqlQueryType::Other;
                         upstream
@@ -430,6 +432,8 @@ where
                     SqlQuery::StartTransaction(_)
                     | SqlQuery::Commit(_)
                     | SqlQuery::Rollback(_)
+                    | SqlQuery::Savepoint(_)
+                    | SqlQuery::ReleaseSavepoint(_)
                     | SqlQuery::Use(_)
                     | SqlQuery::Comment(_)
                     | SqlQuery::Discard(_) => Ok(noria_connector::QueryResult::Empty),

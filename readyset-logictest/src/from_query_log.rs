@@ -111,6 +111,8 @@ fn is_ddl(query: &SqlQuery) -> bool {
         | SqlQuery::StartTransaction(_)
         | SqlQuery::Commit(_)
         | SqlQuery::Rollback(_)
+        | SqlQuery::Savepoint(_)
+        | SqlQuery::ReleaseSavepoint(_)
         | SqlQuery::Show(_)
         | SqlQuery::Explain(_)
         | SqlQuery::Deallocate(_)

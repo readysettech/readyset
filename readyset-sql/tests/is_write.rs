@@ -6,7 +6,11 @@
 
 use readyset_sql::Dialect;
 use readyset_sql::ast::SqlQuery;
-use readyset_sql_parsing::parse_query;
+use readyset_sql_parsing::{ParsingPreset, ReadysetParsingError, parse_query_with_config};
+
+fn parse_query(dialect: Dialect, sql: &str) -> Result<SqlQuery, ReadysetParsingError> {
+    parse_query_with_config(ParsingPreset::for_prod(), dialect, sql)
+}
 
 /// `(dialect, sql, expected_is_write)` covering every `SqlQuery` variant the parser
 /// constructs. Variants without a parseable surface (`CreateMcpToken`, `AlterMcpToken`,
@@ -46,6 +50,9 @@ fn cases() -> &'static [(Dialect, &'static str, bool)] {
         (Dialect::MySQL, "BEGIN", false),
         (Dialect::MySQL, "COMMIT", false),
         (Dialect::MySQL, "ROLLBACK", false),
+        (Dialect::MySQL, "SAVEPOINT s", false),
+        (Dialect::MySQL, "ROLLBACK TO SAVEPOINT s", false),
+        (Dialect::MySQL, "RELEASE SAVEPOINT s", false),
         (Dialect::MySQL, "DROP ALL PROXIED QUERIES", false),
     ]
 }

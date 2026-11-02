@@ -356,3 +356,26 @@ fn window_functions() {
          FROM Sales.SalesOrderHeader"
     );
 }
+
+#[test]
+fn savepoint_and_release() {
+    for sql in ["SAVEPOINT sp1", "RELEASE SAVEPOINT sp1"] {
+        check_rt_mysql_sqlparser!(sql);
+        check_rt_postgres_sqlparser!(sql);
+    }
+
+    for (dialect, sql) in [
+        (Dialect::MySQL, "SAVEPOINT sp1"),
+        (Dialect::PostgreSQL, "SAVEPOINT sp1"),
+        (Dialect::MySQL, "RELEASE SAVEPOINT sp1"),
+        (Dialect::PostgreSQL, "RELEASE SAVEPOINT sp1"),
+        (Dialect::PostgreSQL, "RELEASE sp1"),
+    ] {
+        let name = match parse_query_with_config(ParsingPreset::OnlySqlparser, dialect, sql) {
+            Ok(SqlQuery::Savepoint(stmt)) => stmt.name,
+            Ok(SqlQuery::ReleaseSavepoint(stmt)) => stmt.name,
+            other => panic!("{sql} parsed as {other:?}"),
+        };
+        assert_eq!(name, "sp1", "{dialect:?}: {sql}");
+    }
+}

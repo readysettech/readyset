@@ -1544,6 +1544,8 @@ where
             | SqlQuery::StartTransaction(_)
             | SqlQuery::Commit(_)
             | SqlQuery::Rollback(_)
+            | SqlQuery::Savepoint(_)
+            | SqlQuery::ReleaseSavepoint(_)
             | SqlQuery::Comment(_)
             | SqlQuery::Discard(_),
         ) = query
