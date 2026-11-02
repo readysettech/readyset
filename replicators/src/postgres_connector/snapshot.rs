@@ -433,14 +433,18 @@ impl TableEntry {
         self,
         transaction: &'a pgsql::Transaction<'a>,
     ) -> Result<String, pgsql::Error> {
-        let query = "SELECT definition FROM pg_catalog.pg_views WHERE viewname=$1";
+        let query =
+            "SELECT definition FROM pg_catalog.pg_views WHERE schemaname = $1 AND viewname = $2";
 
         let mut create_view = format!(
             "CREATE VIEW {} AS",
             Dialect::PostgreSQL.quote_identifier(&self.name)
         );
 
-        for col in transaction.query(query, &[&self.name]).await? {
+        for col in transaction
+            .query(query, &[&self.schema, &self.name])
+            .await?
+        {
             create_view.push_str(col.try_get(0)?);
         }
 

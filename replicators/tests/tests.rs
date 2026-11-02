@@ -3020,6 +3020,56 @@ async fn postgresql_replicate_truncate() {
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
 #[upstream(postgres)]
+async fn postgresql_snapshot_same_view_name_in_two_schemas() {
+    let url = pgsql_url();
+    let mut client = DbConnection::connect(&url).await.unwrap();
+    client
+        .query(
+            "CREATE SCHEMA view_schema_a;
+             CREATE TABLE view_schema_a.t (x int PRIMARY KEY);
+             INSERT INTO view_schema_a.t (x) VALUES (1), (2);
+             CREATE VIEW view_schema_a.v AS SELECT x FROM view_schema_a.t;
+
+             CREATE SCHEMA view_schema_b;
+             CREATE TABLE view_schema_b.t (x int PRIMARY KEY);
+             INSERT INTO view_schema_b.t (x) VALUES (3);
+             CREATE VIEW view_schema_b.v AS SELECT x + 10 AS x FROM view_schema_b.t;",
+        )
+        .await
+        .unwrap();
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    get_results_for_query(
+        &mut ctx,
+        "q_view_schema_a",
+        "SELECT * FROM view_schema_a.v",
+        &[&[DfValue::from(1)], &[DfValue::from(2)]],
+    )
+    .await;
+    get_results_for_query(
+        &mut ctx,
+        "q_view_schema_b",
+        "SELECT * FROM view_schema_b.v",
+        &[&[DfValue::from(13)]],
+    )
+    .await;
+
+    shutdown_tx.shutdown().await;
+    client.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(postgres)]
 async fn postgresql_drop_nonexistent_replication_slot() {
     let connector = native_tls::TlsConnector::builder()
         .danger_accept_invalid_certs(true)
