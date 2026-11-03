@@ -228,7 +228,14 @@ impl TryFrom<DfValue> for JsonValue {
             DfValue::TinyText(tiny_text) => JsonValue::String(tiny_text.as_str().to_string()),
             DfValue::TimestampTz(timestamp_tz) => JsonValue::String(timestamp_tz.to_string()),
             DfValue::Time(my_sql_time) => JsonValue::String(my_sql_time.to_string()),
-            DfValue::Numeric(decimal) => JsonValue::String(decimal.to_string()),
+            // MySQL and Postgres write a decimal as a JSON number, with the digits it has.
+            DfValue::Numeric(decimal) => {
+                let digits = decimal.to_string();
+                match digits.parse() {
+                    Ok(number) => JsonValue::Number(number),
+                    Err(_) => JsonValue::String(digits),
+                }
+            }
             DfValue::BitVector(_) | DfValue::Array(_) | DfValue::ByteArray(_) => {
                 unsupported!("Arrays can't be used as json values yet")
             }
@@ -3889,6 +3896,18 @@ mod tests {
             JsonValue::try_from(DfValue::Double(1.5)).unwrap(),
             JsonValue::Number(serde_json::Number::from_f64(1.5).unwrap()),
         );
+    }
+
+    #[test]
+    fn a_decimal_is_a_json_number_with_its_digits() {
+        for digits in ["1.50", "-0.001", "12345678901234567890.5"] {
+            let value = DfValue::from(Decimal::from_str(digits).unwrap());
+            assert_eq!(
+                JsonValue::try_from(value).unwrap().to_string(),
+                digits,
+                "{digits}"
+            );
+        }
     }
 
     #[test]
