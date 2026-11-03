@@ -93,10 +93,7 @@ impl ResolveSchemasContext for RewriteContext {
     }
 
     fn can_query_table(&self, schema: &SqlIdentifier, table: &SqlIdentifier) -> Option<CanQuery> {
-        let relation = Relation {
-            schema: Some(schema.clone()),
-            name: table.clone(),
-        };
+        let relation = Relation::new(Some(schema.clone()), table.clone());
 
         if self.schema_catalog.view_schemas.contains_key(&relation)
             || self.schema_catalog.base_schemas.contains_key(&relation)

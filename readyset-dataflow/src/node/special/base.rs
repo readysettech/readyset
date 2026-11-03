@@ -744,10 +744,7 @@ mod tests {
             let mut state_map = NodeMap::new();
             state_map.insert(ni, state);
 
-            let table = Relation {
-                name: "test".into(),
-                schema: None,
-            };
+            let table = Relation::new(None, "test".into());
             assert_eq!(
                 b.process_ops(
                     ni,
@@ -801,10 +798,7 @@ mod tests {
             let mut state_map = NodeMap::new();
             state_map.insert(ni, state);
 
-            let table = Relation {
-                name: "test".into(),
-                schema: None,
-            };
+            let table = Relation::new(None, "test".into());
             assert_eq!(
                 b.process_ops(
                     ni,
@@ -858,10 +852,7 @@ mod tests {
             let mut state_map = NodeMap::new();
             state_map.insert(ni, state);
 
-            let table = Relation {
-                name: "test".into(),
-                schema: None,
-            };
+            let table = Relation::new(None, "test".into());
             assert_eq!(
                 b.process_ops(
                     ni,
@@ -927,10 +918,7 @@ mod tests {
             let mut state_map = NodeMap::new();
             state_map.insert(ni, state);
 
-            let table = Relation {
-                name: "test".into(),
-                schema: None,
-            };
+            let table = Relation::new(None, "test".into());
             let res = b
                 .process_ops(
                     ni,
@@ -986,10 +974,7 @@ mod tests {
             let mut state_map = NodeMap::new();
             state_map.insert(ni, state);
 
-            let table = Relation {
-                name: "test".into(),
-                schema: None,
-            };
+            let table = Relation::new(None, "test".into());
             let res = b
                 .process_ops(
                     ni,
@@ -1039,10 +1024,7 @@ mod tests {
             let mut state_map = NodeMap::new();
             state_map.insert(ni, state);
 
-            let table = Relation {
-                name: "test".into(),
-                schema: None,
-            };
+            let table = Relation::new(None, "test".into());
 
             let tt_with_utf8_collation = TinyText::try_new("hello", Collation::Utf8).unwrap();
             let BaseWrite { records, .. } = b

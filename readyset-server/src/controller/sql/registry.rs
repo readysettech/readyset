@@ -1071,14 +1071,8 @@ mod tests {
                 .insert_invalidating_tables(
                     "test_query".into(),
                     [
-                        Relation {
-                            schema: Some("s1".into()),
-                            name: "t1".into(),
-                        },
-                        Relation {
-                            schema: Some("s2".into()),
-                            name: "t2".into(),
-                        },
+                        Relation::new(Some("s1".into()), "t1".into()),
+                        Relation::new(Some("s2".into()), "t2".into()),
                     ],
                 )
                 .unwrap();
@@ -1090,18 +1084,12 @@ mod tests {
             registry
                 .insert_invalidating_tables(
                     "test_query2".into(),
-                    [Relation {
-                        schema: Some("s1".into()),
-                        name: "t1".into(),
-                    }],
+                    [Relation::new(Some("s1".into()), "t1".into())],
                 )
                 .unwrap();
 
             let result = registry
-                .queries_to_invalidate_for_table(&Relation {
-                    schema: Some("s1".into()),
-                    name: "t1".into(),
-                })
+                .queries_to_invalidate_for_table(&Relation::new(Some("s1".into()), "t1".into()))
                 .collect::<HashSet<_>>();
 
             assert_eq!(
@@ -1126,10 +1114,7 @@ mod tests {
         fn insert_custom_type_and_table() {
             let mut registry = setup();
 
-            let ty = Relation {
-                schema: Some("public".into()),
-                name: "abc".into(),
-            };
+            let ty = Relation::new(Some("public".into()), "abc".into());
             registry.add_custom_type(ty.clone());
 
             let table = parse_create_table(
@@ -1157,10 +1142,7 @@ mod tests {
         fn query_referencing_custom_type() {
             let mut registry = setup();
 
-            let ty = Relation {
-                schema: Some("public".into()),
-                name: "abc".into(),
-            };
+            let ty = Relation::new(Some("public".into()), "abc".into());
             registry.add_custom_type(ty.clone());
 
             let statement =

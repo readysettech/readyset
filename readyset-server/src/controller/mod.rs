@@ -2529,17 +2529,11 @@ mod tests {
                 .extend_recipe(ChangeList::from_changes(
                     vec![
                         Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                            name: Relation {
-                                schema: Some("s1".into()),
-                                name: "t".into(),
-                            },
+                            name: Relation::new(Some("s1".into()), "t".into()),
                             reason: NotReplicatedReason::Default,
                         }),
                         Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                            name: Relation {
-                                schema: Some("s2".into()),
-                                name: "t".into(),
-                            },
+                            name: Relation::new(Some("s2".into()), "t".into()),
                             reason: NotReplicatedReason::Default,
                         }),
                     ],
@@ -2553,17 +2547,11 @@ mod tests {
 
         let expected = vec![
             (NonReplicatedRelation {
-                name: Relation {
-                    schema: Some("s1".into()),
-                    name: "t".into(),
-                },
+                name: Relation::new(Some("s1".into()), "t".into()),
                 reason: NotReplicatedReason::Default,
             }),
             (NonReplicatedRelation {
-                name: Relation {
-                    schema: Some("s2".into()),
-                    name: "t".into(),
-                },
+                name: Relation::new(Some("s2".into()), "t".into()),
                 reason: NotReplicatedReason::Default,
             }),
         ]
@@ -2582,10 +2570,7 @@ mod tests {
                 .extend_recipe(ChangeList::from_changes(
                     vec![
                         Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                            name: Relation {
-                                schema: Some("s1".into()),
-                                name: "t".into(),
-                            },
+                            name: Relation::new(Some("s1".into()), "t".into()),
                             reason: NotReplicatedReason::Configuration,
                         }),
                         Change::CreateTable {
@@ -2612,10 +2597,7 @@ mod tests {
         }
 
         noria
-            .table(Relation {
-                schema: Some("s2".into()),
-                name: "snapshotting_t".into(),
-            })
+            .table(Relation::new(Some("s2".into()), "snapshotting_t".into()))
             .await
             .unwrap()
             .set_snapshot_mode(true)
@@ -2623,10 +2605,7 @@ mod tests {
             .unwrap();
 
         let mut snapshotted = noria
-            .table(Relation {
-                schema: Some("s2".into()),
-                name: "snapshotted_t".into(),
-            })
+            .table(Relation::new(Some("s2".into()), "snapshotted_t".into()))
             .await
             .unwrap();
         snapshotted.set_snapshot_mode(false).await.unwrap();
@@ -2639,42 +2618,27 @@ mod tests {
 
         let res = noria.table_statuses(false).await.unwrap();
         assert_matches!(
-            res.get(&Relation {
-                schema: Some("s2".into()),
-                name: "snapshotting_t".into(),
-            }),
+            res.get(&Relation::new(Some("s2".into()), "snapshotting_t".into())),
             Some(TableStatus::Snapshotting(..))
         );
         assert_matches!(
-            res.get(&Relation {
-                schema: Some("s2".into()),
-                name: "snapshotted_t".into(),
-            }),
+            res.get(&Relation::new(Some("s2".into()), "snapshotted_t".into())),
             Some(TableStatus::Online | TableStatus::Compacting(..))
         );
 
         let res = noria.table_statuses(true).await.unwrap();
         assert_matches!(
-            res.get(&Relation {
-                schema: Some("s1".into()),
-                name: "t".into(),
-            }),
+            res.get(&Relation::new(Some("s1".into()), "t".into())),
             Some(TableStatus::NotReplicated(
                 NotReplicatedReason::Configuration
             ))
         );
         assert_matches!(
-            res.get(&Relation {
-                schema: Some("s2".into()),
-                name: "snapshotting_t".into(),
-            }),
+            res.get(&Relation::new(Some("s2".into()), "snapshotting_t".into())),
             Some(TableStatus::Snapshotting(..))
         );
         assert_matches!(
-            res.get(&Relation {
-                schema: Some("s2".into()),
-                name: "snapshotted_t".into(),
-            }),
+            res.get(&Relation::new(Some("s2".into()), "snapshotted_t".into())),
             Some(TableStatus::Online | TableStatus::Compacting(..))
         );
 

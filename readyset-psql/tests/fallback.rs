@@ -1012,10 +1012,7 @@ async fn replication_failure_ignores_table(failpoint: &str) {
     setup_for_replication_failure(&client).await;
 
     let err_to_inject = ReadySetError::TableError {
-        table: Relation {
-            schema: Some("public".into()),
-            name: "cats".into(),
-        },
+        table: Relation::new(Some("public".into()), "cats".into()),
         source: Box::new(ReadySetError::Internal("failpoint injected".to_string())),
     };
 
@@ -1104,10 +1101,7 @@ async fn replication_failure_retries_if_failed_to_drop(failpoint: &str) {
 
     // Inject an error in replication
     let err_to_inject = ReadySetError::TableError {
-        table: Relation {
-            schema: Some("public".into()),
-            name: "cats".into(),
-        },
+        table: Relation::new(Some("public".into()), "cats".into()),
         source: Box::new(ReadySetError::Internal("failpoint injected".to_string())),
     };
 

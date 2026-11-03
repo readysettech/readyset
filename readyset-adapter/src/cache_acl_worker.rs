@@ -443,10 +443,7 @@ impl<DB: UpstreamDatabase + 'static> AclWorker<DB> {
             .iter()
             .filter(|info| info.request.database.as_ref() == database)
             .flat_map(|info| extract_referenced_relation_names(&info.request.query))
-            .map(|(schema, name)| Relation {
-                schema: schema.map(Into::into),
-                name: name.into(),
-            })
+            .map(|(schema, name)| Relation::new(schema.map(Into::into), name.into()))
             .collect();
         relations.sort();
         relations.dedup();

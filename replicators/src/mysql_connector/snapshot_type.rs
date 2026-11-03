@@ -311,10 +311,10 @@ mod tests {
             keys: vec![Column::from(SqlIdentifier::from("id"))],
             column_indices: vec![0],
         };
-        let table_name = Relation {
-            schema: Some(SqlIdentifier::from("test")),
-            name: SqlIdentifier::from("test"),
-        };
+        let table_name = Relation::new(
+            Some(SqlIdentifier::from("test")),
+            SqlIdentifier::from("test"),
+        );
         let (count_query, initial_query, bound_based_query, collation_query) =
             snapshot_type.get_queries(&table_name, None, None);
         assert_eq!(count_query, "SELECT TABLE_ROWS FROM information_schema.tables WHERE TABLE_NAME = 'test' AND TABLE_SCHEMA = 'test'");
@@ -339,10 +339,10 @@ mod tests {
             keys: vec![Column::from(SqlIdentifier::from("id"))],
             column_indices: vec![0],
         };
-        let table_name = Relation {
-            schema: Some(SqlIdentifier::from("test")),
-            name: SqlIdentifier::from("test"),
-        };
+        let table_name = Relation::new(
+            Some(SqlIdentifier::from("test")),
+            SqlIdentifier::from("test"),
+        );
 
         let (_count_query, initial_query, bound_based_query, _collation_query) =
             snapshot_type.get_queries(&table_name, Some("+ PT_KILL_BYPASS".to_string()), None);
@@ -368,10 +368,7 @@ mod tests {
             keys: vec![Column::from(SqlIdentifier::from("a"))],
             column_indices: vec![0],
         };
-        let table_name = Relation {
-            schema: Some(SqlIdentifier::from("db")),
-            name: SqlIdentifier::from("foo"),
-        };
+        let table_name = Relation::new(Some(SqlIdentifier::from("db")), SqlIdentifier::from("foo"));
         let (_count_query, initial_query, bound_based_query, _collation_query) =
             snapshot_type.get_queries(&table_name, None, Some(&columns));
         assert_eq!(

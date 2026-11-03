@@ -288,10 +288,7 @@ impl CustomTypeEntry {
     }
 
     pub(crate) fn into_relation(self) -> Relation {
-        Relation {
-            schema: Some(self.schema.into()),
-            name: self.name.into(),
-        }
+        Relation::new(Some(self.schema.into()), self.name.into())
     }
 }
 
@@ -398,10 +395,8 @@ impl TableEntry {
         transaction: &'a pgsql::Transaction<'a>,
         parsing_preset: ParsingPreset,
     ) -> Result<TableDescription, ReadySetError> {
-        let table_relation = Relation {
-            schema: Some(self.schema.clone().into()),
-            name: self.name.clone().into(),
-        };
+        let table_relation =
+            Relation::new(Some(self.schema.clone().into()), self.name.clone().into());
         let columns = Self::get_columns(self.oid, transaction)
             .await
             .map_err(|e| {
@@ -924,10 +919,7 @@ impl<'a> PostgresReplicator<'a> {
                                 NotReplicatedReason::Configuration
                             };
                         Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                            name: Relation {
-                                schema: Some(te.schema.into()),
-                                name: te.name.into(),
-                            },
+                            name: Relation::new(Some(te.schema.into()), te.name.into()),
                             reason: not_replicated_reason,
                         })
                     })
@@ -1020,10 +1012,10 @@ impl<'a> PostgresReplicator<'a> {
                     self.noria
                         .extend_recipe_no_leader_ready(ChangeList::from_change(
                             Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                                name: Relation {
-                                    schema: Some(table.schema.into()),
-                                    name: table.name.clone().into(),
-                                },
+                                name: Relation::new(
+                                    Some(table.schema.into()),
+                                    table.name.clone().into(),
+                                ),
                                 reason: NotReplicatedReason::from_string(&error.to_string()),
                             }),
                             DataDialect::DEFAULT_POSTGRESQL,
@@ -1071,10 +1063,7 @@ impl<'a> PostgresReplicator<'a> {
                     self.noria
                         .extend_recipe_no_leader_ready(ChangeList::from_change(
                             Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                                name: Relation {
-                                    schema: Some(view_schema.into()),
-                                    name: view_name.into(),
-                                },
+                                name: Relation::new(Some(view_schema.into()), view_name.into()),
                                 reason: NotReplicatedReason::from_string(&error.to_string()),
                             }),
                             DataDialect::DEFAULT_POSTGRESQL,
@@ -1380,10 +1369,7 @@ mod tests {
     ) -> TableDescription {
         TableDescription {
             oid: 1,
-            name: Relation {
-                schema: Some("public".into()),
-                name: "t".into(),
-            },
+            name: Relation::new(Some("public".into()), "t".into()),
             columns: column_names.iter().map(|name| column(name)).collect(),
             constraints,
         }
@@ -1452,10 +1438,7 @@ mod tests {
                     name: "a".into(),
                     table: None,
                 }],
-                target_table: Relation {
-                    schema: None,
-                    name: "other".into(),
-                },
+                target_table: Relation::new(None, "other".into()),
                 target_columns: vec![Column {
                     name: "id".into(),
                     table: None,
@@ -1500,10 +1483,7 @@ mod tests {
     fn table_description_with_reserved_keywords_to_string_parses() {
         let desc = TableDescription {
             oid: 32541,
-            name: Relation {
-                schema: Some("public".into()),
-                name: "ar_internal_metadata".into(),
-            },
+            name: Relation::new(Some("public".into()), "ar_internal_metadata".into()),
             columns: vec![
                 ColumnEntry {
                     attnum: 0,
@@ -1607,10 +1587,7 @@ mod tests {
     fn make_table_with_pk(pk_columns: Vec<&str>) -> TableDescription {
         TableDescription {
             oid: 1234,
-            name: Relation {
-                schema: Some("public".into()),
-                name: "users".into(),
-            },
+            name: Relation::new(Some("public".into()), "users".into()),
             columns: vec![
                 ColumnEntry {
                     attnum: 1,
@@ -1740,10 +1717,7 @@ mod tests {
     fn try_into_change_ri_with_no_existing_pk() {
         let desc = TableDescription {
             oid: 1234,
-            name: Relation {
-                schema: Some("public".into()),
-                name: "users".into(),
-            },
+            name: Relation::new(Some("public".into()), "users".into()),
             columns: vec![
                 ColumnEntry {
                     attnum: 1,

@@ -2702,10 +2702,7 @@ mod tests {
     fn rewrite(query: &str, autoparameterize: bool) -> (SelectStatement, DfQueryParameters) {
         let mut catalog = schema_catalog::SchemaCatalog::default();
         catalog.view_schemas.insert(
-            Relation {
-                schema: None,
-                name: "t".into(),
-            },
+            Relation::new(None, "t".into()),
             vec!["a".into(), "b".into(), "v".into()],
         );
         let context = schema_catalog::RewriteContext::new(

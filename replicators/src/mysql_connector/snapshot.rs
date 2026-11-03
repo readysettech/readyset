@@ -220,10 +220,7 @@ impl MySqlReplicator<'_> {
                     .into_iter()
                     .map(|(schema, name)| {
                         Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                            name: Relation {
-                                schema: Some(schema.into()),
-                                name: name.into(),
-                            },
+                            name: Relation::new(Some(schema.into()), name.into()),
                             reason: NotReplicatedReason::Configuration,
                         })
                     })
@@ -288,10 +285,7 @@ impl MySqlReplicator<'_> {
                     noria
                         .extend_recipe_no_leader_ready(ChangeList::from_change(
                             Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                                name: Relation {
-                                    schema: Some(db.into()),
-                                    name: table.into(),
-                                },
+                                name: Relation::new(Some(db.into()), table.into()),
                                 reason: NotReplicatedReason::from_string(&error.to_string()),
                             }),
                             Dialect::DEFAULT_MYSQL,
@@ -340,10 +334,7 @@ impl MySqlReplicator<'_> {
                     noria
                         .extend_recipe_no_leader_ready(ChangeList::from_change(
                             Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                                name: Relation {
-                                    schema: Some(db.into()),
-                                    name: view.into(),
-                                },
+                                name: Relation::new(Some(db.into()), view.into()),
                                 reason: NotReplicatedReason::from_string(&error.to_string()),
                             }),
                             Dialect::DEFAULT_MYSQL,
@@ -370,10 +361,7 @@ impl MySqlReplicator<'_> {
                 self.table_filter
                     .should_be_processed(schema.as_str(), table.as_str())
             })
-            .map(|(schema, name)| Relation {
-                schema: Some(schema.into()),
-                name: name.into(),
-            })
+            .map(|(schema, name)| Relation::new(Some(schema.into()), name.into()))
             .collect::<Vec<_>>();
         Ok((tx, table_list))
     }
@@ -957,10 +945,7 @@ impl MySqlReplicator<'_> {
         let current_tables = noria.tables().await?;
         let snapshot_tables_set: HashSet<Relation> = snapshot_tables
             .iter()
-            .map(|(schema, name)| Relation {
-                schema: Some(schema.clone().into()),
-                name: name.clone().into(),
-            })
+            .map(|(schema, name)| Relation::new(Some(schema.clone().into()), name.clone().into()))
             .collect();
 
         for table in current_tables.keys() {

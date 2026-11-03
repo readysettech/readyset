@@ -135,10 +135,7 @@ macro_rules! handle_table_err {
                 let source = Box::new(binlog_err!($connector, Some(tme), e));
                 note_table_error_scoped(tme, &source);
                 return Err(ReadySetError::TableError {
-                    table: Relation {
-                        schema: Some(tme.database_name().into()),
-                        name: tme.table_name().into(),
-                    },
+                    table: Relation::new(Some(tme.database_name().into()), tme.table_name().into()),
                     source,
                 });
             }
@@ -753,10 +750,7 @@ impl MySqlBinlogConnector {
             ]));
         }
 
-        let table = Relation {
-            schema: Some(tme.database_name().into()),
-            name: tme.table_name().into(),
-        };
+        let table = Relation::new(Some(tme.database_name().into()), tme.table_name().into());
 
         // All rows in a single WRITE_ROWS_EVENT share the outer binlog
         // event's position. We tag with the *post-event* offset so the
@@ -972,10 +966,7 @@ impl MySqlBinlogConnector {
             updated_rows.extend(row_ops);
         }
 
-        let table = Relation {
-            schema: Some(tme.database_name().into()),
-            name: tme.table_name().into(),
-        };
+        let table = Relation::new(Some(tme.database_name().into()), tme.table_name().into());
 
         // All rows in a single UPDATE_ROWS_EVENT share the outer binlog
         // event's position. See `post_event_offset` for why we use the
@@ -1057,10 +1048,7 @@ impl MySqlBinlogConnector {
             }
         }
 
-        let table = Relation {
-            schema: Some(tme.database_name().into()),
-            name: tme.table_name().into(),
-        };
+        let table = Relation::new(Some(tme.database_name().into()), tme.table_name().into());
 
         // All rows in a single DELETE_ROWS_EVENT share the outer binlog
         // event's position. See `post_event_offset` for why we use the
@@ -2162,10 +2150,7 @@ impl MySqlBinlogConnector {
         tme: &TableMapEvent<'static>,
         column_id: usize,
     ) -> ReadySetResult<Option<u16>> {
-        let table = Relation {
-            schema: Some(tme.database_name().into()),
-            name: tme.table_name().into(),
-        };
+        let table = Relation::new(Some(tme.database_name().into()), tme.table_name().into());
         let exists = table_schemas.contains_key(&table);
         if !exists {
             if let Some(schema) = noria.table(table.clone()).await?.schema().cloned() {
@@ -2648,10 +2633,7 @@ mod tests {
     use readyset_sql::ast::SqlType;
 
     fn make_relation(name: &str) -> Relation {
-        Relation {
-            schema: Some("test_db".into()),
-            name: SqlIdentifier::from(name),
-        }
+        Relation::new(Some("test_db".into()), SqlIdentifier::from(name))
     }
 
     fn make_position(pos: u64) -> ReplicationOffset {
@@ -2708,10 +2690,7 @@ mod tests {
         let body = parse_create_table("CREATE TABLE t (id INT)")
             .body
             .expect("parses");
-        let kept = Relation {
-            schema: Some("other_db".into()),
-            name: SqlIdentifier::from("t"),
-        };
+        let kept = Relation::new(Some("other_db".into()), SqlIdentifier::from("t"));
         let mut cache = HashMap::from([
             (make_relation("users"), body.clone()),
             (make_relation("orders"), body.clone()),

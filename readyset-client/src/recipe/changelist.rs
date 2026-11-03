@@ -749,10 +749,7 @@ mod tests {
             };
             let mut catalog = SchemaCatalog::default();
             catalog.view_schemas.insert(
-                Relation {
-                    schema: Some("public".into()),
-                    name: "t".into(),
-                },
+                Relation::new(Some("public".into()), "t".into()),
                 vec!["x".into(), "y".into()],
             );
             let rewrite_context = RewriteContext::new(

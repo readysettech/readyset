@@ -927,10 +927,7 @@ async fn test_sensitiveness_lookup() {
         .await
         .unwrap();
     sleep().await;
-    let table = Relation {
-        schema: Some("noria".into()),
-        name: "col_sensitiveness_lookup".into(),
-    };
+    let table = Relation::new(Some("noria".into()), "col_sensitiveness_lookup".into());
 
     // we want to test the code path during the snapshot. Force a snapshot here.
     resnapshot_table(table, &mut handle, &mut conn).await;

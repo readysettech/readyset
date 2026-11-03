@@ -2583,10 +2583,7 @@ mod tests {
 
             use crate::persistent_state::{PersistenceType, PersistentState};
 
-            let table = Relation {
-                schema: None,
-                name: SqlIdentifier::from("test_table"),
-            };
+            let table = Relation::new(None, SqlIdentifier::from("test_table"));
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
             let mut state = PersistentState::new(
                 String::from("status_notify_test"),

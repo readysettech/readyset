@@ -1720,10 +1720,7 @@ mod tests {
     #[test]
     fn test_cache_debug() {
         let inner = CacheManager::new_inner(None, Default::default());
-        let relation = readyset_sql::ast::Relation {
-            schema: None,
-            name: "test_table".into(),
-        };
+        let relation = readyset_sql::ast::Relation::new(None, "test_table".into());
         let query_id = readyset_client::query::QueryId::from_unparsed_select("SELECT * FROM test");
 
         let cache = Cache::<String, String>::new(

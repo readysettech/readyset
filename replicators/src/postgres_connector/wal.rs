@@ -82,10 +82,7 @@ impl From<WalError> for ReadySetError {
                 table,
                 schema,
             } => {
-                let table = Relation {
-                    schema: Some(schema.into()),
-                    name: table.into(),
-                };
+                let table = Relation::new(Some(schema.into()), table.into());
 
                 ReadySetError::TableError {
                     table,

@@ -1363,10 +1363,7 @@ impl SqlIncorporator {
                 Err(e) => {
                     if let Some(view) = e
                         .table_not_found_cause()
-                        .map(|(name, schema)| Relation {
-                            schema: schema.map(Into::into),
-                            name: name.into(),
-                        })
+                        .map(|(name, schema)| Relation::new(schema.map(Into::into), name.into()))
                         .and_then(|rel| self.views.get(&rel))
                         .filter(|view| !view.compiled)
                         .cloned()
@@ -1813,10 +1810,7 @@ impl ResolveSchemasContext for SqlIncorporatorRewriteContext<'_> {
     }
 
     fn can_query_table(&self, schema: &SqlIdentifier, table: &SqlIdentifier) -> Option<CanQuery> {
-        let relation = Relation {
-            schema: Some(schema.clone()),
-            name: table.clone(),
-        };
+        let relation = Relation::new(Some(schema.clone()), table.clone());
 
         if self.view_schemas().contains_key(&relation)
             || self.base_schema(&relation).is_some()

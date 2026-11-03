@@ -59,10 +59,10 @@ async fn functional_uk_only_rejects_table() {
     eventually!(run_test: {
         handle.non_replicated_relations().await.unwrap()
     }, then_assert: |result| {
-        let relation = Relation {
-            schema: Some(SqlIdentifier::from(db_name)),
-            name: SqlIdentifier::from("t_func_uk"),
-        };
+        let relation = Relation::new(
+            Some(SqlIdentifier::from(db_name)),
+            SqlIdentifier::from("t_func_uk"),
+        );
         let has_table = result.iter().any(|r| r.name == relation);
         assert!(
             has_table,
@@ -133,10 +133,10 @@ async fn no_pk_functional_first_uk_usable_second_uk_succeeds() {
     eventually!(run_test: {
         handle.non_replicated_relations().await.unwrap()
     }, then_assert: |result| {
-        let relation = Relation {
-            schema: Some(SqlIdentifier::from(db_name)),
-            name: SqlIdentifier::from("t_uk_fallback"),
-        };
+        let relation = Relation::new(
+            Some(SqlIdentifier::from(db_name)),
+            SqlIdentifier::from("t_uk_fallback"),
+        );
         let has_table = result.iter().any(|r| r.name == relation);
         assert!(
             !has_table,

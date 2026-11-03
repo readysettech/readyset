@@ -995,10 +995,10 @@ impl<'a> NoriaAdapter<'a> {
                     && statement.body.is_ok()
                     && statement.like.is_none();
                 if !keep {
-                    non_replicated_tables.push(Relation {
-                        schema: Some(schema.clone().into()),
-                        name: statement.table.name.clone(),
-                    });
+                    non_replicated_tables.push(Relation::new(
+                        Some(schema.clone().into()),
+                        statement.table.name.clone(),
+                    ));
                 }
                 keep
             }

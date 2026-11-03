@@ -461,10 +461,7 @@ impl Leader {
             }
             (&Method::GET, path) if path.starts_with("/graph/") => {
                 #[allow(clippy::unwrap_used)]
-                let query_name = Relation {
-                    schema: None,
-                    name: path.get("/graph/".len()..).unwrap().into(),
-                };
+                let query_name = Relation::new(None, path.get("/graph/".len()..).unwrap().into());
                 let ds = self.dataflow_state_handle.read().await;
                 let node_sizes = ds.node_sizes().await?;
                 Ok(ds

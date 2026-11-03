@@ -12,10 +12,7 @@ use crate::constants::DEFAULT_COLLATION_NUMERIC;
 fn default_column_base(col: &ColumnSchema, sql_type: SqlType) -> ColumnBase {
     ColumnBase {
         column: col.column.name.clone(),
-        table: Relation {
-            schema: None,
-            name: "".into(),
-        },
+        table: Relation::new(None, "".into()),
         constraints: vec![],
         table_oid: None,
         attnum: None,
@@ -337,10 +334,7 @@ pub(crate) fn convert_column(
             .column
             .table
             .clone()
-            .unwrap_or_else(|| Relation {
-                schema: None,
-                name: "".into(),
-            })
+            .unwrap_or_else(|| Relation::new(None, "".into()))
             .display(readyset_sql::Dialect::MySQL)
             .to_string(),
         org_table: String::new(),

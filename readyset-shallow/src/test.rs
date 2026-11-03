@@ -26,10 +26,7 @@ fn test_manager() -> CacheManager<String, String> {
 }
 
 fn test_relation(name: &str) -> Relation {
-    Relation {
-        schema: None,
-        name: name.into(),
-    }
+    Relation::new(None, name.into())
 }
 
 fn test_policy() -> EvictionPolicy {

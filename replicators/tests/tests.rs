@@ -519,17 +519,14 @@ impl TestHandle {
             .extend_recipe(ChangeList::from_changes(
                 vec![
                     Change::Drop {
-                        name: Relation {
-                            schema: Some("public".into()),
-                            name: query_name.clone().into(),
-                        },
+                        name: Relation::new(Some("public".into()), query_name.clone().into()),
                         if_exists: true,
                     },
                     Change::CreateCache(CreateCache {
-                        name: Some(Relation {
-                            schema: Some("public".into()),
-                            name: query_name.clone().into(),
-                        }),
+                        name: Some(Relation::new(
+                            Some("public".into()),
+                            query_name.clone().into(),
+                        )),
                         statement: Box::new(
                             parse_select(readyset_sql::Dialect::MySQL, select_stmt.clone())
                                 .unwrap(),
@@ -545,10 +542,7 @@ impl TestHandle {
         let mut getter = self
             .controller()
             .await
-            .view(Relation {
-                schema: Some("public".into()),
-                name: query_name.into(),
-            })
+            .view(Relation::new(Some("public".into()), query_name.into()))
             .await?
             .into_reader_handle()
             .unwrap();
@@ -560,20 +554,14 @@ impl TestHandle {
 
     async fn assert_table_exists(&mut self, schema: &str, name: &str) {
         self.noria
-            .table(Relation {
-                schema: Some(schema.into()),
-                name: name.into(),
-            })
+            .table(Relation::new(Some(schema.into()), name.into()))
             .await
             .unwrap();
     }
 
     async fn assert_table_missing(&mut self, schema: &str, name: &str) {
         self.noria
-            .table(Relation {
-                schema: Some(schema.into()),
-                name: name.into(),
-            })
+            .table(Relation::new(Some(schema.into()), name.into()))
             .await
             .unwrap_err();
     }
@@ -817,10 +805,7 @@ async fn pgsql_snapshot_compaction_timeout_inner(label: &str, table_timeout_secs
         .await
         .unwrap();
 
-    let relation = Relation {
-        schema: Some("public".into()),
-        name: "compaction_timeout".into(),
-    };
+    let relation = Relation::new(Some("public".into()), "compaction_timeout".into());
 
     let mut controller = ctx.controller().await;
     let statuses = controller.table_statuses(true).await.unwrap();
@@ -1288,16 +1273,13 @@ async fn mysql_create_table_like_with_ignored() {
         ]
     );
 
-    assert!(!ctx.noria.tables().await.unwrap().contains_key(&Relation {
-        schema: Some("public".into()),
-        name: "like_table".into(),
-    }));
+    assert!(!ctx.noria.tables().await.unwrap().contains_key(&Relation::new(
+        Some("public".into()),
+        "like_table".into(),
+    )));
 
     let non_replicated_rels = ctx.noria.non_replicated_relations().await.unwrap();
-    let relation = Relation {
-        schema: Some("public".into()),
-        name: "like_table".into(),
-    };
+    let relation = Relation::new(Some("public".into()), "like_table".into());
     assert!(non_replicated_rels.contains(&NonReplicatedRelation::new(relation.clone()),));
 
     ctx.stop().await;
@@ -1470,10 +1452,7 @@ async fn replication_many_tables_inner(url: &str) -> ReadySetResult<()> {
         // Just check that all of the tables are really there
         ctx.controller()
             .await
-            .table(Relation {
-                schema: Some("public".into()),
-                name: format!("t{t}").into(),
-            })
+            .table(Relation::new(Some("public".into()), format!("t{t}").into()))
             .await
             .unwrap();
     }
@@ -1526,10 +1505,7 @@ async fn replication_big_tables_inner(url: &str) -> ReadySetResult<()> {
         // Just check that all of the tables are really there
         ctx.controller()
             .await
-            .table(Relation {
-                schema: Some("public".into()),
-                name: format!("t{t}").into(),
-            })
+            .table(Relation::new(Some("public".into()), format!("t{t}").into()))
             .await
             .unwrap();
     }
@@ -1708,10 +1684,7 @@ async fn replication_filter_inner(url: &str) -> ReadySetResult<()> {
     ctx.assert_table_exists("noria2", "t4").await;
 
     let non_replicated_rels = ctx.noria.non_replicated_relations().await.unwrap();
-    let relation = Relation {
-        schema: Some("public".into()),
-        name: "t2".into(),
-    };
+    let relation = Relation::new(Some("public".into()), "t2".into());
     assert!(non_replicated_rels.contains(&NonReplicatedRelation::new(relation.clone()),));
 
     client
@@ -1729,7 +1702,7 @@ async fn replication_filter_inner(url: &str) -> ReadySetResult<()> {
 
     eventually! {
         let non_replicated_rels = ctx.noria.non_replicated_relations().await.unwrap();
-        let relation =  Relation{schema: Some("noria2".into()),name: "t5".into()};
+        let relation =  Relation::new(Some("noria2".into()), "t5".into());
         non_replicated_rels.contains(&NonReplicatedRelation::new( relation))
     }
 
@@ -2182,10 +2155,7 @@ async fn postgresql_snapshot_has_column_collation_internal(url: &str) {
 
     let table = ctx
         .noria
-        .table(Relation {
-            schema: Some("public".into()),
-            name: "coll_t".into(),
-        })
+        .table(Relation::new(Some("public".into()), "coll_t".into()))
         .await
         .unwrap();
     let body = table
@@ -2244,10 +2214,7 @@ async fn postgresql_ddl_replicate_drop_table_internal(url: &str) {
         .await
         .unwrap();
     ctx.noria
-        .table(Relation {
-            schema: Some("public".into()),
-            name: "t1".into(),
-        })
+        .table(Relation::new(Some("public".into()), "t1".into()))
         .await
         .unwrap();
 
@@ -2257,10 +2224,7 @@ async fn postgresql_ddl_replicate_drop_table_internal(url: &str) {
     eventually! {
         let res = ctx
             .noria
-            .table(Relation {
-                schema: Some("public".into()),
-                name: "t1".into(),
-            })
+            .table(Relation::new(Some("public".into()), "t1".into()))
             .await;
         matches!(
             res.err(),
@@ -2297,10 +2261,7 @@ async fn postgresql_ddl_replicate_create_table_internal(url: &str) {
 
     eventually!(ctx
         .noria
-        .table(Relation {
-            schema: Some("public".into()),
-            name: "t2".into(),
-        })
+        .table(Relation::new(Some("public".into()), "t2".into()))
         .await
         .is_ok());
 
@@ -2327,19 +2288,13 @@ async fn postgresql_ddl_replicate_drop_view_internal(url: &str) {
         .await
         .unwrap();
     ctx.noria
-        .table(Relation {
-            schema: Some("public".into()),
-            name: "t2".into(),
-        })
+        .table(Relation::new(Some("public".into()), "t2".into()))
         .await
         .unwrap();
 
     // Create a cache that reads from the view to test the view exists
     let create_cache_change = Change::CreateCache(CreateCache {
-        name: Some(Relation {
-            schema: Some("public".into()),
-            name: "t2_view_q".into(),
-        }),
+        name: Some(Relation::new(Some("public".into()), "t2_view_q".into())),
         statement: Box::new(
             parse_select(
                 readyset_sql::Dialect::PostgreSQL,
@@ -2403,10 +2358,7 @@ async fn postgresql_ddl_replicate_create_view_internal(url: &str) {
         .await
         .unwrap();
     ctx.noria
-        .table(Relation {
-            schema: Some("public".into()),
-            name: "t2".into(),
-        })
+        .table(Relation::new(Some("public".into()), "t2".into()))
         .await
         .unwrap();
 
@@ -2421,10 +2373,7 @@ async fn postgresql_ddl_replicate_create_view_internal(url: &str) {
         .noria
         .extend_recipe(ChangeList::from_change(
             Change::CreateCache(CreateCache {
-                name: Some(Relation {
-                    schema: Some("public".into()),
-                    name: "t2_view_q".into()
-                }),
+                name: Some(Relation::new(Some("public".into()), "t2_view_q".into())),
                 statement: Box::new(
                     parse_select(
                         readyset_sql::Dialect::PostgreSQL,
@@ -2552,10 +2501,7 @@ async fn applies_replication_table_updates_on_restart(url: &str) {
         .unwrap();
 
     let non_replicated_rels = ctx.noria.non_replicated_relations().await.unwrap();
-    let relation = Relation {
-        schema: Some("public".into()),
-        name: "t2".into(),
-    };
+    let relation = Relation::new(Some("public".into()), "t2".into());
     assert!(
         non_replicated_rels.contains(&NonReplicatedRelation::new(relation)),
         "non_replicated_rels = {non_replicated_rels:?}"
@@ -2582,10 +2528,7 @@ async fn applies_replication_table_updates_on_restart(url: &str) {
         .unwrap();
 
     let non_replicated_rels = ctx.noria.non_replicated_relations().await.unwrap();
-    let relation = Relation {
-        schema: Some("public".into()),
-        name: "t2".into(),
-    };
+    let relation = Relation::new(Some("public".into()), "t2".into());
     assert!(
         !non_replicated_rels.contains(&NonReplicatedRelation::new(relation)),
         "non_replicated_rels = {non_replicated_rels:?}"
@@ -3376,10 +3319,7 @@ async fn pgsql_unsupported() {
         .unwrap();
 
     let non_replicated_rels = ctx.noria.non_replicated_relations().await.unwrap();
-    let relation = Relation {
-        schema: Some("public".into()),
-        name: "t".into(),
-    };
+    let relation = Relation::new(Some("public".into()), "t".into());
     assert!(non_replicated_rels.contains(&NonReplicatedRelation::new(relation)));
 
     // Replicate a new unsupported table
@@ -3387,8 +3327,7 @@ async fn pgsql_unsupported() {
 
     eventually! {
         let non_replicated_rels = ctx.noria.non_replicated_relations().await.unwrap();
-        let relation = Relation{schema: Some("public".into()),
-            name: "t2".into() };
+        let relation = Relation::new(Some("public".into()), "t2".into());
         non_replicated_rels.contains(&NonReplicatedRelation::new(relation)
 
         )
@@ -3507,10 +3446,7 @@ async fn pgsql_dont_replicate_partitioned_table() {
         .unwrap();
 
     ctx.noria.table("t").await.unwrap_err();
-    let relation = Relation {
-        schema: Some("public".into()),
-        name: "t".into(),
-    };
+    let relation = Relation::new(Some("public".into()), "t".into());
 
     assert!(ctx
         .noria
@@ -3520,17 +3456,11 @@ async fn pgsql_dont_replicate_partitioned_table() {
         .contains(&NonReplicatedRelation::new(relation.clone())));
 
     ctx.noria
-        .table(Relation {
-            schema: Some("public".into()),
-            name: "t_true".into(),
-        })
+        .table(Relation::new(Some("public".into()), "t_true".into()))
         .await
         .unwrap();
     ctx.noria
-        .table(Relation {
-            schema: Some("public".into()),
-            name: "t_false".into(),
-        })
+        .table(Relation::new(Some("public".into()), "t_false".into()))
         .await
         .unwrap();
 
@@ -3557,10 +3487,7 @@ async fn pgsql_dont_replicate_partitioned_table() {
         .query("CREATE TABLE t2 (key int, val int) PARTITION BY RANGE (key)")
         .await
         .unwrap();
-    let relation = Relation {
-        schema: Some("public".into()),
-        name: "t2".into(),
-    };
+    let relation = Relation::new(Some("public".into()), "t2".into());
     eventually! {
         ctx
             .noria
@@ -3609,10 +3536,7 @@ async fn pgsql_dont_replicate_generated_columns() {
         .await
         .unwrap();
 
-    let snapshot_rel = Relation {
-        schema: Some("public".into()),
-        name: "t_snapshot".into(),
-    };
+    let snapshot_rel = Relation::new(Some("public".into()), "t_snapshot".into());
     ctx.noria.table(snapshot_rel.clone()).await.unwrap_err();
     assert_eq!(
         ctx.noria
@@ -3634,10 +3558,7 @@ async fn pgsql_dont_replicate_generated_columns() {
         .await
         .unwrap();
 
-    let streaming_rel = Relation {
-        schema: Some("public".into()),
-        name: "t_streaming".into(),
-    };
+    let streaming_rel = Relation::new(Some("public".into()), "t_streaming".into());
     eventually! {
         ctx.noria
             .non_replicated_relations()
@@ -3702,10 +3623,7 @@ async fn mysql_dont_replicate_unsupported_storage_engine() {
         .unwrap();
 
     ctx.noria.table("t").await.unwrap_err();
-    let relation = Relation {
-        schema: Some("public".into()),
-        name: "t".into(),
-    };
+    let relation = Relation::new(Some("public".into()), "t".into());
 
     assert!(ctx
         .noria
@@ -3721,10 +3639,7 @@ async fn mysql_dont_replicate_unsupported_storage_engine() {
         )
         .await
         .unwrap();
-    let relation = Relation {
-        schema: Some("public".into()),
-        name: "t2".into(),
-    };
+    let relation = Relation::new(Some("public".into()), "t2".into());
     eventually! {
         let nrr = ctx
             .noria
@@ -3772,15 +3687,9 @@ async fn mysql_dont_enforce_fk_replication() {
         .await
         .unwrap();
 
-    let t_parent = Relation {
-        schema: Some("public".into()),
-        name: "t_parent".into(),
-    };
+    let t_parent = Relation::new(Some("public".into()), "t_parent".into());
 
-    let t_child = Relation {
-        schema: Some("public".into()),
-        name: "t_child".into(),
-    };
+    let t_child = Relation::new(Some("public".into()), "t_child".into());
     assert!(ctx
         .noria
         .non_replicated_relations()
@@ -3794,10 +3703,7 @@ async fn mysql_dont_enforce_fk_replication() {
         .query("CREATE TABLE t_child2 (y INT, FOREIGN KEY (y) REFERENCES t_parent(x));")
         .await
         .unwrap();
-    let t_child2 = Relation {
-        schema: Some("public".into()),
-        name: "t_child2".into(),
-    };
+    let t_child2 = Relation::new(Some("public".into()), "t_child2".into());
     eventually! {
         ctx.noria.tables().await.unwrap().contains_key(&t_child2)
     }
@@ -3918,10 +3824,7 @@ async fn fk_resnapshot_inner(url: &str) -> ReadySetResult<()> {
         "Snapshot1",
         &[&[DfValue::Int(1), DfValue::Int(1)]],
     );
-    let fk_relation = Relation {
-        schema: Some("public".into()),
-        name: "fk_table1".into(),
-    };
+    let fk_relation = Relation::new(Some("public".into()), "fk_table1".into());
     let tables = ctx.noria.tables().await.unwrap();
     let table_index_first_snapshot = tables.get(&fk_relation).unwrap();
 
@@ -4002,10 +3905,7 @@ async fn mysql_handle_dml_in_statement_events() {
     // 2. There is a cache created on previous step
     let tables = ctx.noria.tables().await.unwrap();
     let caches = ctx.noria.views().await.unwrap();
-    let relation = Relation {
-        schema: Some("public".into()),
-        name: "stmt_table".into(),
-    };
+    let relation = Relation::new(Some("public".into()), "stmt_table".into());
     assert!(tables.contains_key(&relation));
     assert_eq!(caches.len(), 1);
 
@@ -4243,14 +4143,8 @@ async fn alter_readyset_add_table_replication_tables() {
     ctx.assert_table_missing("public", "filter_t2").await;
     ctx.assert_table_missing("noria2", "filter_t4").await;
 
-    let table_2 = Relation {
-        schema: Some("public".into()),
-        name: "filter_t2".into(),
-    };
-    let table_4 = Relation {
-        schema: Some("noria2".into()),
-        name: "filter_t4".into(),
-    };
+    let table_2 = Relation::new(Some("public".into()), "filter_t2".into());
+    let table_4 = Relation::new(Some("noria2".into()), "filter_t4".into());
     ctx.replicator_tx
         .as_ref()
         .unwrap()
@@ -4319,18 +4213,9 @@ async fn alter_readyset_add_table_replication_tables_ignore() {
     ctx.assert_table_missing("noria2", "filter_t3").await;
     ctx.assert_table_exists("noria2", "filter_t4").await;
 
-    let table_1 = Relation {
-        schema: Some("public".into()),
-        name: "filter_t1".into(),
-    };
-    let table_2 = Relation {
-        schema: Some("public".into()),
-        name: "filter_t2".into(),
-    };
-    let table_3 = Relation {
-        schema: Some("noria2".into()),
-        name: "filter_t3".into(),
-    };
+    let table_1 = Relation::new(Some("public".into()), "filter_t1".into());
+    let table_2 = Relation::new(Some("public".into()), "filter_t2".into());
+    let table_3 = Relation::new(Some("noria2".into()), "filter_t3".into());
     ctx.replicator_tx
         .as_ref()
         .unwrap()
@@ -4922,17 +4807,12 @@ async fn alter_table_add_key_mysql() {
     // 2. There is a cache created on previous step
     let tables = ctx.noria.tables().await.unwrap();
     let caches = ctx.noria.views().await.unwrap();
-    let relation = Relation {
-        schema: Some("public".into()),
-        name: "test_alter_table_add_key".into(),
-    };
+    let relation = Relation::new(Some("public".into()), "test_alter_table_add_key".into());
     assert!(tables.contains_key(&relation));
     assert_eq!(caches.len(), 1);
     let table_id = tables.get(&relation).unwrap();
-    let bogus_table = Relation {
-        schema: Some("public".into()),
-        name: "test_alter_table_add_key_bogus".into(),
-    };
+    let bogus_table =
+        Relation::new(Some("public".into()), "test_alter_table_add_key_bogus".into());
     let bogus_table_id = tables.get(&bogus_table).unwrap();
 
     let verify_tables_and_caches =
@@ -5576,17 +5456,12 @@ async fn alter_table_add_key_postgres() {
     // 2. There is a cache created on previous step
     let tables = ctx.noria.tables().await.unwrap();
     let caches = ctx.noria.views().await.unwrap();
-    let relation = Relation {
-        schema: Some("public".into()),
-        name: "test_alter_table_add_key".into(),
-    };
+    let relation = Relation::new(Some("public".into()), "test_alter_table_add_key".into());
     assert!(tables.contains_key(&relation));
     assert_eq!(caches.len(), 1);
     let table_id = tables.get(&relation).unwrap();
-    let bogus_table = Relation {
-        schema: Some("public".into()),
-        name: "test_alter_table_add_key_bogus".into(),
-    };
+    let bogus_table =
+        Relation::new(Some("public".into()), "test_alter_table_add_key_bogus".into());
     let bogus_table_id = tables.get(&bogus_table).unwrap();
 
     let verify_tables_and_caches =
@@ -5944,17 +5819,11 @@ async fn get_results_for_query_inner(
         .extend_recipe(ChangeList::from_changes(
             vec![
                 Change::Drop {
-                    name: Relation {
-                        schema: Some("public".into()),
-                        name: cache_name.into(),
-                    },
+                    name: Relation::new(Some("public".into()), cache_name.into()),
                     if_exists: true,
                 },
                 Change::CreateCache(CreateCache {
-                    name: Some(Relation {
-                        schema: Some("public".into()),
-                        name: cache_name.into(),
-                    }),
+                    name: Some(Relation::new(Some("public".into()), cache_name.into())),
                     statement: Box::new(
                         parse_select(readyset_sql::Dialect::MySQL, select_stmt).unwrap(),
                     ),
@@ -5969,10 +5838,7 @@ async fn get_results_for_query_inner(
     let mut getter = ctx
         .controller()
         .await
-        .view(Relation {
-            schema: Some("public".into()),
-            name: cache_name.into(),
-        })
+        .view(Relation::new(Some("public".into()), cache_name.into()))
         .await?
         .into_reader_handle()
         .unwrap();
@@ -6543,10 +6409,7 @@ async fn pgsql_group_commit_truncate_preserves_pending_position() {
     // Capture the snapshot offset for gc_pos_a so we can verify later
     // that the test actually exercised the post-INSERT flush path (i.e.
     // that the offset advanced beyond the snapshot state).
-    let table_a = Relation {
-        schema: Some("public".into()),
-        name: "gc_pos_a".into(),
-    };
+    let table_a = Relation::new(Some("public".into()), "gc_pos_a".into());
     let snapshot_a_pos = {
         let offsets = ctx
             .controller()

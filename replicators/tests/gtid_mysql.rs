@@ -337,17 +337,14 @@ impl TestHandle {
             .extend_recipe(ChangeList::from_changes(
                 vec![
                     Change::Drop {
-                        name: Relation {
-                            schema: Some(schema.into()),
-                            name: query_name.clone().into(),
-                        },
+                        name: Relation::new(Some(schema.into()), query_name.clone().into()),
                         if_exists: true,
                     },
                     Change::CreateCache(CreateCache {
-                        name: Some(Relation {
-                            schema: Some(schema.into()),
-                            name: query_name.clone().into(),
-                        }),
+                        name: Some(Relation::new(
+                            Some(schema.into()),
+                            query_name.clone().into(),
+                        )),
                         statement: Box::new(
                             parse_select(readyset_sql::Dialect::MySQL, select_stmt.clone())
                                 .unwrap(),
@@ -363,10 +360,7 @@ impl TestHandle {
         let mut getter = self
             .controller()
             .await
-            .view(Relation {
-                schema: Some(schema.into()),
-                name: query_name.into(),
-            })
+            .view(Relation::new(Some(schema.into()), query_name.into()))
             .await?
             .into_reader_handle()
             .unwrap();

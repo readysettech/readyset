@@ -3496,10 +3496,7 @@ async fn overlapping_or_not_doubled_after_reader_migration() {
 #[tokio::test(flavor = "multi_thread")]
 async fn drop_schema_removes_every_relation_in_the_schema() {
     fn rel(schema: &str, name: &str) -> Relation {
-        Relation {
-            schema: Some(schema.into()),
-            name: name.into(),
-        }
+        Relation::new(Some(schema.into()), name.into())
     }
     fn drop_schema(schema: &str) -> ChangeList {
         ChangeList::from_change(Change::DropSchema(schema.into()), Dialect::DEFAULT_MYSQL)
@@ -8962,10 +8959,7 @@ async fn it_recovers_fully_materialized() {
 #[tokio::test(flavor = "multi_thread")]
 async fn drop_removes_base_recorded_as_non_replicated() {
     fn rel(schema: &str, name: &str) -> Relation {
-        Relation {
-            schema: Some(schema.into()),
-            name: name.into(),
-        }
+        Relation::new(Some(schema.into()), name.into())
     }
 
     let (mut g, shutdown_tx) =
@@ -9752,17 +9746,11 @@ async fn multiple_schemas_explicit() {
     }
 
     let mut schema_1_t = g
-        .table(Relation {
-            schema: Some("schema_1".into()),
-            name: "t".into(),
-        })
+        .table(Relation::new(Some("schema_1".into()), "t".into()))
         .await
         .unwrap();
     let mut schema_2_t = g
-        .table(Relation {
-            schema: Some("schema_2".into()),
-            name: "t".into(),
-        })
+        .table(Relation::new(Some("schema_2".into()), "t".into()))
         .await
         .unwrap();
     let mut q = g.view("q").await.unwrap().into_reader_handle().unwrap();
@@ -10251,10 +10239,7 @@ async fn create_type_requires_schema() {
         let res = g
             .extend_recipe(ChangeList::from_change(
                 Change::CreateType {
-                    name: Relation {
-                        schema: None,
-                        name: "missing_schema".into(),
-                    },
+                    name: Relation::new(None, "missing_schema".into()),
                     ty: DfType::from_enum_variants(vec!["a".to_string(), "b".to_string()], None),
                 },
                 Dialect::DEFAULT_POSTGRESQL,
@@ -10301,14 +10286,12 @@ async fn schema_catalog() {
         .await
         .expect("Should be able to get updated schema catalog");
     assert_eq!(catalog.base_schemas.len(), 2);
-    assert!(catalog.base_schemas.contains_key(&Relation {
-        schema: Some("public".into()),
-        name: "users".into(),
-    }));
-    assert!(catalog.base_schemas.contains_key(&Relation {
-        schema: Some("public".into()),
-        name: "posts".into(),
-    }));
+    assert!(catalog
+        .base_schemas
+        .contains_key(&Relation::new(Some("public".into()), "users".into())));
+    assert!(catalog
+        .base_schemas
+        .contains_key(&Relation::new(Some("public".into()), "posts".into())));
 
     shutdown_tx.shutdown().await;
 }

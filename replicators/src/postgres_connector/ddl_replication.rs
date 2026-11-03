@@ -178,10 +178,7 @@ impl DdlEvent {
                 columns,
                 constraints,
             } => {
-                let table = Relation {
-                    schema: Some(self.schema.into()),
-                    name: name.into(),
-                };
+                let table = Relation::new(Some(self.schema.into()), name.into());
 
                 let column_oids = columns
                     .iter()
@@ -269,10 +266,7 @@ impl DdlEvent {
             }
             DdlEventData::AddNonReplicatedTable { name } => {
                 Ok(Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                    name: Relation {
-                        schema: Some(self.schema.into()),
-                        name: name.into(),
-                    },
+                    name: Relation::new(Some(self.schema.into()), name.into()),
                     reason: NotReplicatedReason::Partitioned,
                 }))
             }
@@ -288,10 +282,7 @@ impl DdlEvent {
                         // the event data to construct a fake AlterTableStatement with the parse
                         // failure in place of the definitions
                         AlterTableStatement {
-                            table: Relation {
-                                schema: Some(self.schema.into()),
-                                name: name.into(),
-                            },
+                            table: Relation::new(Some(self.schema.into()), name.into()),
                             definitions: Err(err.to_string()),
                             only: false,
                         }
@@ -313,10 +304,7 @@ impl DdlEvent {
                 name,
                 variants,
             } => Ok(Change::CreateType {
-                name: Relation {
-                    schema: Some(self.schema.clone().into()),
-                    name: name.clone().into(),
-                },
+                name: Relation::new(Some(self.schema.clone().into()), name.clone().into()),
                 ty: DfType::from_enum_variants(
                     variants.into_iter().map(|v| v.label),
                     Some(PgEnumMetadata {
@@ -334,10 +322,7 @@ impl DdlEvent {
                 original_variants,
             } => Ok(Change::AlterType {
                 oid,
-                name: Relation {
-                    schema: Some(self.schema.clone().into()),
-                    name: name.into(),
-                },
+                name: Relation::new(Some(self.schema.clone().into()), name.into()),
                 change: AlterTypeChange::SetVariants {
                     new_variants: variants.into_iter().map(|v| v.label).collect(),
                     original_variants: original_variants
@@ -778,13 +763,7 @@ mod tests {
                     name, definition, ..
                 } = parse_create_view(Dialect::PostgreSQL, statement).unwrap();
                 {
-                    assert_eq!(
-                        name,
-                        Relation {
-                            schema: Some("public".into()),
-                            name: "v".into()
-                        }
-                    );
+                    assert_eq!(name, Relation::new(Some("public".into()), "v".into()));
                     match *definition.unwrap() {
                         SelectSpecification::Simple(select_stmt) => {
                             assert_eq!(

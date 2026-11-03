@@ -448,10 +448,7 @@ impl PostgresWalConnector {
         ops: impl IntoIterator<Item = TableOperation>,
         event_pos: ReplicationOffset,
     ) -> bool {
-        let relation = Relation {
-            schema: Some(schema),
-            name: table,
-        };
+        let relation = Relation::new(Some(schema), table);
         self.group_commit
             .accumulate_row(relation, ops.into_iter().map(|op| (op, event_pos.clone())))
     }
@@ -1161,10 +1158,7 @@ impl Connector for PostgresWalConnector {
                         self.peek = Some(Ok(WalEvent::Truncate { tables, lsn }));
                     }
 
-                    let table = Relation {
-                        schema: Some(schema.into()),
-                        name: name.into(),
-                    };
+                    let table = Relation::new(Some(schema.into()), name.into());
                     cur_pos = cur_pos.with_lsn(lsn);
                     let event_pos: ReplicationOffset = cur_pos.into();
                     return Ok((
@@ -1365,10 +1359,7 @@ mod tests {
     }
 
     fn relation(name: &str) -> Relation {
-        Relation {
-            schema: Some("public".into()),
-            name: SqlIdentifier::from(name),
-        }
+        Relation::new(Some("public".into()), SqlIdentifier::from(name))
     }
 
     /// A plain `TableOperation::Insert` of a single integer paired with

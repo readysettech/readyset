@@ -971,10 +971,7 @@ async fn replication_failure_ignores_table() {
     assert_eq!(result, 1);
 
     let err_to_inject = ReadySetError::TableError {
-        table: Relation {
-            schema: Some("noria".into()),
-            name: "cats".into(),
-        },
+        table: Relation::new(Some("noria".into()), "cats".into()),
         source: Box::new(ReadySetError::Internal("failpoint injected".to_string())),
     };
 
@@ -1186,10 +1183,7 @@ async fn resnapshot_table_command() {
     ) -> Option<NodeIndex> {
         let tables = handle.tables().await.unwrap();
         tables
-            .get(&Relation {
-                schema: Some(schema.as_ref().into()),
-                name: name.as_ref().into(),
-            })
+            .get(&Relation::new(Some(schema.as_ref().into()), name.as_ref().into()))
             .cloned()
     }
 
