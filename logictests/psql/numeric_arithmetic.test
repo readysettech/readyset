@@ -43,3 +43,21 @@ SELECT id, b - 0.5 FROM t
 -0.5
 3
 0.5
+
+query  rowsort
+SELECT id, GREATEST(b, d) FROM t WHERE d IS NOT NULL
+----
+1
+2
+2
+3.10
+
+query  rowsort
+SELECT id, LEAST(b, 0.5) FROM t
+----
+1
+0.5
+2
+0
+3
+0.5

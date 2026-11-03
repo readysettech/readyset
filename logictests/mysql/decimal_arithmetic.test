@@ -43,3 +43,43 @@ SELECT id, b / d4 FROM t
 0
 3
 0.4286
+
+query  rowsort
+SELECT id, CASE WHEN b > 0 THEN d4 ELSE d END FROM t
+----
+1
+0.0625
+2
+3.10
+3
+2.3333
+
+query  rowsort
+SELECT id, COALESCE(d, d4) FROM t
+----
+1
+1.2500
+2
+3.1000
+3
+2.3333
+
+query  rowsort
+SELECT id, GREATEST(b, d4) FROM t
+----
+1
+2.0000
+2
+1.5000
+3
+2.3333
+
+query  rowsort
+SELECT id, LEAST(d, d4) FROM t
+----
+1
+0.0625
+2
+1.5000
+3
+NULL

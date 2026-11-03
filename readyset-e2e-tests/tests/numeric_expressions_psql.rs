@@ -214,3 +214,15 @@ async fn arithmetic_on_a_numeric_matches_postgres() {
     )
     .await;
 }
+
+#[tokio::test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn greatest_and_least_of_numbers_match_postgres() {
+    compare(
+        pairs()
+            .map(|(a, b)| vec![format!("GREATEST({a}, {b})"), format!("LEAST({a}, {b})")])
+            .collect(),
+    )
+    .await;
+}

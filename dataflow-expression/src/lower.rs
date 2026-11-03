@@ -3,7 +3,9 @@ use std::{cmp, iter};
 use chrono_tz::Tz;
 use readyset_data::dialect::SqlEngine;
 use readyset_data::upstream_system_props::system_props;
-use readyset_data::{Array, ArrayD, CharsetFamily, Collation, DfType, DfValue, IxDyn};
+use readyset_data::{
+    Array, ArrayD, CharsetFamily, Collation, DfType, DfValue, IxDyn, PgTypeCategory,
+};
 use readyset_errors::{
     internal, internal_err, invalid_query, invalid_query_err, unsupported, unsupported_err,
     ReadySetError, ReadySetResult,
@@ -198,8 +200,42 @@ fn unify_postgres_types(types: Vec<&DfType>) -> ReadySetResult<DfType> {
     //
     // TODO(ENG-1909): This bit is not completely correct, because we haven't yet implemented the
     // notion of "preferred" types, or whether or not types can be implicitly converted. For now, we
-    // just take the first non-unknown type
+    // just take the first non-unknown type, except among numbers: each converts implicitly to the
+    // ones after it in smallint, integer, bigint, numeric, real, double precision.
+    if first_known_type.pg_category() == PgTypeCategory::Numeric {
+        let rank = |ty: &DfType| match ty {
+            DfType::SmallInt => 1,
+            DfType::Int => 2,
+            DfType::BigInt => 3,
+            DfType::Numeric { .. } => 4,
+            DfType::Float => 5,
+            DfType::Double => 6,
+            _ => 0,
+        };
+        let mut widest = *first_known_type;
+        for ty in types.iter().filter(|ty| ty.is_known()) {
+            if rank(ty) > rank(widest) {
+                widest = ty;
+            }
+        }
+        return Ok(widest.clone());
+    }
     Ok((*first_known_type).clone())
+}
+
+/// Returns the type MySQL gives COALESCE, GREATEST and similar functions over numbers when one of
+/// them is a DECIMAL: a DOUBLE if any is a float, and otherwise a DECIMAL big enough for all of
+/// them. Returns `None` unless one is a DECIMAL and all are numbers.
+fn mysql_decimal_choice_type<'a>(types: impl IntoIterator<Item = &'a DfType>) -> Option<DfType> {
+    let known: Vec<&DfType> = types.into_iter().filter(|ty| ty.is_known()).collect();
+    let is_number = |ty: &&DfType| ty.is_any_int() || ty.is_numeric() || ty.is_any_float();
+    if !known.iter().any(|ty| ty.is_numeric()) || !known.iter().all(is_number) {
+        return None;
+    }
+    let (first, rest) = known.split_first()?;
+    rest.iter().try_fold((*first).clone(), |ty, next| {
+        mysql_numerical_type_cvt(&ty, next)
+    })
 }
 
 /// Returns a tuple of the inferred type to convert arguments to for comparison within a call to
@@ -221,6 +257,14 @@ fn mysql_least_greatest_compare_as(arg_types: Vec<&DfType>) -> DfType {
     // > values
     if arg_types.iter().any(|t| t.is_any_float()) {
         return DfType::Double;
+    }
+
+    // > Otherwise, if at least one argument is a DECIMAL value, they are compared as DECIMAL
+    // > values.
+    //
+    // A DECIMAL and a string are compared as strings, so this is for numbers only.
+    if let Some(ty) = mysql_decimal_choice_type(arg_types.iter().copied()) {
+        return ty;
     }
 
     // > * If the arguments comprise a mix of numbers and strings, they are compared as strings.
@@ -372,9 +416,23 @@ impl BuiltinFunction {
                 );
                 let expr = next_arg()?;
                 let val = next_arg()?;
-                // Type is inferred from the value provided
-                let ty = val.ty().clone();
-                (Self::IfNull(expr, val), ty)
+                let unified = match dialect.engine() {
+                    SqlEngine::MySQL => mysql_decimal_choice_type([expr.ty(), val.ty()]),
+                    SqlEngine::PostgreSQL => None,
+                };
+                match unified {
+                    // MySQL converts both arguments to a type big enough for either, as for
+                    // COALESCE.
+                    Some(ty) => (
+                        Self::IfNull(cast(expr, ty.clone()), cast(val, ty.clone())),
+                        ty,
+                    ),
+                    // Type is inferred from the value provided
+                    None => {
+                        let ty = val.ty().clone();
+                        (Self::IfNull(expr, val), ty)
+                    }
+                }
             }
             "month" => {
                 antithesis_sdk::assert_reachable!(
@@ -687,8 +745,26 @@ impl BuiltinFunction {
                     r#"{"id":"Built-in function","sub":"coalesce","tags":["exclude-nightly"]}"#
                 );
                 let arg1 = next_arg()?;
-                let ty = arg1.ty().clone();
-                (Self::Coalesce(arg1, args.by_ref().collect()), ty)
+                let rest: Vec<Expr> = args.by_ref().collect();
+                let arg_tys = iter::once(arg1.ty()).chain(rest.iter().map(|arg| arg.ty()));
+                let unified = match dialect.engine() {
+                    SqlEngine::MySQL => mysql_decimal_choice_type(arg_tys),
+                    SqlEngine::PostgreSQL => None,
+                };
+                match unified {
+                    // MySQL converts each argument to a type big enough for all of them.
+                    Some(ty) => (
+                        Self::Coalesce(
+                            cast(arg1, ty.clone()),
+                            rest.into_iter().map(|arg| cast(arg, ty.clone())).collect(),
+                        ),
+                        ty,
+                    ),
+                    None => {
+                        let ty = arg1.ty().clone();
+                        (Self::Coalesce(arg1, rest), ty)
+                    }
+                }
             }
             "concat" => {
                 antithesis_sdk::assert_reachable!(
@@ -793,11 +869,8 @@ impl BuiltinFunction {
                         // TODO(ENG-1911): What are the rules for MySQL's return type inference?
                         // The documentation just says "The return type of LEAST() is the aggregated
                         // type of the comparison argument types."
-                        let return_ty = arg_tys
-                            .iter()
-                            .find(|t| t.is_known())
-                            .copied()
-                            .cloned()
+                        let return_ty = mysql_decimal_choice_type(arg_tys.iter().copied())
+                            .or_else(|| arg_tys.iter().find(|t| t.is_known()).copied().cloned())
                             .unwrap_or(DfType::Binary(0));
                         let compare_as = mysql_least_greatest_compare_as(arg_tys);
                         (compare_as, return_ty)
@@ -1098,9 +1171,26 @@ fn mysql_numerical_type_cvt(left: &DfType, right: &DfType) -> Option<DfType> {
     } else {
         let left_is_decimal = left.is_numeric();
         let right_is_decimal = right.is_numeric();
-        if left_is_decimal && right_is_decimal {
-            // TODO: should return decimal, capable of storing max pres and scale
-            Some(left.clone())
+        if let (
+            DfType::Numeric {
+                prec: left_prec,
+                scale: left_scale,
+            },
+            DfType::Numeric {
+                prec: right_prec,
+                scale: right_scale,
+            },
+        ) = (left, right)
+        {
+            // A DECIMAL big enough for both: the most digits before the point and the most after it.
+            let scale = *left_scale.max(right_scale);
+            let int_digits = left_prec
+                .saturating_sub(u16::from(*left_scale))
+                .max(right_prec.saturating_sub(u16::from(*right_scale)));
+            Some(DfType::Numeric {
+                prec: int_digits + u16::from(scale),
+                scale,
+            })
         } else if left_is_decimal && right.is_any_exact_number() {
             Some(left.clone())
         } else if left.is_any_exact_number() && right_is_decimal {
@@ -2137,9 +2227,31 @@ impl Expr {
                         "Can not infer result type for CASE expression"
                     ))
                 } else {
+                    // A branch of a CASE over numbers returns its value as the CASE's type, as an INT
+                    // branch of a CASE that's a DECIMAL returns a DECIMAL.
+                    let is_number = ty.is_any_exact_number() || ty.is_any_float();
+                    let cast = |expr: Expr| {
+                        if is_number && *expr.ty() != ty {
+                            Self::Cast {
+                                expr: Box::new(expr),
+                                ty: ty.clone(),
+                                null_on_failure: false,
+                                dialect,
+                            }
+                        } else {
+                            expr
+                        }
+                    };
+                    let branches = branches
+                        .into_iter()
+                        .map(|CaseWhenBranch { condition, body }| CaseWhenBranch {
+                            condition,
+                            body: cast(body),
+                        })
+                        .collect();
                     Ok(Self::CaseWhen {
                         branches,
-                        else_expr: Box::new(else_expr),
+                        else_expr: Box::new(cast(else_expr)),
                         ty,
                     })
                 }

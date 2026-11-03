@@ -141,6 +141,10 @@ async fn example_exprs_type_same_as_mysql() {
         "CAST(1.5 AS DECIMAL(2,1)) * CAST(1.25 AS DECIMAL(3,2))",
         "CAST(1.5 AS DECIMAL(2,1)) / CAST(1.25 AS DECIMAL(3,2))",
         "CAST(1.5 AS DECIMAL(2,1)) + '2'",
+        // CASE, COALESCE and GREATEST over decimals return a type big enough for all of them.
+        "CASE WHEN 1 = 1 THEN CAST(2.25 AS DECIMAL(3,2)) ELSE CAST(1.5 AS DECIMAL(2,1)) END",
+        "COALESCE(CAST(NULL AS DECIMAL(2,1)), CAST(2.25 AS DECIMAL(3,2)))",
+        "GREATEST(CAST(1.5 AS DECIMAL(2,1)), CAST(2.25 AS DECIMAL(3,2)))",
     ] {
         compare_type(expr, &mut conn).await;
     }
@@ -245,6 +249,9 @@ async fn example_exprs_eval_same_as_mysql() {
         "CAST(3.4 AS UNSIGNED)",
         "CAST(2.6 AS UNSIGNED)",
         "CAST(3.6 AS UNSIGNED)",
+        // GREATEST and LEAST compare numbers as decimals when one is a DECIMAL.
+        "LEAST(10, CAST(9.5 AS DECIMAL(2,1)))",
+        "GREATEST(0, CAST(0.5 AS DECIMAL(2,1)))",
     ] {
         compare_eval(expr, &mut conn).await;
     }
