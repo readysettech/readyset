@@ -72,6 +72,9 @@ impl TryFromDialect<sqlparser::ast::ObjectName> for Relation {
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
         use sqlparser::ast::ObjectNamePart;
+        if value.0.len() > 2 {
+            unsupported!("relation name with more than two parts: {value}")?;
+        }
         let mut identifiers = value.0.into_iter().map(|part| match part {
             ObjectNamePart::Identifier(ident) => Ok(ident.into_dialect(dialect)),
             ObjectNamePart::Function(_) => unsupported!("identifier constructor in relation name"),
@@ -481,3 +484,37 @@ impl PartialEq for NonReplicatedRelation {
 }
 
 impl Eq for NonReplicatedRelation {}
+
+#[cfg(test)]
+mod tests {
+    use std::assert_matches;
+
+    use sqlparser::ast::{Ident, ObjectName};
+
+    use super::*;
+
+    fn object_name(parts: &[&str]) -> ObjectName {
+        let idents: Vec<_> = parts.iter().map(|part| Ident::new(*part)).collect();
+        ObjectName::from(idents)
+    }
+
+    #[test]
+    fn relation_from_object_name() {
+        let relation = Relation::try_from_dialect(object_name(&["t"]), Dialect::PostgreSQL);
+        assert_eq!(relation.unwrap(), Relation::from("t"));
+
+        let relation = Relation::try_from_dialect(object_name(&["s", "t"]), Dialect::PostgreSQL);
+        let relation = relation.unwrap();
+        assert_eq!(relation.schema, Some("s".into()));
+        assert_eq!(relation.name, "t");
+    }
+
+    #[test]
+    fn relation_from_three_part_object_name_is_unsupported() {
+        let result = Relation::try_from_dialect(object_name(&["d", "s", "t"]), Dialect::PostgreSQL);
+        assert_matches!(
+            result,
+            Err(AstConversionError::Unsupported(msg)) if msg.contains("more than two parts")
+        );
+    }
+}

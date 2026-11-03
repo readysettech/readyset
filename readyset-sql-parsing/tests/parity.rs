@@ -1724,3 +1724,17 @@ fn table_alias_with_column_renaming() {
         assert_eq!(aliases, *expected_aliases);
     }
 }
+
+#[test]
+fn three_part_relation_name() {
+    check_parse_both!("SELECT * FROM a.b");
+    for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
+        for sql in [
+            "SELECT * FROM a.b.c",
+            "INSERT INTO a.b.c VALUES (1)",
+            "CREATE TABLE a.b.c (x INT)",
+        ] {
+            check_parse_fails!(dialect, sql, "more than two parts");
+        }
+    }
+}
