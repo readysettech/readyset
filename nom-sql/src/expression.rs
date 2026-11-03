@@ -957,10 +957,7 @@ mod tests {
             Expr::OpAll {
                 lhs: Box::new(Expr::Cast {
                     expr: Box::new(Expr::Literal(Literal::String("a".to_string()))),
-                    ty: SqlType::Other(Relation {
-                        schema: None,
-                        name: "abc".into(),
-                    }),
+                    ty: SqlType::Other(Relation::new(None, "abc".into())),
                     style: CastStyle::DoubleColon,
                     array: false,
                 }),

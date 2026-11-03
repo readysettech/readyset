@@ -276,7 +276,7 @@ impl TryFromDialect<sqlparser::ast::Statement> for SqlQuery {
                 comment,
                 if_exists: _,
             } => {
-                let Relation { schema, name } = object_name.try_into_dialect(dialect)?;
+                let Relation { schema, name, .. } = object_name.try_into_dialect(dialect)?;
                 Ok(Self::Comment(CommentStatement::Column {
                     column_name: name,
                     table_name: schema.ok_or_else(|| {

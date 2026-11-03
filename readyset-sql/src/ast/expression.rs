@@ -3798,10 +3798,7 @@ mod tests {
         let max_over = |table: &str| {
             Expr::Call(FunctionExpr::Max(Box::new(Expr::Column(Column {
                 name: "val".into(),
-                table: Some(Relation {
-                    schema: None,
-                    name: table.into(),
-                }),
+                table: Some(Relation::new(None, table.into())),
             }))))
         };
         // Long table names sharing a >64-char prefix, differing only in the final char.

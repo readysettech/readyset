@@ -697,10 +697,7 @@ mod tests {
     fn parse_add_column_no_column_tag() {
         let qstring = b"ALTER TABLE employees ADD Email varchar(255), ADD snailmail TEXT";
         let expected = AlterTableStatement {
-            table: Relation {
-                name: "employees".into(),
-                schema: None,
-            },
+            table: Relation::new(None, "employees".into()),
             definitions: Ok(vec![
                 AlterTableDefinition::AddColumn {
                     spec: ColumnSpecification {
@@ -782,10 +779,7 @@ mod tests {
             // Ending with semicolon
             let qstring = "ALTER TABLE `t` unsupported rest of the query;";
             let expected = AlterTableStatement {
-                table: Relation {
-                    name: "t".into(),
-                    schema: None,
-                },
+                table: Relation::new(None, "t".into()),
                 definitions: Err("unsupported rest of the query".to_string()),
                 only: false,
             };
@@ -796,10 +790,7 @@ mod tests {
             // Ending with EOF
             let qstring = "ALTER TABLE `t` unsupported rest of the query";
             let expected = AlterTableStatement {
-                table: Relation {
-                    name: "t".into(),
-                    schema: None,
-                },
+                table: Relation::new(None, "t".into()),
                 definitions: Err("unsupported rest of the query".to_string()),
                 only: false,
             };
@@ -812,10 +803,7 @@ mod tests {
         fn parse_add_column() {
             let qstring = "ALTER TABLE `t` ADD COLUMN `c` INT";
             let expected = AlterTableStatement {
-                table: Relation {
-                    name: "t".into(),
-                    schema: None,
-                },
+                table: Relation::new(None, "t".into()),
                 definitions: Ok(vec![AlterTableDefinition::AddColumn {
                     spec: ColumnSpecification {
                         column: Column {
@@ -841,10 +829,7 @@ mod tests {
         fn parse_add_two_columns() {
             let qstring = "ALTER TABLE `t` ADD COLUMN `c` INT, ADD COLUMN `d` TEXT";
             let expected = AlterTableStatement {
-                table: Relation {
-                    name: "t".into(),
-                    schema: None,
-                },
+                table: Relation::new(None, "t".into()),
                 definitions: Ok(vec![
                     AlterTableDefinition::AddColumn {
                         spec: ColumnSpecification {
@@ -886,10 +871,7 @@ mod tests {
         fn parse_drop_column_no_behavior() {
             let qstring = "ALTER TABLE `t` DROP COLUMN c";
             let expected = AlterTableStatement {
-                table: Relation {
-                    name: "t".into(),
-                    schema: None,
-                },
+                table: Relation::new(None, "t".into()),
                 definitions: Ok(vec![AlterTableDefinition::DropColumn {
                     name: "c".into(),
                     behavior: None,
@@ -905,10 +887,7 @@ mod tests {
         fn parse_drop_column_cascade() {
             let qstring = "ALTER TABLE `t` DROP COLUMN c CASCADE";
             let expected = AlterTableStatement {
-                table: Relation {
-                    name: "t".into(),
-                    schema: None,
-                },
+                table: Relation::new(None, "t".into()),
                 definitions: Ok(vec![AlterTableDefinition::DropColumn {
                     name: "c".into(),
                     behavior: Some(DropBehavior::Cascade),
@@ -924,10 +903,7 @@ mod tests {
         fn parse_alter_column_set_default() {
             let qstring = "ALTER TABLE `t` ALTER COLUMN c SET DEFAULT 'foo'";
             let expected = AlterTableStatement {
-                table: Relation {
-                    name: "t".into(),
-                    schema: None,
-                },
+                table: Relation::new(None, "t".into()),
                 definitions: Ok(vec![AlterTableDefinition::AlterColumn {
                     name: "c".into(),
                     operation: AlterColumnOperation::SetColumnDefault(Literal::String(
@@ -945,10 +921,7 @@ mod tests {
         fn parse_alter_column_drop_default() {
             let qstring = "ALTER TABLE `t` ALTER COLUMN c DROP DEFAULT";
             let expected = AlterTableStatement {
-                table: Relation {
-                    name: "t".into(),
-                    schema: None,
-                },
+                table: Relation::new(None, "t".into()),
                 definitions: Ok(vec![AlterTableDefinition::AlterColumn {
                     name: "c".into(),
                     operation: AlterColumnOperation::DropColumnDefault,
@@ -1160,10 +1133,7 @@ mod tests {
                 .into_iter()
                 .for_each(|(qstring, equals)| {
                     let expected = AlterTableStatement {
-                        table: Relation {
-                            name: "t".into(),
-                            schema: None,
-                        },
+                        table: Relation::new(None, "t".into()),
                         only: false,
                         definitions: Ok(vec![
                             AlterTableDefinition::DropColumn {
@@ -1261,10 +1231,7 @@ mod tests {
             // Ending with semicolon
             let qstring = "ALTER TABLE \"t\" unsupported rest of the query;";
             let expected = AlterTableStatement {
-                table: Relation {
-                    name: "t".into(),
-                    schema: None,
-                },
+                table: Relation::new(None, "t".into()),
                 definitions: Err("unsupported rest of the query".to_string()),
                 only: false,
             };
@@ -1275,10 +1242,7 @@ mod tests {
             // Ending with EOF
             let qstring = "ALTER TABLE \"t\" unsupported rest of the query";
             let expected = AlterTableStatement {
-                table: Relation {
-                    name: "t".into(),
-                    schema: None,
-                },
+                table: Relation::new(None, "t".into()),
                 definitions: Err("unsupported rest of the query".to_string()),
                 only: false,
             };
@@ -1291,10 +1255,7 @@ mod tests {
         fn parse_add_column() {
             let qstring = "ALTER TABLE \"t\" ADD COLUMN \"c\" INT";
             let expected = AlterTableStatement {
-                table: Relation {
-                    name: "t".into(),
-                    schema: None,
-                },
+                table: Relation::new(None, "t".into()),
                 definitions: Ok(vec![AlterTableDefinition::AddColumn {
                     spec: ColumnSpecification {
                         column: Column {
@@ -1320,10 +1281,7 @@ mod tests {
         fn parse_add_two_columns() {
             let qstring = "ALTER TABLE \"t\" ADD COLUMN \"c\" INT, ADD COLUMN \"d\" TEXT";
             let expected = AlterTableStatement {
-                table: Relation {
-                    name: "t".into(),
-                    schema: None,
-                },
+                table: Relation::new(None, "t".into()),
                 definitions: Ok(vec![
                     AlterTableDefinition::AddColumn {
                         spec: ColumnSpecification {
@@ -1365,10 +1323,7 @@ mod tests {
         fn parse_drop_column_no_behavior() {
             let qstring = "ALTER TABLE \"t\" DROP COLUMN c";
             let expected = AlterTableStatement {
-                table: Relation {
-                    name: "t".into(),
-                    schema: None,
-                },
+                table: Relation::new(None, "t".into()),
                 definitions: Ok(vec![AlterTableDefinition::DropColumn {
                     name: "c".into(),
                     behavior: None,
@@ -1384,10 +1339,7 @@ mod tests {
         fn parse_drop_column_cascade() {
             let qstring = "ALTER TABLE \"t\" DROP COLUMN c CASCADE";
             let expected = AlterTableStatement {
-                table: Relation {
-                    name: "t".into(),
-                    schema: None,
-                },
+                table: Relation::new(None, "t".into()),
                 definitions: Ok(vec![AlterTableDefinition::DropColumn {
                     name: "c".into(),
                     behavior: Some(DropBehavior::Cascade),
@@ -1403,10 +1355,7 @@ mod tests {
         fn parse_alter_column_set_default() {
             let qstring = "ALTER TABLE \"t\" ALTER COLUMN c SET DEFAULT 'foo'";
             let expected = AlterTableStatement {
-                table: Relation {
-                    name: "t".into(),
-                    schema: None,
-                },
+                table: Relation::new(None, "t".into()),
                 definitions: Ok(vec![AlterTableDefinition::AlterColumn {
                     name: "c".into(),
                     operation: AlterColumnOperation::SetColumnDefault(Literal::String(
@@ -1424,10 +1373,7 @@ mod tests {
         fn parse_alter_column_drop_default() {
             let qstring = "ALTER TABLE \"t\" ALTER COLUMN c DROP DEFAULT";
             let expected = AlterTableStatement {
-                table: Relation {
-                    name: "t".into(),
-                    schema: None,
-                },
+                table: Relation::new(None, "t".into()),
                 definitions: Ok(vec![AlterTableDefinition::AlterColumn {
                     name: "c".into(),
                     operation: AlterColumnOperation::DropColumnDefault,
@@ -1443,10 +1389,7 @@ mod tests {
         fn parse_alter_table_only() {
             let qstring = "ALTER TABLE ONLY \"t\" DROP COLUMN c";
             let expected = AlterTableStatement {
-                table: Relation {
-                    name: "t".into(),
-                    schema: None,
-                },
+                table: Relation::new(None, "t".into()),
                 definitions: Ok(vec![AlterTableDefinition::DropColumn {
                     name: "c".into(),
                     behavior: None,
@@ -1464,10 +1407,7 @@ mod tests {
             let qstring2 = "ALTER TABLE \"t\" DROP CONSTRAINT c RESTRICT";
             let qstring3 = "ALTER TABLE \"t\" DROP CONSTRAINT c";
             let mut expected = AlterTableStatement {
-                table: Relation {
-                    name: "t".into(),
-                    schema: None,
-                },
+                table: Relation::new(None, "t".into()),
                 definitions: Ok(vec![AlterTableDefinition::DropConstraint {
                     name: "c".into(),
                     drop_behavior: Some(DropBehavior::Cascade),
@@ -1512,10 +1452,7 @@ mod tests {
 
         fn check_add_constraint(qstring: &str, table_key: TableKey) {
             let expected = AlterTableStatement {
-                table: Relation {
-                    name: "t".into(),
-                    schema: None,
-                },
+                table: Relation::new(None, "t".into()),
                 definitions: Ok(vec![AlterTableDefinition::AddKey(table_key)]),
                 only: false,
             };
@@ -1650,10 +1587,7 @@ mod tests {
         #[test]
         fn parse_alter_add_constraint_foreign_key() {
             let (index_name, columns) = setup_alter_fk_columns();
-            let target_table = Relation {
-                schema: None,
-                name: "t1".into(),
-            };
+            let target_table = Relation::new(None, "t1".into());
             let target_columns: Vec<Column> =
                 ["t1.c1", "t1.c2"].into_iter().map(|c| c.into()).collect();
 

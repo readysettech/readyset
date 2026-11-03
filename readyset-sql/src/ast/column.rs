@@ -52,15 +52,12 @@ impl FromDialect<Vec<sqlparser::ast::Ident>> for Column {
         let name: SqlIdentifier = value.pop().unwrap().into_dialect(dialect);
         let table = if let Some(table) = value.pop() {
             if let Some(schema) = value.pop() {
-                Some(Relation {
-                    schema: Some(schema.into_dialect(dialect)),
-                    name: table.into_dialect(dialect),
-                })
+                Some(Relation::new(
+                    Some(schema.into_dialect(dialect)),
+                    table.into_dialect(dialect),
+                ))
             } else {
-                Some(Relation {
-                    schema: None,
-                    name: table.into_dialect(dialect),
-                })
+                Some(Relation::new(None, table.into_dialect(dialect)))
             }
         } else {
             None

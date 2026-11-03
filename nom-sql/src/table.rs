@@ -19,7 +19,7 @@ pub fn relation(dialect: Dialect) -> impl Fn(LocatedSpan<&[u8]>) -> NomSqlResult
     move |i| {
         let (i, schema) = opt(terminated(dialect.identifier(), tag(".")))(i)?;
         let (i, name) = dialect.identifier()(i)?;
-        Ok((i, Relation { schema, name }))
+        Ok((i, Relation::new(schema, name)))
     }
 }
 
@@ -127,7 +127,7 @@ pub fn replicator_table_reference(
             dialect.identifier(),
             map(tag("*"), |_| SqlIdentifier::from("*")),
         ))(i)?;
-        Ok((i, Relation { schema, name }))
+        Ok((i, Relation::new(schema, name)))
     }
 }
 

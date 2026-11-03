@@ -476,10 +476,7 @@ pub fn column_identifier_no_alias(
         ))(i)?;
         // Do we have a 'db/schema.table.' or 'table.' qualifier?
         let table = match (id1, id2) {
-            (Some(db), Some(t)) => Some(Relation {
-                schema: Some(db),
-                name: t,
-            }),
+            (Some(db), Some(t)) => Some(Relation::new(Some(db), t)),
             // (None, Some(t)) should be unreachable
             (Some(t), None) | (None, Some(t)) => Some(Relation::from(t)),
             (None, None) => None,
@@ -631,14 +628,8 @@ fn all_in_table(
         let (i, _) = tag("*")(i)?;
 
         let table = match ident2 {
-            Some(name) => Relation {
-                schema: Some(ident1),
-                name,
-            },
-            None => Relation {
-                schema: None,
-                name: ident1,
-            },
+            Some(name) => Relation::new(Some(ident1), name),
+            None => Relation::new(None, ident1),
         };
 
         Ok((i, FieldDefinitionExpr::AllInTable(table)))
@@ -1076,10 +1067,7 @@ mod tests {
             let res2 = test_parse!(column_identifier_no_alias(Dialect::MySQL), b"db.t.c");
             let expected = Column {
                 name: "c".into(),
-                table: Some(Relation {
-                    schema: Some("db".into()),
-                    name: "t".into(),
-                }),
+                table: Some(Relation::new(Some("db".into()), "t".into())),
             };
             assert_eq!(res1, expected);
             assert_eq!(res2, expected);
@@ -1168,10 +1156,7 @@ mod tests {
             let res2 = test_parse!(column_identifier_no_alias(Dialect::PostgreSQL), b"db.t.c");
             let expected = Column {
                 name: "c".into(),
-                table: Some(Relation {
-                    schema: Some("db".into()),
-                    name: "t".into(),
-                }),
+                table: Some(Relation::new(Some("db".into()), "t".into())),
             };
             assert_eq!(res1, expected);
             assert_eq!(res2, expected);

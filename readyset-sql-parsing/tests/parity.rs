@@ -336,10 +336,7 @@ fn select_limit_without_table() {
 fn alter_drop_foreign_key() {
     assert_eq!(
         SqlQuery::AlterTable(AlterTableStatement {
-            table: readyset_sql::ast::Relation {
-                schema: None,
-                name: "orderitem".into()
-            },
+            table: readyset_sql::ast::Relation::new(None, "orderitem".into()),
             definitions: Ok(vec![AlterTableDefinition::DropForeignKey {
                 name: SqlIdentifier::from("orderitem_ibfk_1"),
             }]),

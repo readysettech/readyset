@@ -120,10 +120,7 @@ mod tests {
             ),
             ExplainStatement::Graphviz {
                 simplified: false,
-                for_cache: Some(Relation {
-                    schema: None,
-                    name: "q".into()
-                })
+                for_cache: Some(Relation::new(None, "q".into()))
             }
         );
     }
@@ -173,10 +170,7 @@ mod tests {
                 b"explain materializations for cache my_cache"
             ),
             ExplainStatement::Materializations {
-                for_cache: Some(Relation {
-                    schema: None,
-                    name: "my_cache".into()
-                })
+                for_cache: Some(Relation::new(None, "my_cache".into()))
             }
         );
     }

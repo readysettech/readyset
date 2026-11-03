@@ -171,14 +171,8 @@ mod tests {
         assert_eq!(
             res.tables,
             vec![
-                Relation {
-                    name: "t1".into(),
-                    schema: Some("schema1".into())
-                },
-                Relation {
-                    name: "t2".into(),
-                    schema: Some("schema2".into())
-                }
+                Relation::new(Some("schema1".into()), "t1".into()),
+                Relation::new(Some("schema2".into()), "t2".into())
             ]
         )
     }

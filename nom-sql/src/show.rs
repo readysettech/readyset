@@ -634,10 +634,7 @@ mod tests {
             .1;
         assert_eq!(
             res1,
-            ShowStatement::Rls(Some(Relation {
-                name: "test".into(),
-                schema: Some("public".into()),
-            }))
+            ShowStatement::Rls(Some(Relation::new(Some("public".into()), "test".into())))
         );
     }
 

@@ -29,34 +29,25 @@ pub struct Relation {
 
 impl From<SqlIdentifier> for Relation {
     fn from(name: SqlIdentifier) -> Self {
-        Relation { name, schema: None }
+        Relation::new(None, name)
     }
 }
 
 impl From<&SqlIdentifier> for Relation {
     fn from(name: &SqlIdentifier) -> Self {
-        Relation {
-            name: name.clone(),
-            schema: None,
-        }
+        Relation::new(None, name.clone())
     }
 }
 
 impl From<&'_ str> for Relation {
     fn from(t: &str) -> Relation {
-        Relation {
-            name: t.into(),
-            schema: None,
-        }
+        Relation::new(None, t.into())
     }
 }
 
 impl From<String> for Relation {
     fn from(t: String) -> Self {
-        Relation {
-            name: t.into(),
-            schema: None,
-        }
+        Relation::new(None, t.into())
     }
 }
 
@@ -83,15 +74,9 @@ impl TryFromDialect<sqlparser::ast::ObjectName> for Relation {
             .next()
             .ok_or_else(|| failed_err!("Expected at least one identifier in relation name"))??;
         match identifiers.next() {
-            Some(Ok(second)) => Ok(Self {
-                name: second,
-                schema: Some(first),
-            }),
+            Some(Ok(second)) => Ok(Self::new(Some(first), second)),
             Some(Err(err)) => Err(err),
-            None => Ok(Self {
-                name: first,
-                schema: None,
-            }),
+            None => Ok(Self::new(None, first)),
         }
     }
 }
@@ -136,6 +121,11 @@ impl DialectDisplay for Relation {
 }
 
 impl Relation {
+    /// Return a relation with the given schema and name.
+    pub fn new(schema: Option<SqlIdentifier>, name: SqlIdentifier) -> Self {
+        Self { schema, name }
+    }
+
     /// Like [`display()`](Self::display) except the schema and table name will not be quoted.
     ///
     /// This should not be used to emit SQL code and instead should mostly be for error messages.

@@ -1364,10 +1364,7 @@ mod tests {
             res.unwrap().1,
             CreateTableStatement {
                 if_not_exists: false,
-                table: Relation {
-                    schema: Some("db1".into()),
-                    name: "t".into(),
-                },
+                table: Relation::new(Some("db1".into()), "t".into()),
                 body: Ok(CreateTableBody {
                     fields: vec![ColumnSpecification::new(
                         Column::from("x"),

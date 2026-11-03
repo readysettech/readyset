@@ -138,10 +138,7 @@ mod tests {
                 .1,
             TruncateStatement {
                 tables: vec![TruncateTable {
-                    relation: Relation {
-                        name: "mytable".into(),
-                        schema: Some("mydb".into())
-                    },
+                    relation: Relation::new(Some("mydb".into()), "mytable".into()),
                     only: false,
                 }],
                 restart_identity: false,
@@ -197,10 +194,7 @@ mod tests {
                 .1,
             TruncateStatement {
                 tables: vec![TruncateTable {
-                    relation: Relation {
-                        name: "mytable".into(),
-                        schema: Some("mydb".into())
-                    },
+                    relation: Relation::new(Some("mydb".into()), "mytable".into()),
                     only: false,
                 }],
                 restart_identity: false,

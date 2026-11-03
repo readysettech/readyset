@@ -1080,10 +1080,7 @@ mod tests {
                 name: "id".into(),
                 table: None,
             }],
-            target_table: Relation {
-                schema: None,
-                name: "other".into(),
-            },
+            target_table: Relation::new(None, "other".into()),
             target_columns: vec![Column {
                 name: "id".into(),
                 table: None,
@@ -1098,10 +1095,7 @@ mod tests {
 
     #[test]
     fn key_columns_display_unqualified() {
-        let rel = |name: &str| Relation {
-            schema: Some("db".into()),
-            name: name.into(),
-        };
+        let rel = |name: &str| Relation::new(Some("db".into()), name.into());
         let col = |name: &str| Column {
             name: name.into(),
             table: Some(rel("foo")),

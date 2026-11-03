@@ -58,10 +58,7 @@ mod tests {
         assert_eq!(
             res.unwrap().1,
             DeleteStatement {
-                table: Relation {
-                    schema: Some("db1".into()),
-                    name: "users".into(),
-                },
+                table: Relation::new(Some("db1".into()), "users".into()),
                 where_clause: None,
             }
         );

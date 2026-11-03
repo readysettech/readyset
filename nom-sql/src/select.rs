@@ -602,10 +602,7 @@ mod tests {
             res1,
             SelectStatement {
                 tables: vec![TableExpr {
-                    inner: TableExprInner::Table(Relation {
-                        schema: None,
-                        name: "PaperTag".into(),
-                    }),
+                    inner: TableExprInner::Table(Relation::new(None, "PaperTag".into())),
                     alias: Some("t".into()),
                     column_aliases: vec![],
                 }],
@@ -626,10 +623,10 @@ mod tests {
             res1,
             SelectStatement {
                 tables: vec![TableExpr {
-                    inner: TableExprInner::Table(Relation {
-                        name: "PaperTag".into(),
-                        schema: Some("db1".into()),
-                    }),
+                    inner: TableExprInner::Table(Relation::new(
+                        Some("db1".into()),
+                        "PaperTag".into(),
+                    )),
                     alias: Some("t".into()),
                     column_aliases: vec![],
                 },],
@@ -1978,10 +1975,10 @@ mod tests {
             assert_eq!(
                 res.tables,
                 vec![TableExpr {
-                    inner: TableExprInner::Table(Relation {
-                        schema: Some("public".into()),
-                        name: "User".into(),
-                    }),
+                    inner: TableExprInner::Table(Relation::new(
+                        Some("public".into()),
+                        "User".into(),
+                    )),
                     alias: None,
                     column_aliases: vec![],
                 }]

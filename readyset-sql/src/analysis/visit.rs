@@ -1720,10 +1720,7 @@ mod tests {
                 alias: None,
             }],
             tables: vec![TableExpr {
-                inner: TableExprInner::Table(Relation {
-                    schema: None,
-                    name: "users".into(),
-                }),
+                inner: TableExprInner::Table(Relation::new(None, "users".into())),
                 alias: None,
                 column_aliases: vec![],
             }],
@@ -1753,10 +1750,7 @@ mod tests {
                 alias: None,
             }],
             tables: vec![TableExpr {
-                inner: TableExprInner::Table(Relation {
-                    schema: None,
-                    name: "users".into(),
-                }),
+                inner: TableExprInner::Table(Relation::new(None, "users".into())),
                 alias: None,
                 column_aliases: vec![],
             }],
@@ -1788,10 +1782,7 @@ mod tests {
                 },
             ],
             tables: vec![TableExpr {
-                inner: TableExprInner::Table(Relation {
-                    schema: None,
-                    name: "users".into(),
-                }),
+                inner: TableExprInner::Table(Relation::new(None, "users".into())),
                 alias: None,
                 column_aliases: vec![],
             }],
@@ -1810,10 +1801,7 @@ mod tests {
                             alias: None,
                         }],
                         tables: vec![TableExpr {
-                            inner: TableExprInner::Table(Relation {
-                                schema: None,
-                                name: "users".into(),
-                            }),
+                            inner: TableExprInner::Table(Relation::new(None, "users".into())),
                             alias: None,
                             column_aliases: vec![],
                         }],
@@ -1825,18 +1813,12 @@ mod tests {
                 constraint: JoinConstraint::On(Expr::BinaryOp {
                     lhs: Box::new(Expr::Column(Column {
                         name: "id".into(),
-                        table: Some(Relation {
-                            schema: None,
-                            name: "users".into(),
-                        }),
+                        table: Some(Relation::new(None, "users".into())),
                     })),
                     op: BinaryOperator::Equal,
                     rhs: Box::new(Expr::Column(Column {
                         name: "id".into(),
-                        table: Some(Relation {
-                            schema: None,
-                            name: "s".into(),
-                        }),
+                        table: Some(Relation::new(None, "s".into())),
                     })),
                 }),
             }],
@@ -1866,10 +1848,7 @@ mod tests {
                 alias: None,
             }],
             tables: vec![TableExpr {
-                inner: TableExprInner::Table(Relation {
-                    schema: None,
-                    name: "users".into(),
-                }),
+                inner: TableExprInner::Table(Relation::new(None, "users".into())),
                 alias: None,
                 column_aliases: vec![],
             }],
@@ -1903,10 +1882,7 @@ mod tests {
                 alias: None,
             }],
             tables: vec![TableExpr {
-                inner: TableExprInner::Table(Relation {
-                    schema: None,
-                    name: "users".into(),
-                }),
+                inner: TableExprInner::Table(Relation::new(None, "users".into())),
                 alias: None,
                 column_aliases: vec![],
             }],
@@ -1940,10 +1916,7 @@ mod tests {
                 alias: None,
             }],
             tables: vec![TableExpr {
-                inner: TableExprInner::Table(Relation {
-                    schema: None,
-                    name: "users".into(),
-                }),
+                inner: TableExprInner::Table(Relation::new(None, "users".into())),
                 alias: None,
                 column_aliases: vec![],
             }],

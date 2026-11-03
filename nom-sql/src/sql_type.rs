@@ -987,10 +987,7 @@ mod tests {
             let res = test_parse!(type_identifier(Dialect::PostgreSQL), b"foo.custom");
             assert_eq!(
                 res,
-                SqlType::Other(Relation {
-                    schema: Some("foo".into()),
-                    name: "custom".into()
-                })
+                SqlType::Other(Relation::new(Some("foo".into()), "custom".into()))
             );
         }
 
@@ -1074,10 +1071,7 @@ mod tests {
         fn mediumint_not_recognized() {
             assert_eq!(
                 test_parse!(type_identifier(Dialect::PostgreSQL), b"mediumint"),
-                SqlType::Other(Relation {
-                    schema: None,
-                    name: "mediumint".into()
-                })
+                SqlType::Other(Relation::new(None, "mediumint".into()))
             );
         }
 

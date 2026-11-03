@@ -199,10 +199,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
-                    table: Relation {
-                        schema: Some("db1".into()),
-                        name: "users".into(),
-                    },
+                    table: Relation::new(Some("db1".into()), "users".into()),
                     fields: vec![],
                     data: vec![vec![Expr::Literal(42.into()), Expr::Literal("test".into())]],
                     on_duplicate: None,
@@ -371,10 +368,7 @@ mod tests {
             assert_eq!(
                 res.unwrap().1,
                 InsertStatement {
-                    table: Relation {
-                        schema: Some("db1".into()),
-                        name: "users".into(),
-                    },
+                    table: Relation::new(Some("db1".into()), "users".into()),
                     fields: vec![],
                     data: vec![vec![Expr::Literal(42.into()), Expr::Literal("test".into())]],
                     on_duplicate: None,
