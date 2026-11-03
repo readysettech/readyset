@@ -2954,18 +2954,12 @@ FROM
     fn mk_qualified_col(schema: &str, table: &str, name: &str) -> Column {
         Column {
             name: name.into(),
-            table: Some(Relation {
-                name: table.into(),
-                schema: Some(schema.into()),
-            }),
+            table: Some(Relation::new(Some(schema.into()), table.into())),
         }
     }
 
     fn mk_qualified_rel(schema: &str, table: &str) -> Relation {
-        Relation {
-            name: table.into(),
-            schema: Some(schema.into()),
-        }
+        Relation::new(Some(schema.into()), table.into())
     }
 
     /// Positive: AtMostOne LATERAL body (correlation-pinned GROUP BY)

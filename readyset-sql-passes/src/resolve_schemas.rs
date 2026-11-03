@@ -146,10 +146,10 @@ where
                     });
                 }
                 None => {
-                    self.context.add_invalidating_table(Relation {
-                        schema: Some(schema.clone()),
-                        name: table.name.clone(),
-                    });
+                    self.context.add_invalidating_table(Relation::new(
+                        Some(schema.clone()),
+                        table.name.clone(),
+                    ));
                 }
             };
         }
@@ -660,10 +660,7 @@ mod tests {
 
         assert_eq!(
             context.invalidating_tables.into_inner(),
-            vec![Relation {
-                schema: Some("s1".into()),
-                name: "t".into(),
-            }]
+            vec![Relation::new(Some("s1".into()), "t".into())]
         );
     }
 

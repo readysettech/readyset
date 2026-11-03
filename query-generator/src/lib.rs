@@ -139,10 +139,7 @@ impl Borrow<str> for TableName {
 
 impl From<TableName> for Relation {
     fn from(name: TableName) -> Self {
-        Relation {
-            name: name.0,
-            schema: None,
-        }
+        Relation::new(None, name.0)
     }
 }
 

@@ -2422,10 +2422,7 @@ fn wrap_table_expr_with_projections(
     // clone) via `mem::replace` with a throwaway placeholder that is
     // overwritten by the enclosing `*te = ...` in the very next statement.
     let placeholder = TableExpr {
-        inner: TableExprInner::Table(Relation {
-            schema: None,
-            name: SqlIdentifier::from(""),
-        }),
+        inner: TableExprInner::Table(Relation::new(None, SqlIdentifier::from(""))),
         alias: None,
         column_aliases: vec![],
     };
@@ -2682,10 +2679,7 @@ fn wrap_one_loj_target(
     wrapped_rel: Relation,
     projections: Vec<(SqlIdentifier, Expr)>,
 ) -> ReadySetResult<()> {
-    let wrap_alias_rel = Relation {
-        schema: None,
-        name: wrapped_rel.name.clone(),
-    };
+    let wrap_alias_rel = Relation::new(None, wrapped_rel.name.clone());
     let projected_aliases: HashSet<SqlIdentifier> =
         projections.iter().map(|(alias, _)| alias.clone()).collect();
     let mut passthrough_set: HashSet<SqlIdentifier> = HashSet::new();
@@ -2910,10 +2904,7 @@ fn loj_rhs_relation(stmt: &SelectStatement, join_idx: usize) -> Option<Relation>
 /// subquery).
 fn table_expr_identity(te: &TableExpr) -> Option<Relation> {
     match (&te.inner, &te.alias) {
-        (_, Some(a)) => Some(Relation {
-            schema: None,
-            name: a.clone(),
-        }),
+        (_, Some(a)) => Some(Relation::new(None, a.clone())),
         (TableExprInner::Table(rel), None) => Some(rel.clone()),
         _ => None,
     }
@@ -5509,10 +5500,7 @@ mod correlated_relations_tests {
             .expect("parses")
     }
     fn rel(name: &str) -> Relation {
-        Relation {
-            schema: None,
-            name: name.into(),
-        }
+        Relation::new(None, name.into())
     }
 
     #[test]

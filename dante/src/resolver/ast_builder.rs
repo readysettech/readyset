@@ -137,10 +137,7 @@ fn build_select_inner(
             Constraint::From(t) => {
                 let (physical_name, alias) = get_table_name_and_alias(env, *t)?;
                 tables.push(TableExpr {
-                    inner: TableExprInner::Table(Relation {
-                        schema: None,
-                        name: physical_name,
-                    }),
+                    inner: TableExprInner::Table(Relation::new(None, physical_name)),
                     alias,
                     column_aliases: vec![],
                 });
@@ -562,10 +559,7 @@ fn build_select_inner(
                         effective_rt_name = rtn;
                         let (tn, t_alias) = get_table_name_and_alias(env, *t)?;
                         JoinRightSide::Table(TableExpr {
-                            inner: TableExprInner::Table(Relation {
-                                schema: None,
-                                name: tn,
-                            }),
+                            inner: TableExprInner::Table(Relation::new(None, tn)),
                             alias: t_alias,
                             column_aliases: vec![],
                         })
@@ -877,10 +871,7 @@ fn build_select_inner(
                     fields.push(FieldDefinitionExpr::Expr {
                         expr: Expr::Column(Column {
                             name,
-                            table: Some(Relation {
-                                schema: None,
-                                name: sq_alias.clone(),
-                            }),
+                            table: Some(Relation::new(None, sq_alias.clone())),
                         }),
                         alias: None,
                     });
@@ -1010,10 +1001,7 @@ fn build_select_inner(
                 joins.push(JoinClause {
                     operator: *operator,
                     right: JoinRightSide::Table(TableExpr {
-                        inner: TableExprInner::Table(Relation {
-                            schema: None,
-                            name: rhs_name,
-                        }),
+                        inner: TableExprInner::Table(Relation::new(None, rhs_name)),
                         alias: rhs_alias,
                         column_aliases: vec![],
                     }),
@@ -1535,10 +1523,7 @@ fn and_merge(slot: &mut Option<Expr>, new_expr: Expr) {
 fn make_column_expr(col_name: &SqlIdentifier, table_name: &SqlIdentifier) -> Expr {
     Expr::Column(Column {
         name: col_name.clone(),
-        table: Some(Relation {
-            schema: None,
-            name: table_name.clone(),
-        }),
+        table: Some(Relation::new(None, table_name.clone())),
     })
 }
 

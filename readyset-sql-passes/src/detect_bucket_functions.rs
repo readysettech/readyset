@@ -94,10 +94,10 @@ mod tests {
                 alias: Some(SqlIdentifier::from("bucket_result")),
             }],
             tables: vec![TableExpr {
-                inner: TableExprInner::Table(Relation {
-                    schema: None,
-                    name: SqlIdentifier::from("test_table"),
-                }),
+                inner: TableExprInner::Table(Relation::new(
+                    None,
+                    SqlIdentifier::from("test_table"),
+                )),
                 alias: None,
                 column_aliases: vec![],
             }],
@@ -126,10 +126,10 @@ mod tests {
                 alias: Some(SqlIdentifier::from("hour_bucket")),
             }],
             tables: vec![TableExpr {
-                inner: TableExprInner::Table(Relation {
-                    schema: None,
-                    name: SqlIdentifier::from("test_table"),
-                }),
+                inner: TableExprInner::Table(Relation::new(
+                    None,
+                    SqlIdentifier::from("test_table"),
+                )),
                 alias: None,
                 column_aliases: vec![],
             }],
@@ -137,10 +137,10 @@ mod tests {
         };
 
         let cache_stmt = CreateCacheStatement {
-            name: Some(readyset_sql::ast::Relation {
-                schema: None,
-                name: SqlIdentifier::from("test_cache"),
-            }),
+            name: Some(readyset_sql::ast::Relation::new(
+                None,
+                SqlIdentifier::from("test_cache"),
+            )),
             cache_type: None,
             policy: None,
             coalesce_ms: None,
@@ -188,10 +188,10 @@ mod tests {
                 alias: Some(SqlIdentifier::from("hour_bucket")),
             }],
             tables: vec![TableExpr {
-                inner: TableExprInner::Table(Relation {
-                    schema: None,
-                    name: SqlIdentifier::from("test_table"),
-                }),
+                inner: TableExprInner::Table(Relation::new(
+                    None,
+                    SqlIdentifier::from("test_table"),
+                )),
                 alias: None,
                 column_aliases: vec![],
             }],
@@ -199,10 +199,10 @@ mod tests {
         };
 
         let cache_stmt = CreateCacheStatement {
-            name: Some(readyset_sql::ast::Relation {
-                schema: None,
-                name: SqlIdentifier::from("test_cache"),
-            }),
+            name: Some(readyset_sql::ast::Relation::new(
+                None,
+                SqlIdentifier::from("test_cache"),
+            )),
             cache_type: None,
             policy: None,
             coalesce_ms: None,
@@ -238,10 +238,10 @@ mod tests {
                 alias: Some(SqlIdentifier::from("col_alias")),
             }],
             tables: vec![TableExpr {
-                inner: TableExprInner::Table(Relation {
-                    schema: None,
-                    name: SqlIdentifier::from("test_table"),
-                }),
+                inner: TableExprInner::Table(Relation::new(
+                    None,
+                    SqlIdentifier::from("test_table"),
+                )),
                 alias: None,
                 column_aliases: vec![],
             }],
@@ -249,10 +249,10 @@ mod tests {
         };
 
         let cache_stmt = CreateCacheStatement {
-            name: Some(readyset_sql::ast::Relation {
-                schema: None,
-                name: SqlIdentifier::from("test_cache"),
-            }),
+            name: Some(readyset_sql::ast::Relation::new(
+                None,
+                SqlIdentifier::from("test_cache"),
+            )),
             cache_type: None,
             policy: None,
             coalesce_ms: None,
@@ -305,10 +305,7 @@ mod tests {
                 alias: Some(SqlIdentifier::from("count")),
             }],
             tables: vec![TableExpr {
-                inner: TableExprInner::Table(Relation {
-                    schema: None,
-                    name: SqlIdentifier::from("events"),
-                }),
+                inner: TableExprInner::Table(Relation::new(None, SqlIdentifier::from("events"))),
                 alias: None,
                 column_aliases: vec![],
             }],

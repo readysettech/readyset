@@ -58,10 +58,7 @@ mod tests {
         assert_eq!(format!("{}", orig.display(Dialect::MySQL)), expected);
         assert_eq!(
             orig.body.as_ref().unwrap().keys.as_ref().unwrap()[0].get_columns()[0].table,
-            Some(Relation {
-                schema: Some("x".into()),
-                name: "t".into()
-            })
+            Some(Relation::new(Some("x".into()), "t".into()))
         );
     }
 

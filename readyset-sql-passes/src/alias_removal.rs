@@ -254,10 +254,7 @@ mod tests {
     fn it_removes_aliases() {
         let q = SelectStatement {
             tables: vec![TableExpr {
-                inner: TableExprInner::Table(Relation {
-                    name: "PaperTag".into(),
-                    schema: None,
-                }),
+                inner: TableExprInner::Table(Relation::new(None, "PaperTag".into())),
                 alias: Some("t".into()),
                 column_aliases: vec![],
             }],
@@ -295,10 +292,7 @@ mod tests {
                 assert_eq!(
                     tq.tables,
                     vec![TableExpr {
-                        inner: TableExprInner::Table(Relation {
-                            schema: None,
-                            name: "PaperTag".into(),
-                        }),
+                        inner: TableExprInner::Table(Relation::new(None, "PaperTag".into())),
                         alias: None,
                         column_aliases: vec![],
                     }]
@@ -331,10 +325,7 @@ mod tests {
         };
         let q = SelectStatement {
             tables: vec![TableExpr {
-                inner: TableExprInner::Table(Relation {
-                    schema: None,
-                    name: "PaperTag".into(),
-                }),
+                inner: TableExprInner::Table(Relation::new(None, "PaperTag".into())),
                 alias: Some("t".into()),
                 column_aliases: vec![],
             }],
@@ -369,10 +360,7 @@ mod tests {
                 assert_eq!(
                     tq.tables,
                     vec![TableExpr {
-                        inner: TableExprInner::Table(Relation {
-                            schema: None,
-                            name: "PaperTag".into(),
-                        }),
+                        inner: TableExprInner::Table(Relation::new(None, "PaperTag".into())),
                         alias: None,
                         column_aliases: vec![],
                     }]
@@ -413,10 +401,10 @@ mod tests {
                 assert_eq!(
                     tq.tables,
                     vec![TableExpr {
-                        inner: TableExprInner::Table(Relation {
-                            schema: None,
-                            name: "__query_name__t1".into(),
-                        }),
+                        inner: TableExprInner::Table(Relation::new(
+                            None,
+                            "__query_name__t1".into(),
+                        )),
                         alias: None,
                         column_aliases: vec![],
                     }]
@@ -426,10 +414,10 @@ mod tests {
                     vec![JoinClause {
                         operator: JoinOperator::Join,
                         right: JoinRightSide::Table(TableExpr {
-                            inner: TableExprInner::Table(Relation {
-                                schema: None,
-                                name: "__query_name__t2".into(),
-                            }),
+                            inner: TableExprInner::Table(Relation::new(
+                                None,
+                                "__query_name__t2".into(),
+                            )),
                             alias: None,
                             column_aliases: vec![],
                         }),

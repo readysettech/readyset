@@ -241,13 +241,7 @@ impl SchemaContext {
                     }
                     other => panic!("fixture DDL for {name} does not parse: {other:?}"),
                 };
-                (
-                    Relation {
-                        schema: Some(SCHEMA.into()),
-                        name: (*name).into(),
-                    },
-                    body,
-                )
+                (Relation::new(Some(SCHEMA.into()), (*name).into()), body)
             })
             .collect();
         Self { dialect, schemas }

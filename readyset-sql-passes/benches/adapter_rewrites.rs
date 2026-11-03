@@ -110,10 +110,7 @@ impl ResolveSchemasContext for Catalog {
     fn add_invalidating_table(&self, _table: Relation) {}
 
     fn can_query_table(&self, schema: &SqlIdentifier, table: &SqlIdentifier) -> Option<CanQuery> {
-        let relation = Relation {
-            schema: Some(schema.clone()),
-            name: table.clone(),
-        };
+        let relation = Relation::new(Some(schema.clone()), table.clone());
         self.base_schemas
             .contains_key(&relation)
             .then_some(CanQuery::Yes)

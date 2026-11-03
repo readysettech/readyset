@@ -854,10 +854,7 @@ mod tests {
         let mut q = parse_query(Dialect::MySQL, "SELECT votes.id from s1.votes").unwrap();
         let expected = parse_query(Dialect::MySQL, "SELECT s1.votes.id FROM s1.votes").unwrap();
         let schema = [(
-            Relation {
-                schema: Some("s1".into()),
-                name: "votes".into(),
-            },
+            Relation::new(Some("s1".into()), "votes".into()),
             vec!["id".into()],
         )]
         .into();
@@ -880,17 +877,11 @@ mod tests {
         let mut q = parse_query(Dialect::MySQL, "SELECT t.id from s1.t, s2.t").unwrap();
         let schema = [
             (
-                Relation {
-                    schema: Some("s1".into()),
-                    name: "t".into(),
-                },
+                Relation::new(Some("s1".into()), "t".into()),
                 vec!["id".into()],
             ),
             (
-                Relation {
-                    schema: Some("s2".into()),
-                    name: "t".into(),
-                },
+                Relation::new(Some("s2".into()), "t".into()),
                 vec!["id".into()],
             ),
         ]
@@ -926,17 +917,11 @@ mod tests {
         .unwrap();
         let schema = [
             (
-                Relation {
-                    schema: None,
-                    name: "stories".into(),
-                },
+                Relation::new(None, "stories".into()),
                 vec!["id".into(), "author".into(), "title".into(), "url".into()],
             ),
             (
-                Relation {
-                    schema: None,
-                    name: "votes".into(),
-                },
+                Relation::new(None, "votes".into()),
                 vec!["user".into(), "story_id".into()],
             ),
         ]
@@ -1067,10 +1052,7 @@ mod tests {
     #[test]
     fn order_by_agg_over_aliased_column_having_alias_ref() {
         let schema: HashMap<Relation, Vec<SqlIdentifier>> = [(
-            Relation {
-                schema: Some("qa".into()),
-                name: "datatypes".into(),
-            },
+            Relation::new(Some("qa".into()), "datatypes".into()),
             vec!["rownum".into(), "test_dec".into()],
         )]
         .into();
@@ -1129,10 +1111,7 @@ mod tests {
     #[test]
     fn order_by_agg_over_aliased_column_having_agg_expr() {
         let schema: HashMap<Relation, Vec<SqlIdentifier>> = [(
-            Relation {
-                schema: Some("qa".into()),
-                name: "datatypes".into(),
-            },
+            Relation::new(Some("qa".into()), "datatypes".into()),
             vec!["rownum".into(), "test_dec".into()],
         )]
         .into();
@@ -1184,17 +1163,11 @@ mod tests {
     fn unqualified_correlated_column() {
         let schema: HashMap<Relation, Vec<SqlIdentifier>> = [
             (
-                Relation {
-                    schema: Some("qa".into()),
-                    name: "spj".into(),
-                },
+                Relation::new(Some("qa".into()), "spj".into()),
                 vec!["sn".into(), "qty".into()],
             ),
             (
-                Relation {
-                    schema: Some("qa".into()),
-                    name: "s".into(),
-                },
+                Relation::new(Some("qa".into()), "s".into()),
                 vec!["sn".into(), "status".into()],
             ),
         ]
