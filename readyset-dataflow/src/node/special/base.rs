@@ -856,7 +856,7 @@ mod tests {
             assert_eq!(
                 b.process_ops(
                     ni,
-                    &[Column::new("a".into(), DfType::Int, None)],
+                    &[Column::new("a".into(), DfType::Int)],
                     vec![
                         TableOperation::Update {
                             key: vec![2.into()],
@@ -1030,11 +1030,7 @@ mod tests {
             let BaseWrite { records, .. } = b
                 .process_ops(
                     ni,
-                    &[Column::new(
-                        "c".into(),
-                        DfType::Text(Collation::Utf8Ci),
-                        None,
-                    )],
+                    &[Column::new("c".into(), DfType::Text(Collation::Utf8Ci))],
                     // We insert a `TinyText` with a `Utf8` collation
                     vec![TableOperation::Insert(vec![tt_with_utf8_collation.into()])],
                     &state_map,

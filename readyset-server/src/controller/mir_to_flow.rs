@@ -637,7 +637,7 @@ fn make_constant_node(
     let columns: Vec<DfColumn> = column_names
         .iter()
         .zip(column_types.iter())
-        .map(|(col_name, col_type)| DfColumn::new(col_name.clone(), col_type.clone(), None))
+        .map(|(col_name, col_type)| DfColumn::new(col_name.clone(), col_type.clone()))
         .collect();
 
     let constant = Constant::new(rows.to_vec());
@@ -867,11 +867,7 @@ fn make_window_node(
         }
     };
 
-    cols.push(DfColumn::new(
-        output_col_name.clone(),
-        output_type.clone(),
-        Some(name.clone()),
-    ));
+    cols.push(DfColumn::new(output_col_name.clone(), output_type.clone()));
 
     let group_col_indexes = group_by
         .iter()
@@ -970,8 +966,7 @@ fn make_grouped_node(
         .ok_or_else(|| internal_err!("Grouped has no projections"))?
         .name;
 
-    let make_agg_col =
-        |ty: DfType| -> DfColumn { DfColumn::new(over_col_name.clone(), ty, Some(name.clone())) };
+    let make_agg_col = |ty: DfType| -> DfColumn { DfColumn::new(over_col_name.clone(), ty) };
 
     let na = match kind {
         GroupedNodeType::Accumulation(acc) => {
@@ -1459,7 +1454,7 @@ fn make_project_node(
                 // An expression that is just a column holds that column's values
                 let mut col = match &expr {
                     DfExpr::Column { index, .. } => parent_cols[*index].clone(),
-                    _ => DfColumn::new(alias.clone(), expr.ty().clone(), None),
+                    _ => DfColumn::new(alias.clone(), expr.ty().clone()),
                 };
                 col.set_name(alias.clone());
                 (col, expr)
@@ -1516,11 +1511,7 @@ fn make_distinct_node(
         .ok_or_else(|| internal_err!("No projected columns for distinct"))?
         .name
         .clone();
-    cols.push(DfColumn::new(
-        distinct_count_name,
-        DfType::BigInt,
-        Some(name.clone()),
-    ));
+    cols.push(DfColumn::new(distinct_count_name, DfType::BigInt));
     set_names(&column_names(columns), &mut cols)?;
 
     let group_by_indx = if group_by.is_empty() {
@@ -1588,7 +1579,6 @@ fn make_paginate_or_topk_node(
         parent_cols.push(DfColumn::new(
             column_names.last().unwrap().into(),
             DfType::BigInt,
-            Some(name.clone()),
         ));
     }
     set_names(&column_names, &mut parent_cols)?;

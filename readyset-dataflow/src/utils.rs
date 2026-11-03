@@ -4,7 +4,7 @@ use crate::node::Column;
 
 /// Helper to create a dataflow column
 pub fn dataflow_column(name: &str) -> Column {
-    Column::new(name.into(), DfType::Unknown, None)
+    Column::new(name.into(), DfType::Unknown)
 }
 
 /// Helper to use in calls to add_base/ingredient

@@ -914,7 +914,7 @@ mod tests {
     /// entries than the probed parent has columns while every index stays in range.
     #[test]
     fn coerce_key_tolerates_a_repeated_key_column() {
-        let col_defs = [Column::new("pn".into(), DfType::Int, None)];
+        let col_defs = [Column::new("pn".into(), DfType::Int)];
         let key = PointKey::from([DfValue::from(1), DfValue::from(1)]);
 
         let coerced = coerce_key_if_needed(&col_defs, &[0, 0], &key)

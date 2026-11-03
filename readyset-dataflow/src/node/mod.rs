@@ -48,11 +48,6 @@ pub struct Column {
     name: SqlIdentifier,
     /// Column type
     ty: DfType,
-    /// The node or table where this column originates.
-    ///
-    /// TODO: Use this information to lookup the column specification required for returning a
-    /// resultset to the client.
-    source: Option<Relation>,
     /// Whether the column is a MySQL `ZEROFILL` column
     #[serde(default)]
     zerofill: bool,
@@ -68,11 +63,10 @@ pub struct Column {
 }
 
 impl Column {
-    pub fn new(name: SqlIdentifier, ty: DfType, source: Option<Relation>) -> Self {
+    pub fn new(name: SqlIdentifier, ty: DfType) -> Self {
         Self {
             name,
             ty,
-            source,
             zerofill: false,
             display_width: None,
             origin: ColumnOrigin::Computed,
@@ -99,7 +93,6 @@ impl Column {
                 spec.get_collation()
                     .map(|name| Collation::get_or_default(dialect, name)),
             )?,
-            source: spec.column.table,
             zerofill: spec.constraints.contains(&ColumnConstraint::ZeroFill),
             display_width: spec.sql_type.display_width(),
             origin: ColumnOrigin::Computed,
@@ -115,11 +108,6 @@ impl Column {
     /// Type of the column
     pub fn ty(&self) -> &DfType {
         &self.ty
-    }
-
-    /// Originating column
-    pub fn source(&self) -> Option<&Relation> {
-        self.source.as_ref()
     }
 
     /// Whether the column is a MySQL `ZEROFILL` column
