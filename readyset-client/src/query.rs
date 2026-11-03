@@ -737,4 +737,39 @@ mod tests {
         }
         assert_ne!(request.query_id(), with_database.query_id());
     }
+
+    /// Caches are identified by their `QueryId`, so these values must not change.
+    #[test]
+    fn deep_query_id_golden() {
+        let cases: [(&str, &[&str], &str); 4] = [
+            ("SELECT a FROM t WHERE b = $1", &[], "q_f5d775023dfb82b2"),
+            (
+                "SELECT a FROM public.t WHERE b = $1",
+                &["public"],
+                "q_c99e73e2d8974946",
+            ),
+            (
+                "SELECT CAST(a AS public.mood) FROM public.t",
+                &["public"],
+                "q_520296c29f16f9f8",
+            ),
+            (
+                "SELECT a FROM public.t WHERE b = $1",
+                &["s1", "public"],
+                "q_5889ad8d6f4415ff",
+            ),
+        ];
+        for (sql, path, expected) in cases {
+            let stmt =
+                readyset_sql_parsing::parse_select(readyset_sql::Dialect::PostgreSQL, sql).unwrap();
+            let path: Vec<SqlIdentifier> = path.iter().map(|&s| s.into()).collect();
+            assert_eq!(
+                QueryId::from_select(&stmt, &path).to_string(),
+                expected,
+                "{sql}"
+            );
+            let request = ViewCreateRequest::new(stmt, path);
+            assert_eq!(QueryId::from(&request).to_string(), expected, "{sql}");
+        }
+    }
 }
