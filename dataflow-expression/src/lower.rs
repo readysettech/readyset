@@ -300,13 +300,31 @@ impl BuiltinFunction {
     where
         A: IntoIterator<Item = Expr>,
     {
-        fn type_for_round(expr: &Expr, _precision: &Expr) -> DfType {
+        fn type_for_round(expr: &Expr, precision: &Expr, dialect: Dialect) -> DfType {
             use DfType::*;
             match *expr.ty() {
                 Unknown => Unknown,
 
                 // When the first argument is a DECIMAL value, the return type is also DECIMAL.
-                Numeric { prec, scale } => Numeric { prec, scale },
+                // MySQL keeps as many digits after the point as a literal precision asks for, up
+                // to the argument's own (MySQL 5.7 keeps up to 30). When that drops digits, it
+                // adds one before the point, since rounding can carry into it, as 9.95 rounds to
+                // 10.0.
+                Numeric { prec, scale } => match precision {
+                    Expr::Literal {
+                        val: DfValue::Int(digits),
+                        ..
+                    } if dialect.engine() == SqlEngine::MySQL => {
+                        let kept = (*digits).clamp(0, i64::from(scale)) as u8;
+                        Numeric {
+                            prec: prec.saturating_sub(u16::from(scale))
+                                + u16::from(kept)
+                                + u16::from(kept < scale),
+                            scale: kept,
+                        }
+                    }
+                    _ => Numeric { prec, scale },
+                },
 
                 // When the first argument is of any integer type, the return type is always BIGINT.
                 ref ty if ty.is_any_int() => BigInt,
@@ -491,7 +509,7 @@ impl BuiltinFunction {
                     val: DfValue::Int(0),
                     ty: DfType::Int,
                 });
-                let ty = type_for_round(&expr, &prec);
+                let ty = type_for_round(&expr, &prec, dialect);
                 (Self::Round(expr, prec), ty)
             }
             "json_depth" => {

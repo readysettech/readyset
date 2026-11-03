@@ -145,6 +145,10 @@ async fn example_exprs_type_same_as_mysql() {
         "CASE WHEN 1 = 1 THEN CAST(2.25 AS DECIMAL(3,2)) ELSE CAST(1.5 AS DECIMAL(2,1)) END",
         "COALESCE(CAST(NULL AS DECIMAL(2,1)), CAST(2.25 AS DECIMAL(3,2)))",
         "GREATEST(CAST(1.5 AS DECIMAL(2,1)), CAST(2.25 AS DECIMAL(3,2)))",
+        // ROUND keeps as many digits after the point as it's asked for, up to the argument's.
+        "ROUND(CAST(1.55 AS DECIMAL(3,2)))",
+        "ROUND(CAST(1.555 AS DECIMAL(4,3)), 2)",
+        "ROUND(CAST(15.5 AS DECIMAL(3,1)), -1)",
     ] {
         compare_type(expr, &mut conn).await;
     }

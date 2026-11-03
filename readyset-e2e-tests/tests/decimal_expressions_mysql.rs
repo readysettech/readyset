@@ -268,3 +268,35 @@ async fn choosing_among_decimals_matches_mysql() {
     )
     .await;
 }
+
+#[tokio::test]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn round_of_a_decimal_matches_mysql() {
+    // MySQL 5.7 keeps as many digits after the point as ROUND asks for, up to 30, where later
+    // versions keep at most the argument's. Readyset follows the later versions, so on 5.7 the
+    // test leaves out asking for more digits than the column has.
+    let upstream = Conn::new(mysql_helpers::upstream_config()).await.unwrap();
+    let mysql57 = upstream.server_version() < (8, 0, 0);
+    compare(
+        COLUMNS
+            .iter()
+            .filter(|(column, _)| is_decimal(column))
+            .map(|(column, ty)| {
+                let (_, scale) = ty.trim_end_matches(')').rsplit_once(',').unwrap();
+                let scale: i64 = scale.parse().unwrap();
+                let kept = |digits: &&str| match digits.trim_start_matches(", ").parse::<i64>() {
+                    Ok(asked) => !mysql57 || asked <= scale,
+                    // No precision, or one read from a column.
+                    Err(_) => true,
+                };
+                ["", ", -1", ", 0", ", 1", ", 2", ", 5", ", 31", ", id"]
+                    .into_iter()
+                    .filter(kept)
+                    .map(|digits| format!("ROUND({column}{digits})"))
+                    .collect()
+            })
+            .collect(),
+    )
+    .await;
+}

@@ -83,3 +83,13 @@ SELECT id, LEAST(d, d4) FROM t
 1.5000
 3
 NULL
+
+query  rowsort
+SELECT id, ROUND(d4, 2) FROM t
+----
+1
+0.06
+2
+1.50
+3
+2.33

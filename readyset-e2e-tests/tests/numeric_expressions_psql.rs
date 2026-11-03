@@ -226,3 +226,21 @@ async fn greatest_and_least_of_numbers_match_postgres() {
     )
     .await;
 }
+
+#[tokio::test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn round_of_a_numeric_matches_postgres() {
+    compare(
+        COLUMNS
+            .iter()
+            .filter(|(column, _)| is_numeric(column))
+            .map(|(column, _)| {
+                ["", ", -1", ", 0", ", 1", ", 2", ", 5", ", id"]
+                    .map(|digits| format!("round({column}{digits})"))
+                    .into()
+            })
+            .collect(),
+    )
+    .await;
+}
