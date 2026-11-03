@@ -1219,6 +1219,103 @@ async fn pg_rls_shallow_cache_failed_rollback_to_savepoint_extended() {
     run_failed_rollback_to_savepoint(Protocol::Extended).await;
 }
 
+/// Run `stmts`, which roll back to a savepoint, in a transaction, and check that a read returns
+/// `in_transaction` before COMMIT and bob's rows after it. The bypass partition is filled first, so
+/// a read keyed to it returns alice's and bob's rows.
+async fn run_rollback_to_savepoint(proto: Protocol, stmts: &[&str], in_transaction: &[&str]) {
+    init_test_logging();
+    let (rs, _handle, shutdown_tx) = connect_as_bob_after_alice(proto).await;
+
+    run_stmt(&rs, proto, "SET ROLE service_role").await;
+    assert_served_from_cache(&rs, proto, &["alice", "alice", "bob"], "bypass partition").await;
+    run_stmt(&rs, proto, "SET ROLE authenticated").await;
+
+    run_stmt(&rs, proto, "BEGIN").await;
+    for stmt in stmts {
+        run_stmt(&rs, proto, stmt).await;
+    }
+    let ctx = stmts.join("; ");
+    assert_served_from_cache(&rs, proto, in_transaction, &ctx).await;
+    run_stmt(&rs, proto, "COMMIT").await;
+    assert_served_from_cache(&rs, proto, &["bob"], &format!("{ctx}; COMMIT")).await;
+
+    shutdown_tx.shutdown().await;
+}
+
+/// A `SET ROLE` after a savepoint reverts at ROLLBACK TO SAVEPOINT to the `SET LOCAL ROLE` made
+/// before the savepoint, which reverts at COMMIT.
+const SET_ROLE_OVER_SET_LOCAL_ROLE: &[&str] = &[
+    "SET LOCAL ROLE service_role",
+    "SAVEPOINT s",
+    "SET ROLE anon",
+    "ROLLBACK TO SAVEPOINT s",
+];
+
+/// A claims change after a savepoint reverts at ROLLBACK TO SAVEPOINT to the `SET LOCAL` made
+/// before the savepoint, which reverts at COMMIT.
+const SET_OVER_SET_LOCAL: &[&str] = &[
+    r#"SET LOCAL request.jwt.claims = '{"sub":"alice"}'"#,
+    "SAVEPOINT s",
+    r#"SET request.jwt.claims = '{"sub":"carol"}'"#,
+    "ROLLBACK TO SAVEPOINT s",
+];
+
+/// A `SET LOCAL ROLE` after a savepoint reverts at ROLLBACK TO SAVEPOINT.
+const SET_LOCAL_ROLE_AFTER_SAVEPOINT: &[&str] =
+    &["SAVEPOINT s", "SET LOCAL ROLE service_role", "ROLLBACK TO SAVEPOINT s"];
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_set_role_over_set_local_role_simple() {
+    run_rollback_to_savepoint(
+        Protocol::Simple,
+        SET_ROLE_OVER_SET_LOCAL_ROLE,
+        &["alice", "alice", "bob"],
+    )
+    .await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_set_role_over_set_local_role_extended() {
+    run_rollback_to_savepoint(
+        Protocol::Extended,
+        SET_ROLE_OVER_SET_LOCAL_ROLE,
+        &["alice", "alice", "bob"],
+    )
+    .await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_set_over_set_local_simple() {
+    run_rollback_to_savepoint(Protocol::Simple, SET_OVER_SET_LOCAL, &["alice", "alice"]).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_set_over_set_local_extended() {
+    run_rollback_to_savepoint(Protocol::Extended, SET_OVER_SET_LOCAL, &["alice", "alice"]).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_set_local_role_after_savepoint_simple() {
+    run_rollback_to_savepoint(Protocol::Simple, SET_LOCAL_ROLE_AFTER_SAVEPOINT, &["bob"]).await;
+}
+
+#[test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pg_rls_shallow_cache_set_local_role_after_savepoint_extended() {
+    run_rollback_to_savepoint(Protocol::Extended, SET_LOCAL_ROLE_AFTER_SAVEPOINT, &["bob"]).await;
+}
+
 /// A COMMIT of a transaction where a statement failed rolls the transaction back, reverting its
 /// claims change.
 async fn run_commit_of_failed_transaction(proto: Protocol) {

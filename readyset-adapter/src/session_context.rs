@@ -219,12 +219,14 @@ impl SessionContext {
         Some(inner.effective_role.clone())
     }
 
-    /// Set a session-scope GUC.
+    /// Set a session-scope GUC. Like a `SET` after a `SET LOCAL`, it replaces a transaction-local
+    /// value.
     pub fn set_session_guc(&self, name: impl Into<String>, value: impl Into<String>) {
         let name = name.into();
         let value = value.into();
         let mut inner = self.inner.write();
         update_jwt_claims_if_needed(&mut inner, &name, Some(&value));
+        inner.trx_local_gucs.remove(&name);
         inner.session_gucs.insert(name, value);
     }
 
@@ -1041,6 +1043,17 @@ mod tests {
         s.set_trx_local_guc("a", "1");
         s.on_trx_end();
         assert!(!s.has_trx_local_gucs());
+    }
+
+    #[test]
+    fn session_guc_replaces_trx_local_guc() {
+        let g = guc("app.tenant_id");
+        let s = ctx();
+        s.set_trx_local_guc("app.tenant_id", "acme");
+        s.set_session_guc("app.tenant_id", "globex");
+        let expected = ctx();
+        expected.set_session_guc("app.tenant_id", "globex");
+        assert_eq!(part(&s, &g), part(&expected, &g));
     }
 
     /// A transaction-local role (SET LOCAL ROLE / set_config with

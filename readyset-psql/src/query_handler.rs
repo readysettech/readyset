@@ -516,9 +516,7 @@ impl QueryHandler for PostgreSqlQueryHandler {
 
     fn setting_reverted_by_rollback(stmt: &SetStatement) -> Option<String> {
         match stmt {
-            SetStatement::PostgresParameter(SetPostgresParameter { scope, name, .. })
-                if *scope != Some(PostgresParameterScope::Local) =>
-            {
+            SetStatement::PostgresParameter(SetPostgresParameter { name, .. }) => {
                 Some(name.to_ascii_lowercase())
             }
             SetStatement::SessionAuthorization(auth) if !auth.local => {

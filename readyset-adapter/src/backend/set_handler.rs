@@ -105,7 +105,7 @@ impl PendingSetState {
 pub(super) struct TransactionSettings {
     /// Settings the open transaction changed.
     changed: BTreeSet<String>,
-    /// Settings the open transaction changed until it ends.
+    /// Settings to read back from upstream when the open transaction ends.
     local: BTreeSet<String>,
     /// Settings to read back from upstream before the next statement.
     reread: BTreeSet<String>,
@@ -168,10 +168,12 @@ impl TransactionSettings {
     }
 
     /// The open transaction rolled back to a savepoint, so the settings it changed should be read
-    /// back from upstream. They stay recorded, since the transaction can still roll back.
+    /// back from upstream. They stay recorded, since the transaction can still roll back. A value
+    /// read back inside a transaction can be transaction-local, so they are read back again when
+    /// the transaction ends.
     pub(super) fn rollback_to_savepoint(&mut self) {
-        self.reread
-            .extend(self.changed.iter().chain(&self.local).cloned());
+        self.local.extend(self.changed.iter().cloned());
+        self.reread.extend(self.local.iter().cloned());
     }
 }
 
@@ -445,6 +447,17 @@ mod tests {
         settings.rollback();
         assert!(settings.reread.contains("search_path"));
         assert!(settings.local.is_empty());
+    }
+
+    #[test]
+    fn setting_rolled_back_to_savepoint_is_reread_after_commit() {
+        let mut settings = TransactionSettings::default();
+        settings.changed.insert("role".to_owned());
+        settings.rollback_to_savepoint();
+        assert!(settings.reread.contains("role"));
+        settings.reread.clear();
+        settings.commit();
+        assert!(settings.reread.contains("role"));
     }
 
     #[test]
