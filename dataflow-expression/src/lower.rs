@@ -1111,6 +1111,72 @@ fn mysql_numerical_type_cvt(left: &DfType, right: &DfType) -> Option<DfType> {
     }
 }
 
+/// Returns the type Postgres gives arithmetic on a numeric: double precision when the other side
+/// is a float, and numeric otherwise.
+fn psql_numeric_output_type(left: &DfType, op: &BinaryOperator, right: &DfType) -> Option<DfType> {
+    use BinaryOperator::*;
+    let (numeric, other) = match (left, right) {
+        (DfType::Numeric { .. }, _) => (left, right),
+        (_, DfType::Numeric { .. }) => (right, left),
+        _ => return None,
+    };
+    if !matches!(op, Add | Subtract | Multiply | Divide | Modulo) {
+        return None;
+    }
+    if other.is_any_float() {
+        Some(DfType::Double)
+    } else if other.is_any_int() || other.is_numeric() {
+        Some(numeric.clone())
+    } else {
+        None
+    }
+}
+
+/// Returns the digits of a MySQL DECIMAL or integer type, and how many of them are after the point,
+/// or `None` for other types. MySQL treats an integer as a DECIMAL of its type's precision, such as
+/// 10 digits for an INT.
+fn mysql_decimal_digits(ty: &DfType) -> Option<(u16, u16)> {
+    match *ty {
+        DfType::Numeric { prec, scale } => Some((prec, u16::from(scale))),
+        _ => ty.mysql_decimal_precision().map(|prec| (prec, 0)),
+    }
+}
+
+/// Returns the type MySQL gives arithmetic on a DECIMAL. If the other side is a float or a string,
+/// the result is a DOUBLE. Otherwise MySQL sizes the result from the digits of both sides, up to 65
+/// digits with at most 30 after the point.
+fn mysql_decimal_output_type(left: &DfType, op: &BinaryOperator, right: &DfType) -> Option<DfType> {
+    use BinaryOperator::*;
+    if !left.is_numeric() && !right.is_numeric() {
+        return None;
+    }
+    let is_arithmetic = matches!(op, Add | Subtract | Multiply | Divide | Modulo);
+    let (Some((left_prec, left_scale)), Some((right_prec, right_scale))) =
+        (mysql_decimal_digits(left), mysql_decimal_digits(right))
+    else {
+        let is_double = |ty: &DfType| ty.is_any_float() || ty.is_any_text();
+        return (is_arithmetic && (is_double(left) || is_double(right))).then_some(DfType::Double);
+    };
+    let (prec, scale) = match op {
+        Add | Subtract => {
+            let scale = left_scale.max(right_scale);
+            let int_digits = left_prec
+                .saturating_sub(left_scale)
+                .max(right_prec.saturating_sub(right_scale));
+            (int_digits + 1 + scale, scale)
+        }
+        Multiply => (left_prec + right_prec, left_scale + right_scale),
+        // MySQL keeps div_precision_increment more digits after the point, 4 by default.
+        Divide => (left_prec + right_scale + 4, left_scale + 4),
+        Modulo => (left_prec.max(right_prec), left_scale.max(right_scale)),
+        _ => return None,
+    };
+    Some(DfType::Numeric {
+        prec: prec.min(65),
+        scale: scale.min(30) as u8,
+    })
+}
+
 /// Handle the case where one or the other type is unknown, which occurs when one is a null literal.
 /// In those cases, assuming no other type conversion rules apply, we should use the type of the
 /// non-null operand.
@@ -1328,7 +1394,10 @@ impl BinaryOperator {
         use BinaryOperator::*;
         let (left_coerce, right_coerce) = match self {
             Add | Subtract | Multiply | Divide | Modulo | And | Or => match dialect.engine() {
-                SqlEngine::PostgreSQL => (None, None),
+                // Postgres computes a numeric with an integer as two numerics, and with a float as
+                // two doubles.
+                SqlEngine::PostgreSQL => psql_numeric_output_type(left_type, self, right_type)
+                    .map_or((None, None), |ty| (Some(ty.clone()), Some(ty))),
                 SqlEngine::MySQL => mysql_type_conversion(left_type, right_type)
                     .map_or((None, None), |ty| (Some(ty.clone()), Some(ty))),
             },
@@ -1506,9 +1575,11 @@ impl BinaryOperator {
         right_type: &DfType,
     ) -> ReadySetResult<DfType> {
         if let Some(ty) = match dialect.engine() {
-            SqlEngine::MySQL => crate::promotion::mysql::output_type(left_type, self, right_type),
+            SqlEngine::MySQL => crate::promotion::mysql::output_type(left_type, self, right_type)
+                .or_else(|| mysql_decimal_output_type(left_type, self, right_type)),
             SqlEngine::PostgreSQL => {
                 crate::promotion::psql::output_type(left_type, self, right_type)
+                    .or_else(|| psql_numeric_output_type(left_type, self, right_type))
             }
         } {
             // DfType::Unknown is the sentinel value used by the promotion maps to indicate
@@ -1906,8 +1977,10 @@ impl Expr {
                 let (left_coerce_target, right_coerce_target) =
                     op.argument_type_coercions(&left, &right, dialect)?;
 
+                // Cast each operand to the type the operator works in, unless both it and the result
+                // already have that type.
                 if let Some(ty) = left_coerce_target {
-                    if ty != out {
+                    if ty != out || ty != *left.ty() {
                         left = Box::new(Self::Cast {
                             expr: left,
                             ty,
@@ -1917,7 +1990,7 @@ impl Expr {
                     }
                 }
                 if let Some(ty) = right_coerce_target {
-                    if ty != out {
+                    if ty != out || ty != *right.ty() {
                         right = Box::new(Self::Cast {
                             expr: right,
                             ty,
@@ -2856,6 +2929,27 @@ pub(crate) mod tests {
         let input = parse_expr(ParserDialect::MySQL, "substring(123 from 2)").unwrap();
         let res = Expr::lower(input, Dialect::DEFAULT_MYSQL, &no_op_lower_context()).unwrap();
         assert_eq!(res.ty(), &DfType::DEFAULT_TEXT);
+    }
+
+    #[test]
+    fn mysql_decimal_arithmetic_sizes_an_integer_by_its_type() {
+        // The types MySQL 8.4 gives a DECIMAL(2,1) with a column of each integer type.
+        let decimal = DfType::Numeric { prec: 2, scale: 1 };
+        for (left, op, right, prec, scale) in [
+            (&decimal, BinaryOperator::Add, &DfType::TinyInt, 5, 1),
+            (&decimal, BinaryOperator::Add, &DfType::Int, 12, 1),
+            (&decimal, BinaryOperator::Subtract, &DfType::BigInt, 21, 1),
+            (&decimal, BinaryOperator::Multiply, &DfType::Int, 12, 1),
+            (&DfType::Int, BinaryOperator::Divide, &decimal, 15, 4),
+            (&decimal, BinaryOperator::Divide, &DfType::Int, 6, 5),
+            (&DfType::Int, BinaryOperator::Modulo, &decimal, 10, 1),
+        ] {
+            assert_eq!(
+                op.output_type(Dialect::DEFAULT_MYSQL, left, right).unwrap(),
+                DfType::Numeric { prec, scale },
+                "{left} {op:?} {right}"
+            );
+        }
     }
 
     #[test]

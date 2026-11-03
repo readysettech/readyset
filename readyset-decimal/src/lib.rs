@@ -336,6 +336,18 @@ impl Decimal {
         }
     }
 
+    /// Rounds half away from zero to `scale` digits after the point, as MySQL rounds a DECIMAL.
+    /// Returns `None` for a value with no more digits after the point than that.
+    pub fn round_half_up(&self, scale: i64) -> Option<Self> {
+        match self {
+            Self::Number(decimal) if decimal.fractional_digit_count() > scale => {
+                let rounded = decimal.with_scale_round(scale, RoundingMode::HalfUp);
+                Some(Self::Number(rounded))
+            }
+            _ => None,
+        }
+    }
+
     pub fn fract(&self) -> Self {
         match self {
             Self::Number(decimal) => {

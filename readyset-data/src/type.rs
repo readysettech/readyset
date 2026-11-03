@@ -259,15 +259,14 @@ impl DfType {
     /// - `DECIMAL(prec, scale)` input → `DECIMAL(min(prec+incr, 65), min(scale+incr, 30))`
     /// - Float/Double/Text input → `DOUBLE`
     ///
-    /// The `decimal_precision` for each integer type is the number of decimal
-    /// digits needed to represent the type's maximum value
-    /// (`floor(log10(max_value)) + 1`):
+    /// The `decimal_precision` for each integer type is its display width without
+    /// the sign:
     ///
     /// | Type       | Signed | Unsigned |
     /// |------------|--------|----------|
     /// | TINYINT    |      3 |        3 |
     /// | SMALLINT   |      5 |        5 |
-    /// | MEDIUMINT  |      7 |        8 |
+    /// | MEDIUMINT  |      8 |        8 |
     /// | INT        |     10 |       10 |
     /// | BIGINT     |     19 |       20 |
     ///
@@ -294,13 +293,13 @@ impl DfType {
     }
 
     /// Returns the decimal precision for MySQL integer types, or `None` for non-integer types.
-    /// This is the number of decimal digits needed to represent the type's maximum value.
+    /// This is the type's display width without the sign, so a MEDIUMINT, shown as `mediumint(9)`,
+    /// has 8 digits although its largest value has 7.
     pub fn mysql_decimal_precision(&self) -> Option<u16> {
         match self {
             Self::TinyInt | Self::UnsignedTinyInt => Some(3),
             Self::SmallInt | Self::UnsignedSmallInt => Some(5),
-            Self::MediumInt => Some(7),
-            Self::UnsignedMediumInt => Some(8),
+            Self::MediumInt | Self::UnsignedMediumInt => Some(8),
             Self::Int | Self::UnsignedInt => Some(10),
             Self::BigInt => Some(19),
             Self::UnsignedBigInt => Some(20),

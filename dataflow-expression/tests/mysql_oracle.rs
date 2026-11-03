@@ -135,6 +135,12 @@ async fn example_exprs_type_same_as_mysql() {
         "convert_tz('2004.01.01 12:00:00', '+00:00', '+10:00')",
         "convert_tz('  2004-01-01 12:00:00.12  ', '+00:00', '+10:00')",
         "convert_tz(null, '+00:00', '+10:00')",
+        // MySQL sizes the result of arithmetic on decimals from both sides.
+        "CAST(1.5 AS DECIMAL(2,1)) + CAST(1.25 AS DECIMAL(3,2))",
+        "CAST(1.5 AS DECIMAL(2,1)) - CAST(1.25 AS DECIMAL(3,2))",
+        "CAST(1.5 AS DECIMAL(2,1)) * CAST(1.25 AS DECIMAL(3,2))",
+        "CAST(1.5 AS DECIMAL(2,1)) / CAST(1.25 AS DECIMAL(3,2))",
+        "CAST(1.5 AS DECIMAL(2,1)) + '2'",
     ] {
         compare_type(expr, &mut conn).await;
     }

@@ -1602,7 +1602,7 @@ mod tests {
         check(&DfType::UnsignedTinyInt, 7);
         check(&DfType::SmallInt, 9);
         check(&DfType::UnsignedSmallInt, 9);
-        check(&DfType::MediumInt, 11);
+        check(&DfType::MediumInt, 12);
         check(&DfType::UnsignedMediumInt, 12);
         check(&DfType::Int, 14);
         check(&DfType::UnsignedInt, 14);

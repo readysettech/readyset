@@ -1548,10 +1548,7 @@ mod tests {
         test("1::int", "'1'", false);
         test("2.5::numeric", "2.5::double precision", false);
         test("1::bigint", "1::smallint", false);
-        // Sharing `=`'s coercions also means sharing its gaps: a boolean against a text literal
-        // compares unequal here where PostgreSQL reconciles the two, so `true::boolean` is
-        // distinct from `'true'` under both operators alike.
-        test("true::boolean", "'true'", true);
+        test("true::boolean", "'true'", false);
 
         // `IS [NOT] DISTINCT FROM` binds tighter than `AND` and `OR`, so a following conjunct stays
         // outside the right operand and keeps filtering.

@@ -143,7 +143,13 @@ async fn write_column<S: AsyncRead + AsyncWrite + Unpin>(
         DfValue::Numeric(ref v) => match cs.coltype {
             mysql_srv::ColumnType::MYSQL_TYPE_DECIMAL
             | mysql_srv::ColumnType::MYSQL_TYPE_NEWDECIMAL => {
-                let f = format!("{v:.0$}", cs.decimals as usize);
+                // MySQL rounds a DECIMAL to its column's digits half away from zero, which leaves
+                // no sign on a value that rounds to zero.
+                let decimals = cs.decimals as usize;
+                let f = match v.round_half_up(cs.decimals.into()) {
+                    Some(rounded) => format!("{rounded:.decimals$}"),
+                    None => format!("{v:.decimals$}"),
+                };
                 rw.write_col(f)
             }
             mysql_srv::ColumnType::MYSQL_TYPE_FLOAT | mysql_srv::ColumnType::MYSQL_TYPE_DOUBLE => {
