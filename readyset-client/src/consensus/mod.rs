@@ -323,9 +323,8 @@ pub trait AuthorityControl: Send + Sync {
 
     /// Removes the provided statement from the store.
     async fn remove_cache_ddl_request(&self, cache_ddl_req: CacheDDLRequest) -> ReadySetResult<()> {
-        let cache_ddl_req = serde_json::ser::to_string(&cache_ddl_req)?;
         modify_cache_ddl_requests(self, move |stmts| {
-            stmts.retain(|stmt| *stmt != cache_ddl_req);
+            stmts.retain(|stmt| !cache_ddl_request_matches(stmt, &cache_ddl_req));
         })
         .await
     }
@@ -334,9 +333,8 @@ pub trait AuthorityControl: Send + Sync {
         &self,
         cache_ddl_req: CacheDDLRequest,
     ) -> ReadySetResult<()> {
-        let cache_ddl_req = serde_json::ser::to_string(&cache_ddl_req)?;
         modify_shallow_cache_ddl_requests(self, move |stmts| {
-            stmts.retain(|stmt| *stmt != cache_ddl_req);
+            stmts.retain(|stmt| !cache_ddl_request_matches(stmt, &cache_ddl_req));
         })
         .await
     }
@@ -608,6 +606,11 @@ fn cache_ddl_request_name(raw: &str) -> Option<Relation> {
         .and_then(|req| req.cache_name)
 }
 
+/// Return whether the stored entry `stored` holds `req`.
+fn cache_ddl_request_matches(stored: &str, req: &CacheDDLRequest) -> bool {
+    serde_json::from_str::<CacheDDLRequest>(stored).is_ok_and(|stored| stored == *req)
+}
+
 async fn modify_ddl_requests<A, F>(authority: &A, path: &str, mut f: F) -> ReadySetResult<()>
 where
     A: AuthorityControl + ?Sized,
@@ -732,6 +735,77 @@ mod cache_ddl_tests {
             dialect: Dialect::DEFAULT_POSTGRESQL,
             cache_name: name.map(Relation::from),
         }
+    }
+
+    /// Serialize `req` without some of the newer keys.
+    fn legacy_entry(req: &CacheDDLRequest) -> String {
+        let mut value = serde_json::to_value(req).unwrap();
+        let map = value.as_object_mut().unwrap();
+        map.remove("database");
+        map.remove("cache_name");
+        value.to_string()
+    }
+
+    #[tokio::test]
+    async fn remove_cache_ddl_request_removes_legacy_entry() {
+        let authority = LocalAuthority::new();
+        let entry = legacy_entry(&req("CREATE CACHE FROM SELECT 1", None));
+        modify_cache_ddl_requests(&authority, move |stmts| stmts.push(entry.clone()))
+            .await
+            .unwrap();
+        let recovered = authority.cache_ddl_requests().await.unwrap();
+        assert_eq!(recovered.len(), 1);
+        authority
+            .remove_cache_ddl_request(recovered[0].clone())
+            .await
+            .unwrap();
+        assert!(authority.cache_ddl_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn remove_shallow_cache_ddl_request_removes_legacy_entry() {
+        let authority = LocalAuthority::new();
+        let entry = legacy_entry(&req("CREATE SHALLOW CACHE FROM SELECT 1", None));
+        modify_shallow_cache_ddl_requests(&authority, move |stmts| stmts.push(entry.clone()))
+            .await
+            .unwrap();
+        let recovered = authority.shallow_cache_ddl_requests().await.unwrap();
+        assert_eq!(recovered.len(), 1);
+        authority
+            .remove_shallow_cache_ddl_request(recovered[0].clone())
+            .await
+            .unwrap();
+        assert!(authority
+            .shallow_cache_ddl_requests()
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn remove_shallow_cache_ddl_request_keeps_other_database() {
+        let authority = LocalAuthority::new();
+        let url_db = req("CREATE SHALLOW CACHE FROM SELECT 1", None);
+        let other_db = CacheDDLRequest {
+            database: Some("db2".into()),
+            ..url_db.clone()
+        };
+        authority
+            .add_shallow_cache_ddl_request(url_db.clone())
+            .await
+            .unwrap();
+        authority
+            .add_shallow_cache_ddl_request(other_db.clone())
+            .await
+            .unwrap();
+        authority
+            .remove_shallow_cache_ddl_request(url_db)
+            .await
+            .unwrap();
+        assert_eq!(
+            authority.shallow_cache_ddl_requests().await.unwrap(),
+            vec![other_db]
+        );
     }
 
     #[tokio::test]
