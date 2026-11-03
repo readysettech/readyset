@@ -52,7 +52,7 @@ pub enum DecodeError {
     InvalidTextIpAddressValue(cidr::errors::NetworkParseError),
 
     #[error("invalid text uuid value: {0}")]
-    InvalidTextUuidValue(uuid::Error),
+    InvalidTextUuidValue(String),
 
     #[error("invalid text json value: {0}")]
     InvalidTextJsonValue(serde_json::Error),

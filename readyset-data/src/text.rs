@@ -454,6 +454,29 @@ impl From<TinyText> for DfValue {
     }
 }
 
+/// Reads a uuid the way Postgres does: 32 hex digits, optionally in braces, with one hyphen
+/// allowed after any group of four digits but the last.
+pub fn parse_uuid(text: &str) -> Option<uuid::Uuid> {
+    let mut rest = match text.strip_prefix('{') {
+        Some(braced) => braced.strip_suffix('}')?,
+        None => text,
+    }
+    .as_bytes();
+    let digit = |c: u8| char::from(c).to_digit(16);
+    let mut bytes = [0; 16];
+    for (i, byte) in bytes.iter_mut().enumerate() {
+        let [high, low, tail @ ..] = rest else {
+            return None;
+        };
+        *byte = (digit(*high)? * 16 + digit(*low)?) as u8;
+        rest = tail;
+        if i % 2 == 1 && i < 15 {
+            rest = rest.strip_prefix(b"-").unwrap_or(rest);
+        }
+    }
+    rest.is_empty().then(|| uuid::Uuid::from_bytes(bytes))
+}
+
 /// This trait implements text to DfValue coercion for any DfValue
 /// that can be converted to an str. Currently this is just Text and TinyText, but should also be
 /// implemented for ByteArray in the future.
@@ -744,15 +767,10 @@ pub(crate) trait TextCoerce: Sized + Clone + Into<DfValue> {
             }
 
             DfType::Uuid => {
-                // Since UUIDs can be represented in many ways, if we want to store them as a
-                // string, we have to at least normalize to the same representation.
-                // I.e. we want to make sure that
-                //'123e4567-e89b-12d3-a456-426614174000',
-                //'123E4567-E89b-12D3-A456-426614174000',
-                // and '123e4567e89b12d3a456426614174000' are equal.
-                let uuid = str
-                    .parse::<uuid::Uuid>()
-                    .map_err(|e| Self::coerce_err(to_ty, e))?
+                // Store the uuid the way Postgres writes it, lowercase with hyphens, so that two
+                // spellings of the same uuid compare equal.
+                let uuid = parse_uuid(str)
+                    .ok_or_else(|| Self::coerce_err(to_ty, "invalid input syntax for type uuid"))?
                     .to_string();
 
                 if uuid.as_str() == str {
@@ -1183,19 +1201,45 @@ mod tests {
                 .unwrap(),
             DfValue::from("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"),
         );
-        /* TODO: fix the following UUID conversions one day
-        assert_eq!(
-            DfValue::from("a0ee-bc99-9c0b-4ef8-bb6d-6bb9-bd38-0a11")
-                .coerce_to(&DfType::Uuid, &DfType::Unknown)
-                .unwrap(),
-            DfValue::from("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"),
-        );
-        assert_eq!(
-            DfValue::from("{a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11}")
-                .coerce_to(&DfType::Uuid, &DfType::Unknown)
-                .unwrap(),
-            DfValue::from("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"),
-        );*/
+        // Spellings Postgres reads as a uuid, then spellings it rejects.
+        for s in [
+            "a0ee-bc99-9c0b-4ef8-bb6d-6bb9-bd38-0a11",
+            "a0eebc99-9c0b4ef8-bb6d6bb9-bd380a11",
+            "a0eebc999c0b-4ef8bb6d6bb9bd380a11",
+            "{a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11}",
+            "{a0eebc999c0b4ef8bb6d6bb9bd380a11}",
+            "{a0ee-bc99-9c0b-4ef8-bb6d-6bb9-bd38-0a11}",
+            "A0eEbC99-9C0b-4eF8-Bb6D-6Bb9bD380a11",
+        ] {
+            assert_eq!(
+                DfValue::from(s)
+                    .coerce_to(&DfType::Uuid, &DfType::Unknown)
+                    .unwrap(),
+                DfValue::from("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"),
+                "{s}"
+            );
+        }
+        for s in [
+            "urn:uuid:a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+            " a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+            "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11 ",
+            "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a1",
+            "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a111",
+            "{a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+            "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11}",
+            "{{a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11}}",
+            "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11-",
+            "-a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+            "a0eeb-c99-9c0b-4ef8-bb6d-6bb9bd380a11",
+            "a0eebc99--9c0b-4ef8-bb6d-6bb9bd380a11",
+            "a0eebc99_9c0b_4ef8_bb6d_6bb9bd380a11",
+            "g0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+            "",
+            "{}",
+        ] {
+            let result = DfValue::from(s).coerce_to(&DfType::Uuid, &DfType::Unknown);
+            assert!(result.is_err(), "{s}: {result:?}");
+        }
 
         // TEXT to MAC
         assert_eq!(

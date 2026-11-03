@@ -67,7 +67,7 @@ pub use crate::point::{format_point, parse_point};
 pub use crate::r#box::{format_box, parse_box};
 pub use crate::r#type::{DfType, PgEnumMetadata, PgTypeCategory};
 pub use crate::ranges::{Bound, BoundedRange, IntoBoundedRange, RangeBounds};
-pub use crate::text::{Text, TinyText};
+pub use crate::text::{parse_uuid, Text, TinyText};
 pub use crate::timestamp::{
     TimestampTz, DATE_FORMAT, ISO_TIMESTAMP_PARSE_FORMAT, TIMESTAMP_FORMAT, TIMESTAMP_PARSE_FORMAT,
 };

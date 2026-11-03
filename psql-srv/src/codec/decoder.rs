@@ -582,8 +582,8 @@ fn get_text_value(src: &mut Bytes, t: &Type) -> Result<PsqlValue, Error> {
             .parse::<IpCidr>()
             .map_err(DecodeError::InvalidTextIpAddressValue)
             .map(PsqlValue::Cidr),
-        Type::UUID => Uuid::parse_str(text_str)
-            .map_err(DecodeError::InvalidTextUuidValue)
+        Type::UUID => readyset_data::parse_uuid(text_str)
+            .ok_or_else(|| DecodeError::InvalidTextUuidValue(text_str.to_owned()))
             .map(PsqlValue::Uuid),
         Type::JSON => serde_json::from_str::<serde_json::Value>(text_str)
             .map_err(DecodeError::InvalidTextJsonValue)
@@ -648,6 +648,31 @@ mod tests {
         buf.put_i32(i32::try_from(input.len()).unwrap());
         buf.extend_from_slice(input);
         get_text_value(&mut buf.freeze(), &Type::TIMESTAMPTZ).unwrap()
+    }
+
+    #[test]
+    fn text_uuid_reads_as_postgres_does() {
+        let decode = |input: &str| {
+            let mut buf = BytesMut::new();
+            buf.put_i32(i32::try_from(input.len()).unwrap());
+            buf.extend_from_slice(input.as_bytes());
+            get_text_value(&mut buf.freeze(), &Type::UUID)
+        };
+        let uuid =
+            PsqlValue::Uuid(Uuid::parse_str("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11").unwrap());
+        for s in [
+            "A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11",
+            "a0ee-bc99-9c0b-4ef8-bb6d-6bb9-bd38-0a11",
+            "{a0eebc999c0b4ef8bb6d6bb9bd380a11}",
+        ] {
+            assert_eq!(decode(s).unwrap(), uuid, "{s}");
+        }
+        for s in [
+            "urn:uuid:a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+            "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11 ",
+        ] {
+            decode(s).unwrap_err();
+        }
     }
 
     fn bytes_str(s: &str) -> BytesStr {
