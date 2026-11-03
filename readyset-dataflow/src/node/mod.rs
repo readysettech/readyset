@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::mem;
 
 use readyset_data::{Collation, DfType, Dialect};
 use readyset_sql::ast::{ColumnConstraint, ColumnSpecification, Relation, SqlIdentifier};
@@ -28,6 +29,18 @@ mod debug;
 // NOTE(jfrg): the migration code should probably move into the dataflow crate...
 // it is the reason why so much stuff here is pub
 
+/// The table columns whose values a dataflow column holds
+#[derive(Clone, Default, Serialize, Deserialize, Debug)]
+pub enum ColumnOrigin {
+    /// An operator computes the values
+    #[default]
+    Computed,
+    /// A copy of the column at this index of this table
+    Table(Relation, usize),
+    /// A UNION ALL of these origins, one per branch, none of them a UNION ALL
+    UnionAll(Vec<ColumnOrigin>),
+}
+
 /// Dataflow column representation
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Column {
@@ -46,6 +59,12 @@ pub struct Column {
     /// The declared display width of an integer column, e.g. 5 for `INT(5)`
     #[serde(default)]
     display_width: Option<u16>,
+    /// The table columns whose values this column holds
+    #[serde(default)]
+    origin: ColumnOrigin,
+    /// Whether an outer join adds NULLs to this column, as on the right side of a LEFT JOIN
+    #[serde(default)]
+    outer_nullable: bool,
 }
 
 impl Column {
@@ -56,6 +75,8 @@ impl Column {
             source,
             zerofill: false,
             display_width: None,
+            origin: ColumnOrigin::Computed,
+            outer_nullable: false,
         }
     }
 
@@ -81,6 +102,8 @@ impl Column {
             source: spec.column.table,
             zerofill: spec.constraints.contains(&ColumnConstraint::ZeroFill),
             display_width: spec.sql_type.display_width(),
+            origin: ColumnOrigin::Computed,
+            outer_nullable: false,
         })
     }
 
@@ -112,6 +135,41 @@ impl Column {
     /// Sets this column's name
     pub fn set_name(&mut self, name: SqlIdentifier) {
         self.name = name;
+    }
+
+    /// The table columns whose values this column holds
+    pub fn origin(&self) -> &ColumnOrigin {
+        &self.origin
+    }
+
+    /// Sets the table columns whose values this column holds
+    pub fn set_origin(&mut self, origin: ColumnOrigin) {
+        self.origin = origin;
+    }
+
+    /// Whether an outer join adds NULLs to this column
+    pub fn outer_nullable(&self) -> bool {
+        self.outer_nullable
+    }
+
+    /// This column, with NULLs added by an outer join if `outer_nullable` is true
+    pub fn with_outer_nullable(mut self, outer_nullable: bool) -> Self {
+        self.outer_nullable |= outer_nullable;
+        self
+    }
+
+    /// Adds the NULLs and table columns of another branch of a UNION ALL to this column
+    pub fn add_union_all_branch(&mut self, branch: &Column) {
+        self.outer_nullable |= branch.outer_nullable;
+        let mut origins = match mem::take(&mut self.origin) {
+            ColumnOrigin::UnionAll(origins) => origins,
+            origin => vec![origin],
+        };
+        match &branch.origin {
+            ColumnOrigin::UnionAll(branch_origins) => origins.extend_from_slice(branch_origins),
+            origin => origins.push(origin.clone()),
+        }
+        self.origin = ColumnOrigin::UnionAll(origins);
     }
 }
 

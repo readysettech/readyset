@@ -12,7 +12,7 @@ use std::mem;
 use crate::controller::Migration;
 use crate::manual::ops::grouped::aggregate::Aggregation;
 use common::DfValue;
-use dataflow::node::Column as DfColumn;
+use dataflow::node::{Column as DfColumn, ColumnOrigin};
 use dataflow::ops::grouped::accumulator::Accumulator;
 use dataflow::ops::join::{Join, JoinType};
 use dataflow::ops::project::Project;
@@ -528,10 +528,13 @@ fn make_base_node(
     unique_keys: &[Box<[Column]>],
     mig: &mut Migration<'_>,
 ) -> ReadySetResult<DfNodeIndex> {
-    let columns = column_specs
+    let mut columns = column_specs
         .iter()
         .map(|cs| DfColumn::from_spec(cs.clone(), mig.dialect, |ty| custom_types.get(&ty).cloned()))
         .collect::<Result<Vec<_>, _>>()?;
+    for (index, column) in columns.iter_mut().enumerate() {
+        column.set_origin(ColumnOrigin::Table(name.clone(), index));
+    }
 
     // note that this defaults to a "None" (= NULL) default value for columns that don't have a
     // default value or we cannot infer a default value from the SQL type
@@ -677,9 +680,9 @@ fn make_union_node(
             }
         })?;
 
+        let parent_cols = mig.dataflow_state.ingredients[ni.address()].columns();
         // Union takes columns of first ancestor
         if i == 0 {
-            let parent_cols = mig.dataflow_state.ingredients[ni.address()].columns();
             cols = emit_cols
                 .iter()
                 .map(|i| {
@@ -689,6 +692,13 @@ fn make_union_node(
                         .ok_or_else(|| internal_err!("Invalid index"))
                 })
                 .collect::<ReadySetResult<Vec<_>>>()?;
+        } else if duplicate_mode == ops::union::DuplicateMode::UnionAll {
+            for (col, j) in cols.iter_mut().zip(&emit_cols) {
+                let branch = parent_cols
+                    .get(*j)
+                    .ok_or_else(|| internal_err!("Invalid index"))?;
+                col.add_union_all_branch(branch);
+            }
         }
 
         emit_column_id.insert(ni.address(), emit_cols);
@@ -1170,7 +1180,8 @@ fn make_join_node(
                 right_cols
                     .get(r)
                     .cloned()
-                    .ok_or_else(|| internal_err!("Invalid index"))?,
+                    .ok_or_else(|| internal_err!("Invalid index"))?
+                    .with_outer_nullable(kind == JoinType::Left),
             );
         } else {
             internal!("Column {c} not found in either parent")
@@ -1445,7 +1456,13 @@ fn make_project_node(
                     mig.dialect,
                 )?;
 
-                (DfColumn::new(alias.clone(), expr.ty().clone(), None), expr)
+                // An expression that is just a column holds that column's values
+                let mut col = match &expr {
+                    DfExpr::Column { index, .. } => parent_cols[*index].clone(),
+                    _ => DfColumn::new(alias.clone(), expr.ty().clone(), None),
+                };
+                col.set_name(alias.clone());
+                (col, expr)
             }
         };
 

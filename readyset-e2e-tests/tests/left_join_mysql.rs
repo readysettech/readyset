@@ -31,6 +31,8 @@ async fn left_join_right_columns_are_nullable() {
              CREATE TABLE other (grp int NOT NULL, body varchar(10) NOT NULL DEFAULT '');
              INSERT INTO memo VALUES (1, 'x');
              INSERT INTO other VALUES (1, 'y');
+             CREATE TABLE tag (id int NOT NULL, t_id tinyint);
+             INSERT INTO tag VALUES (1, 1);
              CREATE VIEW v AS
                  SELECT t.grp AS grp, memo.body AS body FROM t LEFT JOIN memo ON t.id = memo.t_id
                  UNION ALL SELECT grp, body FROM other",
@@ -68,6 +70,7 @@ async fn left_join_right_columns_are_nullable() {
         "SELECT t.id, note.t_id, note.body FROM t LEFT JOIN note ON t.id = note.t_id
          WHERE t.grp = ? ORDER BY t.id LIMIT 10",
         "SELECT body FROM v WHERE grp = ? ORDER BY body",
+        "SELECT tag.t_id, t.id FROM tag LEFT JOIN t ON tag.t_id = t.id WHERE tag.id = ?",
     ] {
         eventually!(run_test: {
             rs.query_drop(format!("CREATE CACHE FROM {query}")).await.map_err(|e| e.to_string())

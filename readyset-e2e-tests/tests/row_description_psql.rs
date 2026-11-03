@@ -25,6 +25,8 @@ const SETUP: &str = "
         mood typmod_mood
     );
     INSERT INTO typmod VALUES (1, 123.45, 1.5, 'hello', 'hello', 'hello', 'happy');
+    CREATE TABLE typmod_note (typmod_id BIGINT PRIMARY KEY);
+    INSERT INTO typmod_note VALUES (1);
 ";
 
 const DEEP: &str = "SELECT id, num_ps, num, vc, ch, txt, mood FROM typmod WHERE id = $1";
@@ -32,6 +34,8 @@ const DEEP_SIMPLE: &str = "SELECT id, num_ps, num, vc, ch, txt, mood FROM typmod
 const DEEP_LIMIT: &str = "SELECT id, num_ps, vc FROM typmod WHERE txt = $1 ORDER BY id LIMIT 1";
 const DEEP_LIMIT_SIMPLE: &str =
     "SELECT id, num_ps, vc FROM typmod WHERE txt = 'hello' ORDER BY id LIMIT 1";
+const DEEP_LEFT_JOIN: &str = "SELECT typmod.id, typmod_note.typmod_id FROM typmod
+    LEFT JOIN typmod_note ON typmod.id = typmod_note.typmod_id WHERE typmod.id = $1";
 const SHALLOW: &str = "SELECT num_ps, vc, ch, mood, id FROM typmod WHERE id = $1";
 const PROXIED: &str =
     "SELECT id, num_ps, num, vc, ch, txt, mood, random() FROM typmod WHERE id = $1";
@@ -86,6 +90,9 @@ async fn row_description_matches_upstream() {
     conn.simple_query(&format!("CREATE CACHE FROM {DEEP_LIMIT}"))
         .await
         .unwrap();
+    conn.simple_query(&format!("CREATE CACHE FROM {DEEP_LEFT_JOIN}"))
+        .await
+        .unwrap();
     conn.simple_query(&format!("CREATE SHALLOW CACHE FROM {SHALLOW}"))
         .await
         .unwrap();
@@ -114,6 +121,13 @@ async fn row_description_matches_upstream() {
     let info = last_query_info(&conn).await;
     assert_matches!(info.destination, QueryDestination::Readyset(_), "{info:?}");
     assert_eq!(actual, expected, "deep cache with a LIMIT, simple query");
+
+    let left_join_simple = DEEP_LEFT_JOIN.replace("$1", "1");
+    let expected = simple_fields(&upstream, &left_join_simple).await;
+    let actual = simple_fields(&conn, &left_join_simple).await;
+    let info = last_query_info(&conn).await;
+    assert_matches!(info.destination, QueryDestination::Readyset(_), "{info:?}");
+    assert_eq!(actual, expected, "deep cache with a LEFT JOIN, simple query");
 
     let expected = modifiers(&upstream.prepare(PROXIED).await.unwrap());
     let stmt = conn.prepare(PROXIED).await.unwrap();
