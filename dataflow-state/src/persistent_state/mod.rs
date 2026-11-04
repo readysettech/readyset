@@ -418,6 +418,31 @@ impl PersistenceParameters {
 
         base_dir.join(WORKING_DIR)
     }
+
+    /// Rename a RocksDB directory from `legacy_name` to `name` when only the legacy directory
+    /// exists, and return whether it was renamed. Only permanent storage keeps directories across
+    /// restarts, so other modes have nothing to rename.
+    pub fn rename_legacy_db(&self, legacy_name: &str, name: &str) -> io::Result<bool> {
+        if self.mode != DurabilityMode::Permanent {
+            return Ok(false);
+        }
+        let dir = self.storage_dir();
+        let legacy_path = dir.join(db_dir_name(legacy_name.into()));
+        let path = dir.join(db_dir_name(name.into()));
+        if !legacy_path.is_dir() || path.exists() {
+            return Ok(false);
+        }
+        fs::rename(legacy_path, path)?;
+        Ok(true)
+    }
+}
+
+/// Append the `.db` suffix of a RocksDB directory to `name` unless it already has it.
+fn db_dir_name(mut name: String) -> String {
+    if !name.ends_with(".db") {
+        name.push_str(".db");
+    }
+    name
 }
 
 /// Errors that can occur when creating a new persistent state or opening an existing one.
@@ -1807,7 +1832,7 @@ enum AutoCompact {
 
 impl PersistentState {
     pub fn new<C: AsRef<[usize]>, K: IntoIterator<Item = C>>(
-        mut name: String,
+        name: String,
         table: Option<Relation>,
         unique_keys: K,
         params: &PersistenceParameters,
@@ -1829,9 +1854,7 @@ impl PersistentState {
         let unique_keys: Vec<Box<[usize]>> =
             unique_keys.into_iter().map(|c| c.as_ref().into()).collect();
 
-        if !name.ends_with(".db") {
-            name.push_str(".db");
-        }
+        let name = db_dir_name(name);
 
         let (tmpdir, full_path) = match params.mode {
             DurabilityMode::Permanent => {
@@ -3628,6 +3651,78 @@ mod tests {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn rename_legacy_db_keeps_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let params = PersistenceParameters {
+            mode: DurabilityMode::Permanent,
+            storage_dir: Some(dir.path().into()),
+            ..Default::default()
+        };
+        let row: Vec<DfValue> = vec![10.into(), "Cat".into()];
+        let mut state = PersistentState::new(
+            "legacy".into(),
+            None,
+            Vec::<Box<[usize]>>::new(),
+            &params,
+            PersistenceType::BaseTable,
+            None,
+        )
+        .unwrap();
+        state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+        state
+            .process_records(&mut vec![row.clone()].into(), None, None)
+            .unwrap();
+        drop(state);
+
+        assert!(params.rename_legacy_db("legacy", "new").unwrap());
+        assert!(!dir.path().join("legacy.db").exists());
+        assert!(!params.rename_legacy_db("legacy", "new").unwrap());
+
+        let state = PersistentState::new(
+            "new".into(),
+            None,
+            Vec::<Box<[usize]>>::new(),
+            &params,
+            PersistenceType::BaseTable,
+            None,
+        )
+        .unwrap();
+        match state.lookup(&[0], &PointKey::Single(10.into())) {
+            LookupResult::Some(RecordResult::Owned(rows)) => assert_eq!(rows, vec![row]),
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn rename_legacy_db_keeps_existing_db() {
+        let dir = tempfile::tempdir().unwrap();
+        let params = PersistenceParameters {
+            mode: DurabilityMode::Permanent,
+            storage_dir: Some(dir.path().into()),
+            ..Default::default()
+        };
+        fs::create_dir(dir.path().join("legacy.db")).unwrap();
+        fs::create_dir(dir.path().join("new.db")).unwrap();
+
+        assert!(!params.rename_legacy_db("legacy", "new").unwrap());
+        assert!(dir.path().join("legacy.db").exists());
+    }
+
+    #[test]
+    fn rename_legacy_db_needs_permanent_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let params = PersistenceParameters {
+            mode: DurabilityMode::DeleteOnExit,
+            storage_dir: Some(dir.path().into()),
+            ..Default::default()
+        };
+        fs::create_dir(dir.path().join("legacy.db")).unwrap();
+
+        assert!(!params.rename_legacy_db("legacy", "new").unwrap());
+        assert!(dir.path().join("legacy.db").exists());
     }
 
     /// Opening a `PersistentState` against on-disk metadata written by an older binary

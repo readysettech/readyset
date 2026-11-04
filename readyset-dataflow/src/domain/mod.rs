@@ -781,6 +781,45 @@ pub struct Domain {
     replay_buffered_writes: Gauge,
 }
 
+/// Escape `-`, which separates the parts of a base table's RocksDB directory name, `/`, which
+/// separates path components, and `=`, the escape character, as `=` and the character's hex code.
+fn escape_file_name_part(s: &str) -> Cow<'_, str> {
+    if !s.contains(['=', '-', '/']) {
+        return Cow::Borrowed(s);
+    }
+    let mut escaped = String::with_capacity(s.len() + 4);
+    for c in s.chars() {
+        match c {
+            '=' => escaped.push_str("=3D"),
+            '-' => escaped.push_str("=2D"),
+            '/' => escaped.push_str("=2F"),
+            c => escaped.push(c),
+        }
+    }
+    Cow::Owned(escaped)
+}
+
+/// Return the name of a base table's RocksDB directory, with each part escaped so that `-` only
+/// appears between parts.
+fn base_table_file_name(prefix: &str, table: &Relation, shard: usize) -> String {
+    let prefix = prefix.replace('-', "_");
+    let name = escape_file_name_part(&table.name);
+    match &table.schema {
+        Some(schema) => format!("{prefix}-{}-{name}-{shard}", escape_file_name_part(schema)),
+        None => format!("{prefix}-{name}-{shard}"),
+    }
+}
+
+/// Return the name of a base table's RocksDB directory from before schema and table names were
+/// escaped.
+fn legacy_base_table_file_name(prefix: &str, table: &Relation, shard: usize) -> String {
+    let prefix = prefix.replace('-', "_");
+    match &table.schema {
+        Some(schema) => format!("{prefix}-{schema}-{}-{shard}", table.name),
+        None => format!("{prefix}-{}-{shard}", table.name),
+    }
+}
+
 /// Creates the materialized node state for the given node.
 /// This is used to deferred the creation of the persistent state to a separate task, as we know
 /// it takes a lot of time for large tables.
@@ -791,6 +830,7 @@ async fn initialize_state(
     node_idx: LocalNodeIndex,
     indices: HashSet<Index>,
     base_name: String,
+    legacy_name: String,
     table: Relation,
     unique_keys: Vec<Box<[usize]>>,
     persistence_params: PersistenceParameters,
@@ -820,6 +860,18 @@ async fn initialize_state(
             {
                 let base_name = base_name.clone();
                 tokio::task::spawn_blocking(move || {
+                    if legacy_name != base_name {
+                        match persistence_params.rename_legacy_db(&legacy_name, &base_name) {
+                            Ok(true) => info!(%legacy_name, %base_name, "Renamed base table state"),
+                            Ok(false) => {}
+                            Err(error) => warn!(
+                                %error,
+                                %legacy_name,
+                                %base_name,
+                                "Failed to rename base table state"
+                            ),
+                        }
+                    }
                     PersistentState::new(
                         base_name,
                         Some(table),
@@ -2339,18 +2391,10 @@ impl Domain {
                 | (Some(base), &DurabilityMode::Permanent) => {
                     let node = node_ref.borrow();
                     let node_name = node.name();
-                    let base_name = format!(
-                        "{}-{}{}-{}",
-                        self.persistence_parameters
-                            .db_filename_prefix
-                            .replace('-', "_"),
-                        match &node_name.schema {
-                            Some(schema) => format!("{schema}-"),
-                            _ => "".into(),
-                        },
-                        node_name.name,
-                        self.shard.unwrap_or(0),
-                    );
+                    let prefix = &self.persistence_parameters.db_filename_prefix;
+                    let shard = self.shard.unwrap_or(0);
+                    let base_name = base_table_file_name(prefix, node_name, shard);
+                    let legacy_name = legacy_base_table_file_name(prefix, node_name, shard);
 
                     let persistence_params = self.persistence_parameters.clone();
                     let init_state_tx = self.init_state_tx.clone();
@@ -2368,6 +2412,7 @@ impl Domain {
                             node_idx,
                             index,
                             base_name.clone(),
+                            legacy_name,
                             node_name.clone(),
                             unique_keys,
                             persistence_params,
@@ -5194,5 +5239,45 @@ mod test {
             }
             out.send(fake_addr(), Packet::Spin);
         });
+    }
+
+    fn relation(schema: Option<&str>, name: &str) -> Relation {
+        Relation::new(schema.map(Into::into), name.into())
+    }
+
+    #[test]
+    fn base_table_file_name_keeps_plain_names() {
+        for table in [relation(Some("public"), "t"), relation(None, "t")] {
+            assert_eq!(
+                base_table_file_name("my-prefix", &table, 1),
+                legacy_base_table_file_name("my-prefix", &table, 1),
+            );
+        }
+        assert_eq!(
+            base_table_file_name("my-prefix", &relation(Some("public"), "t"), 1),
+            "my_prefix-public-t-1"
+        );
+    }
+
+    #[test]
+    fn base_table_file_name_escapes_separators() {
+        assert_eq!(
+            base_table_file_name("readyset", &relation(Some("a-b"), "c=d/e"), 0),
+            "readyset-a=2Db-c=3Dd=2Fe-0"
+        );
+    }
+
+    #[test]
+    fn base_table_file_names_are_distinct() {
+        let names = [
+            relation(Some("a-b"), "c"),
+            relation(Some("a"), "b-c"),
+            relation(None, "a-b-c"),
+            relation(Some("a"), "b=2Dc"),
+            relation(Some("a-"), "b"),
+            relation(Some("a"), "-b"),
+        ]
+        .map(|table| base_table_file_name("readyset", &table, 0));
+        assert!(names.iter().all_unique(), "{names:?}");
     }
 }
