@@ -36,7 +36,7 @@ use crate::inline_leading_derived_table::InlineLeadingDerivedTable as _;
 use crate::normalize_right_join::NormalizeRightJoin as _;
 use crate::normalize_subquery_positions::NormalizeSubqueryPositions as _;
 use crate::query_optimization_rewrite::{OptimizationStrategy, QueryOptimizationRewrite};
-use crate::rewrite_utils::standardize_placeholders;
+use crate::rewrite_utils::{standardize_placeholders, trace_pass};
 use crate::shallow::literalize_shallow_prepared;
 use crate::unnest_subqueries::{NonNullSchemaImpl, UnnestSubqueries as _};
 use crate::validate_pipeline_invariants::ValidatePipelineInvariants as _;
@@ -244,41 +244,31 @@ fn rewrite_equivalent_parameters(
     client_params: u16,
 ) -> ReadySetResult<QueryParameters> {
     let span = trace_span!("adapter_rewrites", part = "equivalent_parameters").entered();
+    // `trace_pass!` in this function's dialect.
+    macro_rules! pass {
+        ($($pass:tt)*) => { trace_pass!(flags.dialect, $($pass)*) };
+    }
     trace!(parent: &span, query = %query.display(flags.dialect), "Going to rewrite query placeholders");
 
-    let reordered_placeholders = reorder_numbered_placeholders(query, client_params);
-    trace!(
-        parent: &span,
-        pass="reorder_numbered_placeholders",
-        query = %query.display(flags.dialect),
-        placeholders=?reordered_placeholders
-    );
+    pass!(let reordered_placeholders = reorder_numbered_placeholders(query, client_params));
 
-    let run = autoparameterize::auto_parameterize_query(
+    pass!(let auto_parameterized = auto_parameterize_query(
         query,
         Vec::new(),
         LiteralSlots::default(),
         flags.autoparameterize,
         flags.server_supports_mixed_comparisons,
         false,
-    )?;
-    trace!(
-        parent: &span,
-        pass="auto_parameterize_query",
-        query = %query.display(flags.dialect),
-        auto_parameters=?run.params,
-        canonical_positions=run.slots.positions(),
-    );
+    )?);
 
-    let positions = number_placeholders(query)?;
-    trace!(parent: &span, pass="number_placeholders", query = %query.display(flags.dialect));
+    pass!(let placeholder_count = number_placeholders(query)?);
 
     Ok(QueryParameters {
         dialect: flags.dialect,
         reordered_placeholders,
-        has_user_placeholders: positions > run.params.len(),
-        auto_parameters: run.params,
-        slots: run.slots,
+        has_user_placeholders: placeholder_count > auto_parameterized.params.len(),
+        auto_parameters: auto_parameterized.params,
+        slots: auto_parameterized.slots,
         client_params,
     })
 }
@@ -320,66 +310,50 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
     context: C,
 ) -> ReadySetResult<QueryParameters> {
     let span = trace_span!("adapter_rewrites", part = "equivalent_deep").entered();
+    // `trace_pass!` in this function's dialect.
+    macro_rules! pass {
+        ($($pass:tt)*) => { trace_pass!(flags.dialect, $($pass)*) };
+    }
     trace!(parent: &span, query = %query.display(flags.dialect), "Going to rewrite for deep caching");
 
     let client_params = client_parameter_count(query)?;
     // Settle the placeholder spelling before any pass below reads one, counting the client's
     // parameters first so that count is over the spelling they sent.
-    standardize_placeholders(query)?;
-    trace!(parent: &span, pass="standardize_placeholders", query = %query.display(flags.dialect));
+    pass!(standardize_placeholders(query)?);
     // Runs before every pass that resolves a name: the entry's own name becomes the derived
     // table's alias, so nothing below meets a `WITH` at all.  After the placeholders are
     // numbered, so moving a body carries its bindings with it.
     // What it leaves the server declines; a statement still holding one takes the shallow path.
-    inline_ctes(query, flags.dialect)?;
-    trace!(parent: &span, pass="inline_ctes", query = %query.display(flags.dialect));
-    query.disallow_row(flags.dialect)?;
-    trace!(parent: &span, pass="disallow_row", query = %query.display(flags.dialect));
-    query.validate_window_functions()?;
-    trace!(parent: &span, pass="validate_window_functions", query = %query.display(flags.dialect));
-    query.resolve_schemas(&context)?;
-    trace!(parent: &span, pass="resolve_schemas", query = %query.display(flags.dialect));
-    query.scalar_optimize_expressions(&context);
-    trace!(parent: &span, pass="scalar_optimize_expressions", query = %query.display(flags.dialect));
-    query.expand_stars(&context)?;
-    trace!(parent: &span, pass="expand_stars", query = %query.display(flags.dialect));
-    query.expand_implied_tables(&context)?;
-    trace!(parent: &span, pass="expand_implied_tables", query = %query.display(flags.dialect));
-    query.expand_join_on_using(&context)?;
-    trace!(parent: &span, pass="expand_join_on_using", query = %query.display(flags.dialect));
-    query.normalize_right_join()?;
-    trace!(parent: &span, pass="normalize_right_join", query = %query.display(flags.dialect));
-    let invariants_ok = query.validate_pipeline_invariants(flags.dialect);
-    trace!(parent: &span, pass="validate_pipeline_invariants", query = %query.display(flags.dialect));
+    pass!(inline_ctes(query, flags.dialect)?);
+    pass!(query.disallow_row(flags.dialect)?);
+    pass!(query.validate_window_functions()?);
+    pass!(query.resolve_schemas(&context)?);
+    pass!(query.scalar_optimize_expressions(&context));
+    pass!(query.expand_stars(&context)?);
+    pass!(query.expand_implied_tables(&context)?);
+    pass!(query.expand_join_on_using(&context)?);
+    pass!(query.normalize_right_join()?);
+    pass!(let invariants_ok = query.validate_pipeline_invariants(flags.dialect));
     match invariants_ok {
         Ok(_) => {
-            query.validate_query_semantics(flags.dialect)?;
-            trace!(parent: &span, pass="validate_query_semantics", query = %query.display(flags.dialect));
+            pass!(query.validate_query_semantics(flags.dialect)?);
             let nonnull_schema = NonNullSchemaImpl::from(&context);
-            let wrap_aliases = query.normalize_subquery_positions()?;
-            trace!(parent: &span, pass="normalize_subquery_positions", query = %query.display(flags.dialect));
-            query.rewrite_array_constructors(&context)?;
-            trace!(parent: &span, pass="rewrite_array_constructors", query = %query.display(flags.dialect));
+            pass!(let wrap_aliases = query.normalize_subquery_positions()?);
+            pass!(query.rewrite_array_constructors(&context)?);
             let unique_cols_schema = UniqueColumnsSchemaImpl::from(&context);
-            query.drop_redundant_join(&unique_cols_schema)?;
-            trace!(parent: &span, pass="drop_redundant_join", query = %query.display(flags.dialect));
-            query.inline_leading_derived_table(&unique_cols_schema, &wrap_aliases)?;
-            trace!(parent: &span, pass="inline_leading_derived_table", query = %query.display(flags.dialect));
-            query.unnest_subqueries(&nonnull_schema, &unique_cols_schema)?;
-            trace!(parent: &span, pass="unnest_subqueries", query = %query.display(flags.dialect));
+            pass!(query.drop_redundant_join(&unique_cols_schema)?);
+            pass!(query.inline_leading_derived_table(&unique_cols_schema, &wrap_aliases)?);
+            pass!(query.unnest_subqueries(&nonnull_schema, &unique_cols_schema)?);
             // Flatten the wrapper unnesting left behind.  Inlining here rather than inside
             // derived_tables_rewrite brings the predicate into the same statement as the join
             // while the LEFT-join promotion step can still see it, which is what a decorrelated
             // query needs to reach the plan its own emitted text already produces.
-            query.inline_leading_derived_table_after_unnest(&unique_cols_schema)?;
-            trace!(parent: &span, pass="inline_leading_derived_table_after_unnest", query = %query.display(flags.dialect));
-            query.derived_tables_rewrite(flags.dialect, &unique_cols_schema)?;
-            trace!(parent: &span, pass="derived_tables_rewrite", query = %query.display(flags.dialect));
-            query.query_optimization_rewrite(
+            pass!(query.inline_leading_derived_table_after_unnest(&unique_cols_schema)?);
+            pass!(query.derived_tables_rewrite(flags.dialect, &unique_cols_schema)?);
+            pass!(query.query_optimization_rewrite(
                 &context,
                 OptimizationStrategy::HoistParametrizableFilters,
-            )?;
-            trace!(parent: &span, pass="query_optimization_rewrite", query = %query.display(flags.dialect));
+            )?);
             // Ask the entry validator whether the rewrites emitted something it would have
             // rejected on the way in.  The rewrites reshape the projection, the grouping keys
             // and the join tree, so the statement leaving this block is not the one the
@@ -397,8 +371,7 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
             warn!(parent: &span, error = %e, query = %query.display(flags.dialect), "Pipeline invariants violated, skipping query rewrites");
         }
     }
-    query.order_limit_removal(&context)?;
-    trace!(parent: &span, pass="order_limit_removal", query = %query.display(flags.dialect));
+    pass!(query.order_limit_removal(&context)?);
 
     rewrite_equivalent_parameters(query, flags, client_params)
 }
@@ -446,6 +419,10 @@ pub fn rewrite_for_readyset(
     prev: QueryParameters,
 ) -> ReadySetResult<DfQueryParameters> {
     let span = trace_span!("adapter_rewrites", part = "readyset").entered();
+    // `trace_pass!` in this function's dialect.
+    macro_rules! pass {
+        ($($pass:tt)*) => { trace_pass!(flags.dialect, $($pass)*) };
+    }
     trace!(parent: &span, query = %query.display(flags.dialect), "Going to rewrite query for Readyset");
 
     let QueryParameters {
@@ -484,23 +461,22 @@ pub fn rewrite_for_readyset(
     // The first phase's slots, so a placeholder this walk reaches is still known to have been a
     // literal that phase lifted. This walk also reaches positions the first one did not -- an
     // OFFSET among them -- so its slots are the query's whole canonical space.
-    let AutoParameters {
-        params: auto_parameters,
-        slots,
-    } = autoparameterize::auto_parameterize_query(
+    pass!(let auto_parameterized = auto_parameterize_query(
         query,
         auto_parameters,
         slots,
         flags.autoparameterize,
         flags.server_supports_mixed_comparisons,
         true,
-    )?;
-    trace!(parent: &span, pass="auto_parameterize_query", query = %query.display(flags.dialect), auto_parameters=?auto_parameters, canonical_positions=slots.positions());
+    )?);
+    let AutoParameters {
+        params: auto_parameters,
+        slots,
+    } = auto_parameterized;
     // Unwrap any `AUTOPARAM (EXCLUDE_*)` marker so the final form holds plain literals. Nothing
     // in the product marks literals today; see `autoparam_exclusions`.
     autoparameterize::unwrap_all_preserved(query);
-    let rewritten_in_conditions = collapse_where_in(query, flags.dialect)?;
-    trace!(parent: &span, pass="collapse_where_in", query = %query.display(flags.dialect), rewritten_in_conditions=?rewritten_in_conditions);
+    pass!(let rewritten_in_conditions = collapse_where_in(query, flags.dialect)?);
 
     // Decompose AVG into SUM+COUNT when post-lookup aggregation (PLA) will run.
     //
@@ -515,21 +491,15 @@ pub fn rewrite_for_readyset(
     // DISTINCT + AVG is fine here because the read-path orchestrator runs the
     // HashBased DISTINCT dedup over recomposed AVG values (i.e. after
     // `postprocess_decompositions`), not over raw SUM/COUNT/MIN triples.
-    let post_lookup_decompositions = if needs_pla {
-        let d = decompose_aggregates_for_post_lookup(query, dialect)?;
-        if !d.is_empty() {
-            trace!(parent: &span, pass="decompose_aggregates_for_post_lookup", query = %query.display(flags.dialect), decompositions=?d);
-        }
-        d
-    } else {
-        vec![]
-    };
+    pass!(
+        if needs_pla,
+        let post_lookup_decompositions = decompose_aggregates_for_post_lookup(query, dialect)?
+    );
     // NOTE: query.fields.len() must be taken AFTER decompose_aggregates_for_post_lookup,
     // which appends source columns (e.g. COUNT, MIN) to the SELECT list.
     let post_lookup_plan = PostLookupPlan::new(post_lookup_decompositions, query.fields.len());
 
-    number_placeholders(query)?;
-    trace!(parent: &span, pass="number_placeholders", query = %query.display(flags.dialect), auto_parameters=?auto_parameters);
+    pass!(number_placeholders(query)?);
 
     Ok(DfQueryParameters {
         dialect,

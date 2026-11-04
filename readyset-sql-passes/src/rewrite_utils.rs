@@ -25,6 +25,63 @@ use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::mem;
 
+/// Runs a rewrite pass on a query and traces the query it leaves under the pass's name, as in
+/// `trace_pass!(dialect, query.expand_stars(&context)?)`. The pass is a method on the query or a
+/// function that takes the query first, like `inline_ctes(query, dialect)?`. A trailing `?`
+/// returns the pass's error before the trace.
+///
+/// The pass's result is dropped, unless the pass starts with `let name =`: then `name` holds the
+/// result and the trace logs it too. With `if cond,` first, the pass only runs, and is traced, when
+/// `cond` holds, and otherwise `name` gets its type's default.
+macro_rules! trace_pass {
+    // Runs and traces a pass, and evaluates to its result, which then names the logged field.
+    (@run $dialect:expr, $name:ident, $query:ident . $pass:ident $args:tt $($try:tt)?) => {{
+        let $name = $query.$pass $args $($try)?;
+        trace_pass!(@trace $dialect, $query, $pass, $name = ?$name);
+        $name
+    }};
+    (@run $dialect:expr, $name:ident, $pass:ident ($query:ident $($args:tt)*) $($try:tt)?) => {{
+        let $name = $pass($query $($args)*) $($try)?;
+        trace_pass!(@trace $dialect, $query, $pass, $name = ?$name);
+        $name
+    }};
+    // Runs and traces a pass, and drops its result, which may still borrow the query.
+    (@run $dialect:expr, $query:ident . $pass:ident $args:tt $($try:tt)?) => {{
+        $query.$pass $args $($try)?;
+        trace_pass!(@trace $dialect, $query, $pass);
+    }};
+    (@run $dialect:expr, $pass:ident ($query:ident $($args:tt)*) $($try:tt)?) => {{
+        $pass($query $($args)*) $($try)?;
+        trace_pass!(@trace $dialect, $query, $pass);
+    }};
+    (@trace $dialect:expr, $query:ident, $pass:ident $(, $($field:tt)*)?) => {
+        tracing::trace!(
+            pass = stringify!($pass),
+            query = %$query.display($dialect)
+            $(, $($field)*)?
+        )
+    };
+    ($dialect:expr, if $cond:expr, let $name:ident = $($pass:tt)*) => {
+        let $name = if $cond {
+            trace_pass!(@run $dialect, $name, $($pass)*)
+        } else {
+            Default::default()
+        };
+    };
+    ($dialect:expr, if $cond:expr, $($pass:tt)*) => {
+        if $cond {
+            trace_pass!(@run $dialect, $($pass)*)
+        }
+    };
+    ($dialect:expr, let $name:ident = $($pass:tt)*) => {
+        let $name = trace_pass!(@run $dialect, $name, $($pass)*);
+    };
+    ($dialect:expr, $($pass:tt)*) => {
+        trace_pass!(@run $dialect, $($pass)*)
+    };
+}
+pub(crate) use trace_pass;
+
 /// Gate for LIMIT-preservation in uncorrelated FROM-subqueries and
 /// uncorrelated LATERAL bodies.  When `true` (the default), the TOP-K
 /// rewrite is skipped for those positions: LIMIT/ORDER stay on the

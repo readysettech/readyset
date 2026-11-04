@@ -76,6 +76,7 @@ pub use crate::resolve_schemas::ResolveSchemas;
 pub use crate::resolve_schemas::ResolveSchemasContext;
 pub use crate::rewrite_between::RewriteBetween;
 pub use crate::rewrite_utils::is_aggregated_expr;
+use crate::rewrite_utils::trace_pass;
 pub use crate::star_expansion::StarExpansion;
 pub use crate::star_expansion::StarExpansionContext;
 pub use crate::strip_literals::{SelectStatementSkeleton, StripLiterals};
@@ -232,41 +233,34 @@ impl Rewrite for CreateTableStatement {
 
 impl Rewrite for SelectStatement {
     fn rewrite<C: RewriteContext>(&mut self, context: C) -> ReadySetResult<&mut Self> {
-        let span = trace_span!("server_rewrites").entered();
+        let _span = trace_span!("server_rewrites").entered();
         let query_name = context.query_name().unwrap_or("unknown");
         let sql_dialect = context.dialect().into();
+        // `trace_pass!` in this function's dialect.
+        macro_rules! pass {
+            ($($pass:tt)*) => { trace_pass!(sql_dialect, $($pass)*) };
+        }
         trace!(query_pre = %self.display(sql_dialect), "Rewriting query");
 
         // Substitute each `WITH` entry at the reference that reads it, before any pass below
         // resolves a name, so nothing below meets a `WITH` at all.
-        let with_clause_left = inline_ctes(self, sql_dialect)?;
-        trace!(parent: &span, pass="inline_ctes", query = %self.display(sql_dialect));
+        pass!(let with_clause_left = inline_ctes(self, sql_dialect)?);
         // A `RECURSIVE`-marked list is left where it was written, and no pass below resolves an
         // entry name, so a statement still holding one is declined here.
         if with_clause_left {
             unsupported!("common table expression that cannot be inlined is not supported");
         }
 
-        self.rewrite_between();
-        trace!(parent: &span, pass="rewrite_between", query = %self.display(sql_dialect));
-        self.disallow_row(sql_dialect)?;
-        trace!(parent: &span, pass="disallow_row", query = %self.display(sql_dialect));
-        self.validate_window_functions()?;
-        trace!(parent: &span, pass="validate_window_functions", query = %self.display(sql_dialect));
-        self.scalar_optimize_expressions(&context);
-        trace!(parent: &span, pass="scalar_optimize_expressions", query = %self.display(sql_dialect));
-        self.resolve_schemas(&context)?;
-        trace!(parent: &span, pass="resolve_schemas", query = %self.display(sql_dialect));
-        self.expand_stars(&context)?;
-        trace!(parent: &span, pass="expand_stars", query = %self.display(sql_dialect));
-        self.expand_implied_tables(&context)?;
-        trace!(parent: &span, pass="expand_implied_tables", query = %self.display(sql_dialect));
-        self.remove_numeric_field_references()?;
-        trace!(parent: &span, pass="remove_numeric_field_references", query = %self.display(sql_dialect));
-        self.normalize_topk_with_aggregate(&context)?;
-        trace!(parent: &span, pass="normalize_topk_with_aggregate", query = %self.display(sql_dialect));
-        self.rewrite_table_aliases(query_name, context.table_alias_rewrites())?;
-        trace!(parent: &span, pass="rewrite_table_aliases", query = %self.display(sql_dialect));
+        pass!(self.rewrite_between());
+        pass!(self.disallow_row(sql_dialect)?);
+        pass!(self.validate_window_functions()?);
+        pass!(self.scalar_optimize_expressions(&context));
+        pass!(self.resolve_schemas(&context)?);
+        pass!(self.expand_stars(&context)?);
+        pass!(self.expand_implied_tables(&context)?);
+        pass!(self.remove_numeric_field_references()?);
+        pass!(self.normalize_topk_with_aggregate(&context)?);
+        pass!(self.rewrite_table_aliases(query_name, context.table_alias_rewrites())?);
 
         trace!(query_post = %self.display(sql_dialect), "Query rewritten");
         Ok(self)
