@@ -1366,7 +1366,7 @@ WHERE p.pn IS NOT NULL
       AND t.pn IS NOT NULL -- guarantees RHS first item non-null
 );"#;
     let expected_text = r#"SELECT "p"."pn" FROM "p" AS "p" LEFT OUTER JOIN
-        (SELECT "t"."pn" AS "pn", "t"."jn" AS "jn" FROM "spj" AS "t" WHERE ("t"."pn" IS NOT NULL)) AS "GNL" ON
+        (SELECT DISTINCT "t"."pn" AS "pn", "t"."jn" AS "jn" FROM "spj" AS "t" WHERE ("t"."pn" IS NOT NULL)) AS "GNL" ON
         (("GNL"."jn" = "p"."jn") AND ("p"."pn" = "GNL"."pn")) WHERE (("p"."pn" IS NOT NULL) AND ("GNL"."pn" IS NULL));"#;
     test_it("test40", original_text, expected_text);
 }
@@ -2900,7 +2900,7 @@ WHERE
             DataTypes1.RowNum = DataTypes.RowNum
     );"#;
     let expected_text = r#"SELECT "datatypes"."rownum" FROM "datatypes" LEFT OUTER JOIN
-        (SELECT avg("datatypes1"."rownum") OVER(PARTITION BY "datatypes1"."rownum") AS "avg_w",
+        (SELECT DISTINCT avg("datatypes1"."rownum") OVER(PARTITION BY "datatypes1"."rownum") AS "avg_w",
         "datatypes1"."rownum" AS "rownum" FROM "datatypes1") AS "GNL" ON
         (("GNL"."rownum" = "datatypes"."rownum") AND ("datatypes"."rownum" = "GNL"."avg_w"))
         WHERE ("GNL"."avg_w" IS NULL)"#;
@@ -3190,7 +3190,7 @@ WHERE
     ) AS z
   );"#;
     let expected_text = r#"SELECT "spj"."qty" FROM "spj" LEFT OUTER JOIN
-        (SELECT "z"."sm" AS "sm", "z"."pn" AS "pn" FROM (SELECT "INNER"."sm" AS "sm", "INNER"."pn" AS "pn" FROM
+        (SELECT DISTINCT "z"."sm" AS "sm", "z"."pn" AS "pn" FROM (SELECT "INNER"."sm" AS "sm", "INNER"."pn" AS "pn" FROM
         (SELECT "INNER"."sm" AS "sm", "INNER"."pn" AS "pn", ROW_NUMBER() OVER(PARTITION BY "INNER"."pn" ORDER BY "INNER"."sm" DESC NULLS FIRST) AS "__rn"
         FROM (SELECT sum("t"."weight") AS "sm", "t"."pn" AS "pn" FROM "p" AS "t" GROUP BY "t"."jn", "t"."pn") AS "INNER") AS "INNER"
         WHERE ("INNER"."__rn" <= 3)) AS "z") AS "GNL" ON (("GNL"."pn" = "spj"."pn") AND ("spj"."qty" = "GNL"."sm"))
@@ -3895,7 +3895,7 @@ WHERE spj.qty NOT IN (
   WHERE p.pn = spj.pn
 );"#;
     let expected_text = r#"SELECT "spj"."qty" FROM "spj" LEFT OUTER JOIN
-        (SELECT "p"."weight" AS "weight", "p"."pn" AS "pn" FROM "p") AS "GNL" ON
+        (SELECT DISTINCT "p"."weight" AS "weight", "p"."pn" AS "pn" FROM "p") AS "GNL" ON
         (("GNL"."pn" = "spj"."pn") AND ("spj"."qty" = "GNL"."weight"))
         WHERE ("GNL"."weight" IS NULL)"#;
     test_it("test128", original_text, expected_text);
@@ -3997,7 +3997,7 @@ WHERE t1.i NOT IN (
   WHERE x.rn = 1 AND x.t = t1.t
 );"#;
     let expected_text = r#"SELECT "t1"."i" FROM "test1" AS "t1" LEFT OUTER JOIN
-        (SELECT "x"."i" AS "i", "x"."t" AS "t" FROM
+        (SELECT DISTINCT "x"."i" AS "i", "x"."t" AS "t" FROM
         (SELECT "t2"."i", ROW_NUMBER() OVER(PARTITION BY "t2"."t" ORDER BY "t2"."i" ASC NULLS LAST) AS "rn", "t2"."t"
         FROM "test2" AS "t2") AS "x" WHERE ("x"."rn" = 1)) AS "GNL" ON (("GNL"."t" = "t1"."t") AND ("t1"."i" = "GNL"."i"))
         LEFT OUTER JOIN (SELECT DISTINCT "NP_3VL"."present_" AS "present_", "NP_3VL"."t" AS "t"
@@ -4052,7 +4052,7 @@ WHERE
    spj.pn NOT IN (SELECT spj.sn FROM spj WHERE s.pn = spj.pn);
 "#;
     let expected_text = r#"SELECT count(*) FROM "s" JOIN "spj" ON ("s"."sn" = "spj"."sn") LEFT OUTER JOIN
-        (SELECT "spj"."sn" AS "sn", "spj"."pn" AS "pn" FROM "spj") AS "GNL" ON (("s"."pn" = "GNL"."pn") AND ("s"."sn" = "GNL"."sn"))
+        (SELECT DISTINCT "spj"."sn" AS "sn", "spj"."pn" AS "pn" FROM "spj") AS "GNL" ON (("s"."pn" = "GNL"."pn") AND ("s"."sn" = "GNL"."sn"))
         LEFT OUTER JOIN (SELECT DISTINCT "NP_3VL"."present_" AS "present_", "NP_3VL"."pn" AS "pn"
         FROM (SELECT 1 AS "present_", "spj"."sn" AS "sn", "spj"."pn" AS "pn" FROM "spj") AS "NP_3VL"
         WHERE ("NP_3VL"."sn" IS NULL)) AS "NP_3VL" ON ("s"."pn" = "NP_3VL"."pn")
@@ -4121,7 +4121,7 @@ WHERE 'X' NOT IN (
   WHERE p.pn = spj.pn
 );"#;
     let expected_text = r#"SELECT "spj"."sn" FROM "spj" LEFT OUTER JOIN
-        (SELECT CASE WHEN (1 = 1) THEN NULL ELSE "p"."city" END AS "v", "p"."pn" AS "pn" FROM "p") AS "GNL"
+        (SELECT DISTINCT CASE WHEN (1 = 1) THEN NULL ELSE "p"."city" END AS "v", "p"."pn" AS "pn" FROM "p") AS "GNL"
         ON (("GNL"."pn" = "spj"."pn") AND ("GNL"."v" = 'X')) LEFT OUTER JOIN
         (SELECT DISTINCT "NP_3VL"."present_" AS "present_", "NP_3VL"."pn" AS "pn"
         FROM (SELECT 1 AS "present_", CASE WHEN (1 = 1) THEN NULL ELSE "p"."city" END AS "v", "p"."pn" AS "pn" FROM "p") AS "NP_3VL"
@@ -4260,7 +4260,7 @@ WHERE 'Y' NOT IN (
   WHERE p.pn = spj.pn
 );"#;
     let expected_text = r#"SELECT "spj"."sn" FROM "spj" LEFT OUTER JOIN
-        (SELECT CASE WHEN (1 = 1) THEN NULL ELSE "p"."city" END AS "city", "p"."pn" AS "pn" FROM "p") AS "GNL"
+        (SELECT DISTINCT CASE WHEN (1 = 1) THEN NULL ELSE "p"."city" END AS "city", "p"."pn" AS "pn" FROM "p") AS "GNL"
         ON (("GNL"."pn" = "spj"."pn") AND ("GNL"."city" = 'Y')) LEFT OUTER JOIN
         (SELECT DISTINCT "NP_3VL"."present_" AS "present_", "NP_3VL"."pn" AS "pn" FROM
         (SELECT 1 AS "present_", CASE WHEN (1 = 1) THEN NULL ELSE "p"."city" END AS "city", "p"."pn" AS "pn" FROM "p") AS "NP_3VL"
@@ -6703,7 +6703,7 @@ fn test244() {
 fn test245() {
     let original_text = r#"SELECT spj.sn FROM spj WHERE spj.qty NOT IN (SELECT p.weight FROM p);"#;
     let expected_text = r#"SELECT "spj"."sn" FROM "spj" LEFT OUTER JOIN
-    (SELECT "p"."weight" AS "weight" FROM "p") AS "GNL" ON ("spj"."qty" = "GNL"."weight")
+    (SELECT DISTINCT "p"."weight" AS "weight" FROM "p") AS "GNL" ON ("spj"."qty" = "GNL"."weight")
     WHERE ("GNL"."weight" IS NULL)"#;
     test_it("test245", original_text, expected_text);
 }
@@ -6716,7 +6716,7 @@ WHERE spj.qty NOT IN (
 SELECT CASE WHEN p.color = 'RED' THEN NULL ELSE p.weight END
 FROM p
 );"#;
-    let expected_text = r#"SELECT "spj"."sn" FROM "spj" LEFT OUTER JOIN (SELECT CASE WHEN ("p"."color" = 'RED')
+    let expected_text = r#"SELECT "spj"."sn" FROM "spj" LEFT OUTER JOIN (SELECT DISTINCT CASE WHEN ("p"."color" = 'RED')
     THEN NULL ELSE "p"."weight" END AS "CASE WHEN (""p"".""color"" = 'RED') THEN NULL ELSE ""p"".""weight"" END" FROM "p") AS "GNL"
     ON ("spj"."qty" = "GNL"."CASE WHEN (""p"".""color"" = 'RED') THEN NULL ELSE ""p"".""weight"" END") LEFT OUTER JOIN
     (SELECT DISTINCT "NP_3VL"."present_" AS "present_" FROM (SELECT 1 AS "present_", CASE WHEN ("p"."color" = 'RED')
@@ -6737,7 +6737,7 @@ WHERE spj.qty NOT IN (
     FROM p
 );
 "#;
-    let expected_text = r#"SELECT "spj"."sn" FROM "spj" LEFT OUTER JOIN (SELECT CASE WHEN ("p"."color" = 'RED')
+    let expected_text = r#"SELECT "spj"."sn" FROM "spj" LEFT OUTER JOIN (SELECT DISTINCT CASE WHEN ("p"."color" = 'RED')
     THEN NULL ELSE "p"."weight" END AS "CASE WHEN (""p"".""color"" = 'RED') THEN NULL ELSE ""p"".""weight"" END" FROM "p") AS "GNL"
     ON ("spj"."qty" = "GNL"."CASE WHEN (""p"".""color"" = 'RED') THEN NULL ELSE ""p"".""weight"" END") LEFT OUTER JOIN
     (SELECT DISTINCT "NP_3VL"."present_" AS "present_" FROM (SELECT 1 AS "present_", CASE WHEN ("p"."color" = 'RED')
@@ -6758,7 +6758,7 @@ WHERE spj.qty NOT IN (
   OFFSET 1000000
 );
 "#;
-    let expected_text = r#"SELECT "spj"."sn" FROM "spj" LEFT OUTER JOIN (SELECT "INNER"."weight" AS "weight"
+    let expected_text = r#"SELECT "spj"."sn" FROM "spj" LEFT OUTER JOIN (SELECT DISTINCT "INNER"."weight" AS "weight"
     FROM (SELECT "p"."weight" AS "weight", ROW_NUMBER() OVER() AS "__rn" FROM "p") AS "INNER"
     WHERE ("INNER"."__rn" > 1000000)) AS "GNL" ON ("spj"."qty" = "GNL"."weight") WHERE ("GNL"."weight" IS NULL)"#;
     test_it("test248", original_text, expected_text);
@@ -6780,7 +6780,7 @@ WHERE spj.qty NOT IN (
     // - GNL: RN wrapper + WHERE __rn > 1000000, projects the CASE expr
     // - NP_3VL: DISTINCT present_ over the same offset-applied RHS, filtered by CASE expr IS NULL
     // - WHERE: (GNL.case_expr IS NULL) AND (NP_3VL.present_ IS NULL)
-    let expected_text = r#"SELECT "spj"."sn" FROM "spj" LEFT OUTER JOIN (SELECT
+    let expected_text = r#"SELECT "spj"."sn" FROM "spj" LEFT OUTER JOIN (SELECT DISTINCT
     "INNER"."CASE WHEN (""p"".""color"" = 'RED') THEN NULL ELSE ""p"".""weight"" END" AS
     "CASE WHEN (""p"".""color"" = 'RED') THEN NULL ELSE ""p"".""weight"" END"
     FROM (SELECT CASE WHEN ("p"."color" = 'RED') THEN NULL ELSE "p"."weight" END
@@ -7746,17 +7746,12 @@ fn not_in_null_probe_belongs_to_its_column() {
     );
 }
 
-/// A guard whose left side is provably non-null asks for no existence probe of its own, but
-/// an earlier guard over the same RHS may already have put one in the statement.  The entry
-/// feeding the later anti-join then reads a table a probe reads too, so it keeps set
-/// semantics.  This fails if the guard reports what it asked for instead of what is there.
-///
-/// `spj`.`pn` is nullable and `spj`.`qty` is NOT NULL in this schema, so the first predicate
-/// installs the existence probe and the second is the one that asks for none.
+/// Two NOT IN predicates over one table, one with a nullable left side, keep set semantics on
+/// the entry the NOT NULL side feeds.  `spj`.`pn` is nullable and `spj`.`qty` is NOT NULL here.
 #[test]
-fn not_in_reports_an_existence_probe_an_earlier_guard_left() {
+fn nullable_and_non_null_not_in_entries_over_one_table_keep_set_semantics() {
     let out = rewrite(
-        "existence_probe_from_earlier_guard",
+        "nullable_and_non_null_not_in_entries",
         r#"SELECT "spj"."sn" FROM "spj"
            WHERE "spj"."pn" NOT IN (SELECT "p"."pn" FROM "p")
              AND "spj"."qty" NOT IN (SELECT "p"."pn" FROM "p")"#,
@@ -7767,6 +7762,67 @@ fn not_in_reports_an_existence_probe_an_earlier_guard_left() {
             r#"(SELECT DISTINCT "p"."pn" AS "pn" FROM "p") AS "GNL1" ON ("spj"."qty" = "GNL1"."pn")"#
         ),
         "the entry the later guard feeds keeps set semantics:\n{out}"
+    );
+}
+
+/// Two NOT IN predicates over one table, each with a NOT NULL left side and a NOT NULL RHS
+/// column, emit no probe.  Each entry reads the table the other entry reads, so both keep set
+/// semantics.  `spj`.`qty`, `p`.`weight` and `p`.`city` are NOT NULL in this schema.
+#[test]
+fn two_not_null_not_in_entries_over_one_table_keep_set_semantics() {
+    test_it(
+        "two_not_null_not_in_entries",
+        r#"SELECT "spj"."sn" FROM "spj"
+           WHERE "spj"."qty" NOT IN (SELECT "p"."weight" FROM "p")
+             AND "spj"."qty" NOT IN (SELECT "p"."city" FROM "p")"#,
+        r#"SELECT "spj"."sn" FROM "spj"
+           LEFT OUTER JOIN (SELECT DISTINCT "p"."weight" AS "weight" FROM "p") AS "GNL"
+           ON ("spj"."qty" = "GNL"."weight")
+           LEFT OUTER JOIN (SELECT DISTINCT "p"."city" AS "city" FROM "p") AS "GNL1"
+           ON ("spj"."qty" = "GNL1"."city")
+           WHERE (("GNL"."weight" IS NULL) AND ("GNL1"."city" IS NULL))"#,
+    );
+}
+
+/// A NOT EXISTS entry projects a literal, so it has a node of its own and needs no set semantics,
+/// even beside a NOT IN whose probes read the same table.  `spj`.`pn` and `p`.`pn` are nullable.
+#[test]
+fn not_exists_entry_projecting_a_literal_needs_no_set_semantics() {
+    test_it(
+        "not_exists_entry_projecting_a_literal",
+        r#"SELECT "spj"."sn" FROM "spj"
+           WHERE NOT EXISTS (SELECT 1 FROM "p" WHERE "p"."pn" = "spj"."jn")
+             AND "spj"."pn" NOT IN (SELECT "p"."pn" FROM "p")"#,
+        r#"SELECT "spj"."sn" FROM "spj"
+           LEFT OUTER JOIN (SELECT 1 AS "present_", "p"."pn" AS "pn" FROM "p") AS "GNL"
+           ON ("GNL"."pn" = "spj"."jn")
+           LEFT OUTER JOIN (SELECT DISTINCT "p"."pn" AS "pn" FROM "p") AS "GNL1"
+           ON ("spj"."pn" = "GNL1"."pn")
+           LEFT OUTER JOIN (SELECT DISTINCT "NP_3VL"."present_" AS "present_"
+             FROM (SELECT 1 AS "present_", "p"."pn" AS "pn" FROM "p") AS "NP_3VL"
+             WHERE ("NP_3VL"."pn" IS NULL)) AS "NP_3VL"
+           LEFT OUTER JOIN (SELECT DISTINCT 1 AS "present_" FROM "p") AS "EP_3VL"
+           WHERE ((("GNL"."present_" IS NULL) AND ("GNL1"."pn" IS NULL))
+             AND CASE WHEN (("spj"."pn" IS NOT NULL) AND ("NP_3VL"."present_" IS NULL)) THEN TRUE
+                 ELSE ("EP_3VL"."present_" IS NULL) END)"#,
+    );
+}
+
+/// A NOT IN entry that groups without aggregating has a node of its own and needs no set
+/// semantics.  The duplicate-sensitive window function keeps its GROUP BY in place.
+#[test]
+fn grouped_window_not_in_entry_needs_no_set_semantics() {
+    test_it(
+        "grouped_window_not_in_entry",
+        r#"SELECT "spj"."sn" FROM "spj"
+           WHERE "spj"."qty" NOT IN (SELECT row_number() OVER (ORDER BY "p"."weight") FROM "p"
+                                     GROUP BY "p"."weight", "p"."city")"#,
+        r#"SELECT "spj"."sn" FROM "spj"
+           LEFT OUTER JOIN (SELECT ROW_NUMBER() OVER(ORDER BY "p"."weight" ASC NULLS LAST)
+               AS "ROW_NUMBER() OVER(ORDER BY ""p"".""weight"" ASC NULLS LAST)"
+             FROM "p" GROUP BY "p"."weight", "p"."city") AS "GNL"
+           ON ("spj"."qty" = "GNL"."ROW_NUMBER() OVER(ORDER BY ""p"".""weight"" ASC NULLS LAST)")
+           WHERE ("GNL"."ROW_NUMBER() OVER(ORDER BY ""p"".""weight"" ASC NULLS LAST)" IS NULL)"#,
     );
 }
 

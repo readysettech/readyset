@@ -16,12 +16,11 @@ use crate::rewrite_utils::{
     extract_aggregate_fallback_for_expr, extract_correlation_keys, find_group_by_key,
     find_rhs_join_clause, for_each_window_function, get_from_item_reference_name,
     get_select_item_alias, get_unique_alias, has_alias, is_aggregate_only_without_group_by,
-    is_aggregated_expr, is_aggregated_select, is_aggregation_or_grouped, is_literal_one,
-    is_literal_positive, is_literal_zero, make_first_field_ref_name,
-    move_correlated_constraints_from_join_to_where, partition_correlated_predicates,
-    preserve_uncorrelated_top_k, project_statement_columns_if, resolve_field_expr_by_alias,
-    resolve_group_by_exprs, rewrite_top_k_in_place, rewrite_top_k_in_place_with_partition,
-    split_expr_mut,
+    is_aggregated_expr, is_aggregated_select, is_literal_one, is_literal_positive, is_literal_zero,
+    make_first_field_ref_name, move_correlated_constraints_from_join_to_where,
+    partition_correlated_predicates, preserve_uncorrelated_top_k, project_statement_columns_if,
+    resolve_field_expr_by_alias, resolve_group_by_exprs, rewrite_top_k_in_place,
+    rewrite_top_k_in_place_with_partition, split_expr_mut,
 };
 use crate::unnest_subqueries_3vl::{
     ProbeRegistry, RhsContext, SelectList3vlFlags, SelectList3vlInput,
@@ -1972,28 +1971,18 @@ pub(crate) fn split_on_for_rhs_against_preceding_lhs(
         fully_supported,
     }
 }
-/// Puts set semantics back on the entry feeding the anti-join at `index`.
-///
-/// `join_derived_table` drops them, because the left-null filter alone enforces anti-join
-/// semantics and they are redundant for the entry's result.  They are not redundant for its
-/// shape once an existence probe reads the same table: without a node of its own the entry is a
-/// pass-through, is flattened away, and the join reads the base table the probe is also reading.
-/// An entry that already aggregates has a node of its own and needs nothing.
-fn restore_set_semantics(stmt: &mut SelectStatement, index: usize) -> ReadySetResult<()> {
-    let Some(JoinClause {
-        right: JoinRightSide::Table(table_expr),
-        ..
-    }) = stmt.join.get_mut(index)
-    else {
-        internal!("the anti-join should still be where it was pushed");
-    };
-    let TableExprInner::Subquery(entry) = &mut table_expr.inner else {
-        internal!("an anti-join's entry is a derived table");
-    };
-    if !is_aggregation_or_grouped(entry)? {
-        entry.distinct = true;
-    }
-    Ok(())
+/// Whether any field of `stmt` is a bare literal.  A projection carrying a literal keeps state of
+/// its own, so the entry already has a node between its base table and the join.
+fn projects_a_literal(stmt: &SelectStatement) -> bool {
+    stmt.fields.iter().any(|field| {
+        matches!(
+            field,
+            FieldDefinitionExpr::Expr {
+                expr: Expr::Literal(_),
+                ..
+            }
+        )
+    })
 }
 
 pub(crate) fn join_derived_table(
@@ -2109,10 +2098,15 @@ pub(crate) fn join_derived_table(
             constraint: join_expr.map_or_else(|| JoinConstraint::Empty, JoinConstraint::On),
         },
         DeriveTableJoinKind::AntiJoin => {
-            if join_expr.is_some() {
-                // `DISTINCT` is unnecessary for anti-join with ON; the left-null filter enforces
-                // semi/anti semantics.  Where an existence probe goes on to read the same table,
-                // the caller puts it back: see `unnest_subqueries_in_where`.
+            // The left-null filter enforces anti-join semantics, so set semantics never change the
+            // anti-join's result.  They keep the entry a node of its own, so it never flattens into
+            // a join on a base table another join also reads.  An entry that aggregates, groups or
+            // projects a literal already has a node of its own and needs none.
+            if join_expr.is_some()
+                && (is_aggregated_select(derived_table_stmt)?
+                    || derived_table_stmt.group_by.is_some()
+                    || projects_a_literal(derived_table_stmt))
+            {
                 derived_table_stmt.distinct = false;
             }
             add_to_where = and_predicates_skip_true(
@@ -2403,19 +2397,9 @@ fn unnest_subqueries_in_where<U: UniqueColumnsSchema>(
                 DeriveTableJoinKind::Join(join_op)
             },
         )? {
-            // The anti-join is the clause `join_derived_table` just pushed.  Its index is taken
-            // before the guard runs, which pushes probe joins of its own.
-            let anti_join = stmt.join.len() - 1;
             if let Some(apply_3vl_guard) = apply_3vl_guard
-                && let Some((guard_expr, emitted)) = apply_3vl_guard(stmt, ctx)?
+                && let Some(guard_expr) = apply_3vl_guard(stmt, ctx)?
             {
-                // An existence probe reads every row of the group, so it reads the same base
-                // table rows the entry does.  Set semantics keep a node between the two, which
-                // is the shape the engine maintains correctly; without one the entry is a
-                // pass-through, is flattened away, and the join reads the base table directly.
-                if emitted.existence {
-                    restore_set_semantics(stmt, anti_join)?;
-                }
                 add_to_where = and_predicates_skip_true(add_to_where, guard_expr);
             }
             if let Some(add_to_where) = add_to_where {

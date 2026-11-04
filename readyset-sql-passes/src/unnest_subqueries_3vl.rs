@@ -374,7 +374,7 @@ pub(crate) fn add_3vl_for_not_in_where_subquery(
     preserved_rhs_stmt: SelectStatement,
     rhs_ctx: RhsContext,
     probes: &mut ProbeRegistry,
-) -> ReadySetResult<(Expr, EmittedProbes)> {
+) -> ReadySetResult<Expr> {
     // We only need NP unless LHS can be NULL (EP used only then).
     let need_np = !rhs_ctx.is_null_free();
     let need_ep = false;
@@ -398,16 +398,9 @@ pub(crate) fn add_3vl_for_not_in_where_subquery(
         construct_null_check_expr(has_null_present, true)
     };
 
-    // If LHS is provably non-null, the guard is just `rhs_not_null`. This guard asks for no
-    // existence probe of its own, but an earlier guard over the same RHS may already have put
-    // one in the statement, and the caller has to know what reads this entry's table.
+    // If LHS is provably non-null, the guard is just `rhs_not_null`
     if is_lhs_null_free {
-        return Ok((
-            rhs_not_null,
-            EmittedProbes {
-                existence: info.non_empty.is_some(),
-            },
-        ));
+        return Ok(rhs_not_null);
     }
 
     // Otherwise we also need EP for the (… OR is_empty) branch — upgrade lazily.
@@ -430,26 +423,13 @@ pub(crate) fn add_3vl_for_not_in_where_subquery(
     // so neither is ever NULL and the two spellings agree on every input, in any context. The
     // engine mishandles the disjunctive shape over a leading derived table (REA-6929); this
     // encoding keeps the decorrelation correct while that stands.
-    Ok((
-        Expr::CaseWhen {
-            branches: vec![CaseWhenBranch {
-                condition: lhs_matches,
-                body: Expr::Literal(true.into()),
-            }],
-            else_expr: Some(Box::new(rhs_is_empty)),
-        },
-        EmittedProbes { existence: true },
-    ))
-}
-
-/// Which probes a guard put in the statement, for a caller that has to know what now reads the
-/// same table the subquery does.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct EmittedProbes {
-    /// Whether an existence probe for this RHS is in the statement.  Both probe kinds scan the
-    /// entry\'s table -- the null-present filter sits above an unfiltered scan -- so this is
-    /// narrower than "something reads it"; REA-7085 covers widening it.
-    pub(crate) existence: bool,
+    Ok(Expr::CaseWhen {
+        branches: vec![CaseWhenBranch {
+            condition: lhs_matches,
+            body: Expr::Literal(true.into()),
+        }],
+        else_expr: Some(Box::new(rhs_is_empty)),
+    })
 }
 
 fn construct_3vl_case_expr(
