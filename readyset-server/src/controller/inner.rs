@@ -47,7 +47,7 @@ use replicators::{ControllerMessage, ReplicatorMessage};
 use reqwest::Url;
 use slotmap::{DefaultKey, Key, KeyData, SlotMap};
 use tokio::select;
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::sync::{watch, Mutex};
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
@@ -108,25 +108,65 @@ pub struct Leader {
     /// A channel that will be notified if a background task for the controller fails
     pub(super) background_task_failed: mpsc::Sender<ReadySetError>,
     pub(super) running_recovery: Option<watch::Receiver<ReadySetResult<()>>>,
-    /// This channel is for sending events to the replicator.
-    pub(super) replicator_tx: UnboundedSender<ReplicatorMessage>,
     /// This channel is for sending events to the controller.
     pub(super) controller_tx: UnboundedSender<ControllerMessage>,
     /// The currently known state for all tables.
     table_statuses: TableStatusState,
     /// Any TableStatus updates sent here will update this controller's state machine.
     table_status_tx: UnboundedSender<(Relation, TableStatus)>,
-    /// Handle to the running replicator task, used to stop it for failover.
-    pub(super) replicator_handle: Option<JoinHandle<()>>,
-    /// Dedicated stop signal for the replicator task (separate from process shutdown).
-    pub(super) replicator_stop_tx: Option<tokio::sync::watch::Sender<bool>>,
-    /// Shared replication lag status, written by the replicator's background task.
-    pub(super) replication_lag_status: SharedLagStatus,
+    /// The running replication task, if replication is started.
+    pub(super) replicator: Option<ReplicationChannel>,
     /// The CDC server list the replication task walks. Replaced in place by CHANGE CDC so a
     /// running task sees the new failover candidates.
     pub(super) cdc_server_list: Arc<RwLock<Option<UpstreamServers>>>,
+}
+
+/// A running replication task and the state it shares with the leader.
+#[derive(Debug)]
+pub(super) struct ReplicationChannel {
+    /// This channel is for sending events to the replicator.
+    tx: UnboundedSender<ReplicatorMessage>,
+    /// Handle to the running replicator task, used to stop it for failover.
+    handle: JoinHandle<()>,
+    /// Dedicated stop signal for the replicator task (separate from process shutdown).
+    stop_tx: watch::Sender<bool>,
+    /// Shared replication lag status, written by the replicator's background task.
+    lag_status: SharedLagStatus,
     /// The `host:port` of the CDC server replication is currently using.
-    pub(super) active_cdc_server: Arc<RwLock<Option<String>>>,
+    task_active_cdc_server: Arc<RwLock<Option<String>>>,
+}
+
+impl ReplicationChannel {
+    /// Return the `host:port` of the CDC server replication is currently using.
+    pub(super) fn active_cdc_server(&self) -> Option<String> {
+        self.task_active_cdc_server
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Signal the task to stop and wait up to `timeout` for it to finish. Abort the task if it
+    /// is still running after `timeout`.
+    pub(super) async fn stop(self, timeout: Duration) -> ReadySetResult<()> {
+        let _ = self.stop_tx.send(true);
+
+        let abort = self.handle.abort_handle();
+        match tokio::time::timeout(timeout, self.handle).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => {
+                error!(%e, "Replicator task panicked during shutdown");
+                Err(ReadySetError::Internal(format!(
+                    "replicator panicked during shutdown: {e}"
+                )))
+            }
+            Err(_) => {
+                abort.abort();
+                Err(ReadySetError::Internal(
+                    "replicator did not stop within timeout; aborted".into(),
+                ))
+            }
+        }
+    }
 }
 
 impl Leader {
@@ -135,7 +175,6 @@ impl Leader {
     pub(super) async fn start(
         &mut self,
         controller_tx: UnboundedSender<ControllerMessage>,
-        replicator_rx: UnboundedReceiver<ReplicatorMessage>,
         telemetry_sender: TelemetrySender,
         shutdown_rx: ShutdownReceiver,
     ) {
@@ -160,14 +199,14 @@ impl Leader {
 
         // When the controller becomes the leader, we need to read updates
         // from the binlog.
-        self.start_replication_task(
-            controller_tx,
-            replicator_rx,
-            telemetry_sender,
-            shutdown_rx,
-            true, // server_startup: resnapshot to capture config changes
-        )
-        .await;
+        self.replicator = self
+            .spawn_replicator(
+                controller_tx,
+                telemetry_sender,
+                shutdown_rx,
+                true, // server_startup: resnapshot to capture config changes
+            )
+            .await;
     }
 
     /// Start replication/binlog synchronization in an infinite loop
@@ -176,20 +215,19 @@ impl Leader {
     /// connect again, and catch up from the binlog
     ///
     /// TODO: how to handle the case where we need a full new replica
-    /// Returns `true` if a replication task was actually spawned, `false` if
-    /// replication was skipped due to configuration (disabled, no URL, etc.).
-    pub(super) async fn start_replication_task(
-        &mut self,
+    /// Return the spawned replication task, or `None` if replication was skipped due to
+    /// configuration (disabled, no URL, etc.).
+    pub(super) async fn spawn_replicator(
+        &self,
         controller_tx: UnboundedSender<ControllerMessage>,
-        mut replicator_rx: UnboundedReceiver<ReplicatorMessage>,
         telemetry_sender: TelemetrySender,
         mut shutdown_rx: ShutdownReceiver,
         server_startup: bool,
-    ) -> bool {
+    ) -> Option<ReplicationChannel> {
         if !self.replicator_config.replication_enabled {
             let _ = controller_tx.send(ControllerMessage::SnapshotDone);
             info!("Replication disabled; skipping snapshotting and replication");
-            return false;
+            return None;
         }
 
         if self.replicator_config.cdc_db_url.is_empty()
@@ -202,7 +240,7 @@ impl Leader {
             // of the channel
             let _ = controller_tx.send(ControllerMessage::SnapshotDone);
             info!("No primary instance specified");
-            return false;
+            return None;
         }
         let servers = match self.replicator_config.cdc_servers() {
             Ok(servers) => servers,
@@ -211,7 +249,7 @@ impl Leader {
                 if let Err(e) = controller_tx.send(ControllerMessage::UnrecoverableError(e)) {
                     error!("Failed to notify controller of replication config error: {e}");
                 }
-                return false;
+                return None;
             }
         };
         let dialect: Dialect = servers.database_type().into();
@@ -230,7 +268,7 @@ impl Leader {
                 if let Err(e) = controller_tx.send(ControllerMessage::UnrecoverableError(e)) {
                     error!("Failed to notify controller of replication filter config error: {e}");
                 }
-                return false;
+                return None;
             }
         };
 
@@ -240,14 +278,17 @@ impl Leader {
         let replicator_statement_logging = self.replicator_statement_logging;
         let parsing_preset = self.parsing_preset;
         let table_status_tx = self.table_status_tx.clone();
-        let replication_lag_status = self.replication_lag_status.clone();
+        let lag_status = SharedLagStatus::default();
+        let replication_lag_status = lag_status.clone();
         *self
             .cdc_server_list
             .write()
             .unwrap_or_else(|e| e.into_inner()) = Some(servers);
         let cdc_server_list = self.cdc_server_list.clone();
-        let active_cdc_server = self.active_cdc_server.clone();
+        let active_cdc_server = Arc::new(RwLock::new(None));
+        let task_active_cdc_server = active_cdc_server.clone();
 
+        let (tx, mut replicator_rx) = mpsc::unbounded_channel();
         let (stop_tx, mut stop_rx) = watch::channel(false);
 
         // The replication task ideally won't panic, but if it does and we arent replicating, that
@@ -400,9 +441,13 @@ impl Leader {
                 .unwrap_or_else(|e| e.into_inner()) = None;
         }));
 
-        self.replicator_handle = Some(handle);
-        self.replicator_stop_tx = Some(stop_tx);
-        true
+        Some(ReplicationChannel {
+            tx,
+            handle,
+            stop_tx,
+            lag_status,
+            task_active_cdc_server,
+        })
     }
 
     fn log_incoming_create_cache_stmts(&self, changelist: &ChangeList) {
@@ -572,16 +617,16 @@ impl Leader {
             }
             (&Method::POST, "/resnapshot_table") => {
                 let table: Relation = bincode::deserialize(&body)?;
-                let _ = self
-                    .replicator_tx
-                    .send(ReplicatorMessage::ResnapshotTable { table });
+                if let Some(task) = &self.replicator {
+                    let _ = task.tx.send(ReplicatorMessage::ResnapshotTable { table });
+                }
                 return_serialized!(());
             }
             (&Method::POST, "/add_filter_tables") => {
                 let tables: Vec<Relation> = bincode::deserialize(&body)?;
-                let _ = self
-                    .replicator_tx
-                    .send(ReplicatorMessage::AddTables { tables });
+                if let Some(task) = &self.replicator {
+                    let _ = task.tx.send(ReplicatorMessage::AddTables { tables });
+                }
                 return_serialized!(());
             }
             (&Method::POST, "/non_replicated_relations") => {
@@ -680,22 +725,24 @@ impl Leader {
             }
             (&Method::POST, "/replication_server") => {
                 let server = self
-                    .active_cdc_server
-                    .read()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .clone();
+                    .replicator
+                    .as_ref()
+                    .and_then(ReplicationChannel::active_cdc_server);
                 return_serialized!(server);
             }
             (&Method::POST, "/replication_lag_status") => {
-                let status = self
-                    .replication_lag_status
-                    .read()
-                    .map_err(|e| {
-                        ReadySetError::Internal(format!(
-                            "Failed to read replication lag status: {e}"
-                        ))
-                    })?
-                    .clone();
+                let status = if let Some(task) = &self.replicator {
+                    task.lag_status
+                        .read()
+                        .map_err(|e| {
+                            ReadySetError::Internal(format!(
+                                "Failed to read replication lag status: {e}"
+                            ))
+                        })?
+                        .clone()
+                } else {
+                    None
+                };
                 return_serialized!(status);
             }
             (&Method::POST, "/replication_offsets") => {
@@ -766,10 +813,9 @@ impl Leader {
                     cdc_server: if self.replicator_config.replication_enabled
                         && !replication_stopped
                     {
-                        self.active_cdc_server
-                            .read()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .clone()
+                        self.replicator
+                            .as_ref()
+                            .and_then(ReplicationChannel::active_cdc_server)
                     } else {
                         None
                     },
@@ -1264,7 +1310,6 @@ impl Leader {
         worker_tx: mpsc::Sender<crate::worker::WorkerRequest>,
         background_recovery_interval: Duration,
         parsing_preset: ParsingPreset,
-        replicator_tx: UnboundedSender<ReplicatorMessage>,
         controller_tx: UnboundedSender<ControllerMessage>,
         table_statuses: TableStatusState,
         table_status_tx: UnboundedSender<(Relation, TableStatus)>,
@@ -1288,15 +1333,11 @@ impl Leader {
             running_migrations: Default::default(),
             background_task_failed,
             running_recovery: None,
-            replicator_tx,
             controller_tx,
             table_statuses,
             table_status_tx,
-            replicator_handle: None,
-            replicator_stop_tx: None,
-            replication_lag_status: Arc::new(RwLock::new(None)),
+            replicator: None,
             cdc_server_list: Arc::new(RwLock::new(None)),
-            active_cdc_server: Arc::new(RwLock::new(None)),
         }
     }
 }

@@ -35,7 +35,7 @@ use readyset_util::retry_with_exponential_backoff;
 use readyset_util::select;
 use readyset_util::shutdown::ShutdownReceiver;
 use replication_offset::ReplicationOffset;
-use replicators::{ControllerMessage, ReplicatorMessage};
+use replicators::ControllerMessage;
 use table_status::TableStatusState;
 use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -45,7 +45,7 @@ use url::Url;
 use vec1::Vec1;
 
 use crate::controller::events::EventsHandle;
-use crate::controller::inner::Leader;
+use crate::controller::inner::{Leader, ReplicationChannel};
 use crate::controller::migrate::Migration;
 use crate::controller::sql::Recipe;
 use crate::controller::state::DfState;
@@ -310,30 +310,6 @@ impl AdapterControllerChannel {
     }
 }
 
-/// Channel used to notify the replicator about events.
-pub struct ReplicatorChannel {
-    sender: UnboundedSender<ReplicatorMessage>,
-    receiver: Option<UnboundedReceiver<ReplicatorMessage>>,
-}
-
-impl ReplicatorChannel {
-    fn new() -> Self {
-        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
-        Self {
-            sender,
-            receiver: Some(receiver),
-        }
-    }
-
-    fn receiver(&mut self) -> UnboundedReceiver<ReplicatorMessage> {
-        self.receiver.take().unwrap()
-    }
-
-    fn sender(&self) -> UnboundedSender<ReplicatorMessage> {
-        self.sender.clone()
-    }
-}
-
 /// Information that we as the new leader need to act upon
 #[derive(Debug)]
 pub(crate) struct LeaderElectionResults {
@@ -491,8 +467,6 @@ pub struct Controller {
     controller_http: ControllerConnectionPool,
     /// Replicator → controller notifications.
     controller_channel: ControllerChannel,
-    /// Controller → replicator notifications.
-    replicator_channel: ReplicatorChannel,
     /// Adapter/HTTP → controller commands.
     adapter_controller_channel: AdapterControllerChannel,
     /// Provides the ability to report metrics to Segment
@@ -583,7 +557,6 @@ impl Controller {
             cache_ddl: None,
             controller_http,
             controller_channel: ControllerChannel::new(),
-            replicator_channel: ReplicatorChannel::new(),
             adapter_controller_channel: AdapterControllerChannel::new(),
             telemetry_sender,
             permissive_writes,
@@ -728,7 +701,6 @@ impl Controller {
                     self.worker_tx.clone(),
                     self.config.background_recovery_interval,
                     self.parsing_preset,
-                    self.replicator_channel.sender(),
                     self.controller_channel.sender(),
                     self.table_statuses.clone(),
                     self.table_status_tx.clone(),
@@ -739,7 +711,6 @@ impl Controller {
                 leader
                     .start(
                         self.controller_channel.sender(),
-                        self.replicator_channel.receiver(),
                         self.telemetry_sender.clone(),
                         self.shutdown_rx.clone(),
                     )
@@ -1108,52 +1079,23 @@ impl Controller {
             ));
         }
 
-        // Take the stop channel and task handle under a short write lock,
-        // then drop the lock before awaiting the handle.
-        let (stop_tx, handle) = {
+        // Take the replicator task under a short write lock, then drop the lock before awaiting
+        // its handle.
+        let task = {
             let mut guard = inner.write().await;
             if let Some(ref mut leader) = *guard {
-                let stop_tx = leader.replicator_stop_tx.take();
-                let handle = leader.replicator_handle.take();
-                if stop_tx.is_none() && handle.is_none() {
-                    return Err(ReadySetError::Internal(
-                        "no replicator task is running".into(),
-                    ));
-                }
-                (stop_tx, handle)
+                leader.replicator.take().ok_or_else(|| {
+                    ReadySetError::Internal("no replicator task is running".into())
+                })?
             } else {
                 return Err(ReadySetError::NotLeader);
             }
         };
 
-        // Signal the replicator to stop
-        if let Some(stop_tx) = stop_tx {
-            let _ = stop_tx.send(true);
-        }
-
-        // Await the replicator task with a timeout (no lock held)
-        if let Some(handle) = handle {
-            let abort = handle.abort_handle();
-            match tokio::time::timeout(REPLICATOR_STOP_TIMEOUT, handle).await {
-                Ok(Ok(())) => {}
-                Ok(Err(e)) => {
-                    error!(%e, "Replicator task panicked during shutdown");
-                    replication_stopped.store(true, Ordering::Release);
-                    return Err(ReadySetError::Internal(format!(
-                        "replicator panicked during shutdown: {e}"
-                    )));
-                }
-                Err(_) => {
-                    abort.abort();
-                    replication_stopped.store(true, Ordering::Release);
-                    return Err(ReadySetError::Internal(
-                        "replicator did not stop within timeout; aborted".into(),
-                    ));
-                }
-            }
-        }
-
+        // Stop the replicator task (no lock held)
+        let stopped = task.stop(REPLICATOR_STOP_TIMEOUT).await;
         replication_stopped.store(true, Ordering::Release);
+        stopped?;
 
         // Log the position (re-acquire read lock briefly)
         let position = {
@@ -1194,22 +1136,16 @@ impl Controller {
 
         let mut guard = inner.write().await;
         if let Some(ref mut leader) = *guard {
-            // Create a new replicator channel pair for the restarted task
-            let (replicator_tx, replicator_rx) =
-                tokio::sync::mpsc::unbounded_channel::<ReplicatorMessage>();
-            leader.replicator_tx = replicator_tx;
-
-            let started = leader
-                .start_replication_task(
+            leader.replicator = leader
+                .spawn_replicator(
                     controller_tx,
-                    replicator_rx,
                     telemetry_sender,
                     shutdown_rx,
                     false, // not server_startup: skip resnapshot, resume from current position
                 )
                 .await;
 
-            if !started {
+            if leader.replicator.is_none() {
                 return Err(ReadySetError::Internal(
                     "replication could not be started; check server configuration".into(),
                 ));
@@ -1488,10 +1424,9 @@ impl Controller {
             };
             info!(servers = %servers.displays().join(", "), "CDC server list changed");
             let active = leader
-                .active_cdc_server
-                .read()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone();
+                .replicator
+                .as_ref()
+                .and_then(ReplicationChannel::active_cdc_server);
             let running = !replication_stopped.load(Ordering::Acquire);
             let restart =
                 running && active.is_some_and(|active| servers.position(&active).is_none());
