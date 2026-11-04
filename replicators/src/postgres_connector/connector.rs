@@ -28,7 +28,7 @@ use tracing::{debug, error, info, trace, warn};
 
 use super::ddl_replication::setup_ddl_replication;
 use super::wal_reader::{WalEvent, WalReader};
-use super::PUBLICATION_NAME;
+use super::{PUBLICATION_NAME, REPLICATION_SLOT};
 use crate::noria_adapter::{Connector, ReplicationAction};
 use crate::table_filter::TableFilter;
 
@@ -850,8 +850,21 @@ pub async fn drop_replication_slot(client: &mut pgsql::Client, name: &str) -> Re
     }
 }
 
+/// Return whether a Readyset replication slot exists in the current database.
+pub async fn readyset_replication_slot_exists(client: &pgsql::Client) -> ReadySetResult<bool> {
+    let messages = client
+        .simple_query(&format!(
+            "SELECT 1 FROM pg_replication_slots \
+             WHERE database = current_database() AND slot_name LIKE '{REPLICATION_SLOT}%'"
+        ))
+        .await?;
+    Ok(messages
+        .iter()
+        .any(|m| matches!(m, SimpleQueryMessage::Row(_))))
+}
+
 pub async fn drop_publication(client: &mut pgsql::Client, name: &str) -> ReadySetResult<()> {
-    info!(slot = name, "Dropping publication if exists");
+    info!(publication = name, "Dropping publication if exists");
     client
         .simple_query(&format!("DROP PUBLICATION IF EXISTS {name}"))
         .await

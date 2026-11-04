@@ -10,7 +10,8 @@ use readyset_sql::ast::{CollationName, ColumnConstraint};
 use tokio_postgres as pgsql;
 
 pub use connector::{
-    drop_publication, drop_readyset_schema, drop_replication_slot, PostgresWalConnector,
+    drop_publication, drop_readyset_schema, drop_replication_slot,
+    readyset_replication_slot_exists, PostgresWalConnector,
 };
 pub use snapshot::PostgresReplicator;
 

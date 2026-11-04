@@ -36,8 +36,9 @@ use replication_offset::{ReplicationOffset, ReplicationOffsets};
 use crate::db_util::{CreateSchema, DatabaseSchemas};
 use crate::mysql_connector::{is_gtid_mode_enabled, MySqlBinlogConnector, MySqlReplicator};
 use crate::postgres_connector::{
-    drop_publication, drop_readyset_schema, drop_replication_slot, PostgresReplicator,
-    PostgresWalConnector, PUBLICATION_NAME, REPLICATION_SLOT,
+    drop_publication, drop_readyset_schema, drop_replication_slot,
+    readyset_replication_slot_exists, PostgresReplicator, PostgresWalConnector, PUBLICATION_NAME,
+    REPLICATION_SLOT,
 };
 use crate::replication_lag_reporter::{
     spawn_lag_reporter, SharedLagStatus, SharedReplicatorProgress, UpstreamLagConfig,
@@ -124,11 +125,19 @@ pub async fn cleanup(config: UpstreamConfig) -> ReadySetResult<()> {
         let (mut client, connection) = options.connect(tls).await?;
         let _connection_handle = tokio::spawn(connection);
 
-        drop_publication(&mut client, &repl_slot_name).await?;
         // Drop primary replication slot
         drop_replication_slot(&mut client, &repl_slot_name).await?;
         // Drop resnapshot replication slot (if exists, if does not we output debug message)
         drop_replication_slot(&mut client, &resnapshot_slot_name).await?;
+        // Other Readyset deployments replicating from this database share the publication.
+        if readyset_replication_slot_exists(&client).await? {
+            info!(
+                publication = PUBLICATION_NAME,
+                "Keeping publication used by other Readyset replication slots"
+            );
+        } else {
+            drop_publication(&mut client, PUBLICATION_NAME).await?;
+        }
         // Drop schema
         drop_readyset_schema(&mut client).await?;
     }

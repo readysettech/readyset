@@ -3058,6 +3058,92 @@ async fn postgresql_drop_nonexistent_replication_slot() {
     );
 }
 
+async fn postgresql_publication_exists(client: &tokio_postgres::Client, name: &str) -> bool {
+    client
+        .query_one(
+            "SELECT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = $1)",
+            &[&name],
+        )
+        .await
+        .unwrap()
+        .get(0)
+}
+
+/// Return whether the slot exists, and whether it is active.
+async fn postgresql_slot_state(client: &tokio_postgres::Client, name: &str) -> Option<bool> {
+    client
+        .query_opt(
+            "SELECT active FROM pg_replication_slots WHERE slot_name = $1",
+            &[&name],
+        )
+        .await
+        .unwrap()
+        .map(|row| row.get(0))
+}
+
+/// Tests that `cleanup` with a replication server id keeps the publication while another Readyset
+/// replication slot exists, and drops it once none remain.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn postgresql_cleanup_publication_with_server_id() {
+    let url = pgsql_url();
+    let mut db = DbConnection::connect(&url).await.unwrap();
+    db.query(CREATE_SCHEMA).await.unwrap();
+    db.query(POPULATE_SCHEMA).await.unwrap();
+    let (client, conn) = tokio_postgres::connect(&url, tokio_postgres::NoTls)
+        .await
+        .unwrap();
+    let _conn = tokio::spawn(conn);
+
+    let config = Config {
+        replication_server_id: Some(ReplicationServerId("cleanup".into())),
+        ..Default::default()
+    };
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.clone(), Some(config.clone()))
+        .await
+        .unwrap();
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    assert!(postgresql_publication_exists(&client, "readyset").await);
+    assert!(postgresql_slot_state(&client, "readyset_cleanup").await.is_some());
+
+    ctx.stop().await;
+    shutdown_tx.shutdown().await;
+    eventually! {
+        postgresql_slot_state(&client, "readyset_cleanup").await == Some(false)
+    }
+
+    client
+        .simple_query("SELECT pg_create_logical_replication_slot('readyset_other', 'pgoutput')")
+        .await
+        .unwrap();
+    let cleanup_config = Config {
+        upstream_db_url: vec![url.parse().unwrap()],
+        cdc_db_url: vec![url.parse().unwrap()],
+        ..config
+    };
+    replicators::cleanup(cleanup_config.clone()).await.unwrap();
+
+    assert!(postgresql_publication_exists(&client, "readyset").await);
+    assert_eq!(postgresql_slot_state(&client, "readyset_cleanup").await, None);
+
+    client
+        .simple_query("SELECT pg_drop_replication_slot('readyset_other')")
+        .await
+        .unwrap();
+    replicators::cleanup(cleanup_config).await.unwrap();
+
+    assert!(!postgresql_publication_exists(&client, "readyset").await);
+
+    db.stop().await;
+}
+
 /// Given a table, check that it has an associated TOAST table
 async fn postgresql_is_toasty(client: &tokio_postgres::client::Client, table: &str) -> bool {
     let res = client
