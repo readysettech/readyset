@@ -3,11 +3,13 @@ mod autoparameterize;
 pub mod post_lookup_decomposition;
 
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::{iter, mem};
 
 pub use autoparam_exclusions::wrap_autoparam_exclusions;
+use autoparameterize::unwrap_all_preserved;
 pub use autoparameterize::{
     AutoParameters, CacheLookupKey, LiteralSlots, ValueSlots, auto_parameterize_query,
 };
@@ -16,11 +18,13 @@ use readyset_data::{Collation, DfType, DfValue};
 use readyset_errors::{
     ReadySetError, ReadySetResult, internal_err, invalid_query_err, unsupported, unsupported_err,
 };
-use readyset_sql::analysis::visit::Visitor;
+use readyset_sql::analysis::is_aggregate;
+use readyset_sql::analysis::visit::{self, Visitor};
 use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{
-    BinaryOperator, Expr, InValue, ItemPlaceholder, LimitClause, Literal, SelectMetadata,
-    SelectStatement, ShallowCacheQuery,
+    ArrayArguments, BinaryOperator, Column, Expr, FieldDefinitionExpr, FunctionExpr, InValue,
+    ItemPlaceholder, JoinClause, JoinConstraint, JoinOperator, LimitClause, Literal,
+    SelectMetadata, SelectStatement, ShallowCacheQuery, TableExpr, TableExprInner, UnaryOperator,
 };
 use readyset_sql::{AstConversionError, Dialect, DialectDisplay, TryFromDialect, TryIntoDialect};
 use serde::{Deserialize, Serialize};
@@ -36,7 +40,7 @@ use crate::inline_leading_derived_table::InlineLeadingDerivedTable as _;
 use crate::normalize_right_join::NormalizeRightJoin as _;
 use crate::normalize_subquery_positions::NormalizeSubqueryPositions as _;
 use crate::query_optimization_rewrite::{OptimizationStrategy, QueryOptimizationRewrite};
-use crate::rewrite_utils::{standardize_placeholders, trace_pass};
+use crate::rewrite_utils::{contains_nested_select, standardize_placeholders, trace_pass};
 use crate::shallow::literalize_shallow_prepared;
 use crate::unnest_subqueries::{NonNullSchemaImpl, UnnestSubqueries as _};
 use crate::validate_pipeline_invariants::ValidatePipelineInvariants as _;
@@ -255,7 +259,10 @@ fn rewrite_equivalent_parameters(
     }
     trace!(parent: &span, query = %query.display(flags.dialect), "Going to rewrite query placeholders");
 
-    pass!(let reordered_placeholders = reorder_numbered_placeholders(query, client_params));
+    pass!(
+        if client_params > 0,
+        let reordered_placeholders = reorder_numbered_placeholders(query, client_params)
+    );
 
     pass!(let auto_parameterized = auto_parameterize_query(
         query,
@@ -266,7 +273,10 @@ fn rewrite_equivalent_parameters(
         false,
     )?);
 
-    pass!(let placeholder_count = number_placeholders(query)?);
+    pass!(
+        if client_params > 0 || !auto_parameterized.params.is_empty(),
+        let placeholder_count = number_placeholders(query)?
+    );
 
     Ok(QueryParameters {
         dialect: flags.dialect,
@@ -322,61 +332,135 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
     trace!(parent: &span, query = %query.display(flags.dialect), "Going to rewrite for deep caching");
 
     flags.features = query_features(query)?;
+    trace!(parent: &span, features = ?flags.features, "Collected query features");
     // Settle the placeholder spelling before any pass below reads one, counting the client's
     // parameters first so that count is over the spelling they sent.
-    pass!(standardize_placeholders(query)?);
+    pass!(if flags.features.client_params > 0, standardize_placeholders(query)?);
     // Runs before every pass that resolves a name: the entry's own name becomes the derived
     // table's alias, so nothing below meets a `WITH` at all.  After the placeholders are
     // numbered, so moving a body carries its bindings with it.
     // What it leaves the server declines; a statement still holding one takes the shallow path.
-    pass!(inline_ctes(query, flags.dialect)?);
-    pass!(query.disallow_row(flags.dialect)?);
-    pass!(query.validate_window_functions()?);
+    pass!(if flags.features.has_cte, inline_ctes(query, flags.dialect)?);
+    // Postgres returns a row as a record, and Readyset serves it too. MySQL has no row type and
+    // rejects the statement, so Readyset refuses it and proxies it for MySQL's own error.
+    pass!(
+        if flags.dialect == Dialect::MySQL && flags.features.has_projected_row,
+        query.disallow_row(flags.dialect)?
+    );
+    pass!(
+        if flags.features.has_window_function,
+        query.validate_window_functions()?
+    );
     pass!(query.resolve_schemas(&context)?);
-    pass!(query.scalar_optimize_expressions(&context));
-    pass!(query.expand_stars(&context)?);
+    pass!(
+        if flags.features.has_constant_expr || flags.features.has_not,
+        query.scalar_optimize_expressions(&context)
+    );
+    // Besides expanding `*`, this names the columns of every derived table and VALUES list.
+    pass!(
+        if flags.features.has_star
+            || flags.features.has_nested_select
+            || flags.features.has_values,
+        query.expand_stars(&context)?
+    );
     pass!(query.expand_implied_tables(&context)?);
-    pass!(query.expand_join_on_using(&context)?);
-    pass!(query.normalize_right_join()?);
-    pass!(let invariants_ok = query.validate_pipeline_invariants(flags.dialect));
-    match invariants_ok {
-        Ok(_) => {
-            pass!(query.validate_query_semantics(flags.dialect)?);
-            let nonnull_schema = NonNullSchemaImpl::from(&context);
+    // Besides rewriting USING, this checks the right-hand side of every join.
+    pass!(if flags.features.has_join, query.expand_join_on_using(&context)?);
+    pass!(if flags.features.has_right_join, query.normalize_right_join()?);
+    // The invariants are what the passes above leave behind: no CTE, no `*`, no USING and no
+    // column without a table, so a statement that started with none of them has none to find.
+    let invariants_ok = if flags.features.has_cte
+        || flags.features.has_star
+        || flags.features.has_using
+        || flags.features.has_unqualified_column
+    {
+        pass!(let invariants_ok = query.validate_pipeline_invariants(flags.dialect));
+        invariants_ok
+    } else {
+        debug_assert!(query.validate_pipeline_invariants(flags.dialect).is_ok());
+        Ok(())
+    };
+    if let Err(e) = invariants_ok {
+        warn!(parent: &span, error = %e, query = %query.display(flags.dialect), "Pipeline invariants violated, skipping query rewrites");
+    } else {
+        pass!(
+            if flags.features.has_nested_select || flags.features.joins_or_groups(),
+            query.validate_query_semantics(flags.dialect)?
+        );
+        let nonnull_schema = NonNullSchemaImpl::from(&context);
+        // Scoped to subqueries and HAVING: elsewhere, derived_tables_rewrite normalizes the
+        // join conditions this pass would also move.
+        let wrap_aliases = if flags.features.has_having || flags.features.has_nested_select {
             pass!(let wrap_aliases = query.normalize_subquery_positions()?);
-            pass!(query.rewrite_array_constructors(&context)?);
-            let unique_cols_schema = UniqueColumnsSchemaImpl::from(&context);
-            pass!(query.drop_redundant_join(&unique_cols_schema)?);
-            pass!(query.inline_leading_derived_table(&unique_cols_schema, &wrap_aliases)?);
-            pass!(query.unnest_subqueries(&nonnull_schema, &unique_cols_schema)?);
-            // Flatten the wrapper unnesting left behind.  Inlining here rather than inside
-            // derived_tables_rewrite brings the predicate into the same statement as the join
-            // while the LEFT-join promotion step can still see it, which is what a decorrelated
-            // query needs to reach the plan its own emitted text already produces.
-            pass!(query.inline_leading_derived_table_after_unnest(&unique_cols_schema)?);
-            pass!(query.derived_tables_rewrite(flags.dialect, &unique_cols_schema)?);
-            pass!(query.query_optimization_rewrite(
+            wrap_aliases
+        } else {
+            HashSet::new()
+        };
+        pass!(
+            if flags.features.has_array_subquery,
+            query.rewrite_array_constructors(&context)?
+        );
+        let unique_cols_schema = UniqueColumnsSchemaImpl::from(&context);
+        pass!(if flags.features.has_join, query.drop_redundant_join(&unique_cols_schema)?);
+        pass!(
+            if flags.features.has_nested_select,
+            let inlined = query.inline_leading_derived_table(&unique_cols_schema, &wrap_aliases)?
+        );
+        // Inlining can take away the statement's only nested SELECT.
+        let has_nested_select =
+            flags.features.has_nested_select && (!inlined || contains_nested_select(query));
+        // Unnesting turns subqueries into joins and grouping. The passes below that handle
+        // joins or grouping all run when has_nested_select is set.
+        pass!(
+            if has_nested_select,
+            query.unnest_subqueries(&nonnull_schema, &unique_cols_schema)?
+        );
+        // Flatten the wrapper unnesting left behind.  Inlining here rather than inside
+        // derived_tables_rewrite brings the predicate into the same statement as the join
+        // while the LEFT-join promotion step can still see it, which is what a decorrelated
+        // query needs to reach the plan its own emitted text already produces.
+        pass!(
+            if has_nested_select || flags.features.has_grouping,
+            query.inline_leading_derived_table_after_unnest(&unique_cols_schema)?
+        );
+        // Besides flattening derived tables, this normalizes joins, GROUP BY, HAVING and
+        // ORDER BY, and drops a WHERE that is always true, which inlining can leave behind.
+        pass!(
+            if inlined
+                || has_nested_select
+                || flags.features.joins_or_groups()
+                || flags.features.has_order_by
+                || flags.features.has_constant_where,
+            query.derived_tables_rewrite(flags.dialect, &unique_cols_schema)?
+        );
+        // Besides hoisting predicates, this normalizes ORDER BY against the select list.
+        pass!(
+            if has_nested_select
+                || flags.features.joins_or_groups()
+                || flags.features.has_order_by,
+            query.query_optimization_rewrite(
                 &context,
                 OptimizationStrategy::HoistParametrizableFilters,
-            )?);
-            // Ask the entry validator whether the rewrites emitted something it would have
-            // rejected on the way in.  The rewrites reshape the projection, the grouping keys
-            // and the join tree, so the statement leaving this block is not the one the
-            // validator admitted -- most sharply for the rule that every column outside an
-            // aggregate belongs to the GROUP BY, which decorrelation and predicate routing
-            // both have to maintain by hand.
-            //
-            // Refusing here applies the same contract as the entry check above: a statement
-            // this validator rejects is one the pipeline has no agreed reading of, so the
-            // rewrite is declined rather than handed on.
+            )?
+        );
+        // Ask the entry validator whether the rewrites emitted something it would have
+        // rejected on the way in.  The rewrites reshape the projection, the grouping keys
+        // and the join tree, so the statement leaving this block is not the one the
+        // validator admitted -- most sharply for the rule that every column outside an
+        // aggregate belongs to the GROUP BY, which decorrelation and predicate routing
+        // both have to maintain by hand.
+        //
+        // Refusing here applies the same contract as the entry check above: a statement
+        // this validator rejects is one the pipeline has no agreed reading of, so the
+        // rewrite is declined rather than handed on.
+        if has_nested_select || flags.features.joins_or_groups() {
             query.validate_query_semantics(flags.dialect)?;
-            trace!(parent: &span, pass="validate_query_semantics_on_exit", query = %query.display(flags.dialect));
+        } else {
+            debug_assert!(query.validate_query_semantics(flags.dialect).is_ok());
         }
-        Err(e) => {
-            warn!(parent: &span, error = %e, query = %query.display(flags.dialect), "Pipeline invariants violated, skipping query rewrites");
-        }
+        trace!(parent: &span, pass="validate_query_semantics_on_exit", query = %query.display(flags.dialect));
     }
-    pass!(query.order_limit_removal(&context)?);
+    pass!(if flags.features.has_limit, query.order_limit_removal(&context)?);
 
     rewrite_equivalent_parameters(query, flags)
 }
@@ -481,8 +565,11 @@ pub fn rewrite_for_readyset(
     } = auto_parameterized;
     // Unwrap any `AUTOPARAM (EXCLUDE_*)` marker so the final form holds plain literals. Nothing
     // in the product marks literals today; see `autoparam_exclusions`.
-    autoparameterize::unwrap_all_preserved(query);
-    pass!(let rewritten_in_conditions = collapse_where_in(query, flags.dialect)?);
+    pass!(if features.has_preserved_literal, unwrap_all_preserved(query));
+    pass!(
+        if features.has_in_list,
+        let rewritten_in_conditions = collapse_where_in(query, flags.dialect)?
+    );
 
     // Decompose AVG into SUM+COUNT when post-lookup aggregation (PLA) will run.
     //
@@ -497,15 +584,20 @@ pub fn rewrite_for_readyset(
     // DISTINCT + AVG is fine here because the read-path orchestrator runs the
     // HashBased DISTINCT dedup over recomposed AVG values (i.e. after
     // `postprocess_decompositions`), not over raw SUM/COUNT/MIN triples.
-    pass!(
-        if needs_pla,
-        let post_lookup_decompositions = decompose_aggregates_for_post_lookup(query, dialect)?
-    );
+    let post_lookup_decompositions = if needs_pla {
+        pass!(let decompositions = decompose_aggregates_for_post_lookup(query, dialect)?);
+        decompositions
+    } else {
+        Vec::new()
+    };
     // NOTE: query.fields.len() must be taken AFTER decompose_aggregates_for_post_lookup,
     // which appends source columns (e.g. COUNT, MIN) to the SELECT list.
     let post_lookup_plan = PostLookupPlan::new(post_lookup_decompositions, query.fields.len());
 
-    pass!(number_placeholders(query)?);
+    pass!(
+        if client_params > 0 || !auto_parameters.is_empty(),
+        number_placeholders(query)?
+    );
 
     Ok(DfQueryParameters {
         dialect,
@@ -1364,42 +1456,204 @@ where
 }
 
 /// What the rewrite passes need to know about a statement, collected in one walk before any pass
-/// runs.
+/// runs, so a pass with nothing to do is skipped instead of walking the statement to find out.
+///
+/// The flags describe the statement as the client sent it and never change. A pass that adds
+/// something a later gate reads, such as a join, must run only when that gate already holds.
 #[derive(Debug, Default, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct QueryFeatures {
     /// How many values the client binds: one per `?`, or the highest `$n`.
     client_params: u16,
+    /// A `WITH` clause, at any depth.
+    has_cte: bool,
+    /// A SELECT below the top level: a CTE body, a derived table or a subquery expression.
+    has_nested_select: bool,
+    /// A `VALUES` list used as a table.
+    has_values: bool,
+    /// `*` or `t.*` in a select list.
+    has_star: bool,
+    /// A statement reading more than one FROM item, through joins or a comma-separated list.
+    has_join: bool,
+    has_using: bool,
+    has_right_join: bool,
+    /// A window function, such as `ROW_NUMBER() OVER (...)`.
+    has_window_function: bool,
+    /// An `IN` with a list of values, such as `a IN (1, 2, 3)`.
+    has_in_list: bool,
+    /// A `LIMIT`, at any depth.
+    has_limit: bool,
+    /// An `ARRAY(subquery)` constructor.
+    has_array_subquery: bool,
+    /// A column with no table.
+    has_unqualified_column: bool,
+    /// An aggregate or a GROUP BY.
+    has_grouping: bool,
+    has_having: bool,
+    has_order_by: bool,
+    /// A literal the autoparameterization exclusions keep inline.
+    has_preserved_literal: bool,
+    /// An expression scalar optimization folds: one that reads no column, parameter, subquery or
+    /// aggregate and is not a literal, a cast or a row, such as `1 + 1`.
+    has_constant_expr: bool,
+    /// A `NOT`, which scalar optimization pushes into the expression it negates.
+    has_not: bool,
+    /// A WHERE that reads no column, parameter, subquery or aggregate, such as `WHERE TRUE`.
+    has_constant_where: bool,
+    /// A row value the statement returns, from its select list or a VALUES list, such as
+    /// `SELECT ROW(a, b)`. A row in a filter, such as `(a, b) IN ((1, 2))`, doesn't count.
+    has_projected_row: bool,
+}
+
+impl QueryFeatures {
+    /// Whether the statement has a construct the semantic checks and the predicate hoisting look
+    /// at, besides a nested SELECT: more than one FROM item, an aggregate, GROUP BY or HAVING.
+    fn joins_or_groups(&self) -> bool {
+        self.has_join || self.has_grouping || self.has_having
+    }
 }
 
 /// Collects the [`QueryFeatures`] of `query` in one walk.
 fn query_features(query: &SelectStatement) -> ReadySetResult<QueryFeatures> {
     #[derive(Default)]
-    struct ParameterCount {
+    struct Collector {
         question_marks: usize,
         highest_number: usize,
+        depth: usize,
+        /// Columns, parameters, subqueries and aggregates met so far, so an expression that adds
+        /// none reads nothing.
+        reads: usize,
+        features: QueryFeatures,
     }
 
-    impl<'ast> Visitor<'ast> for ParameterCount {
+    impl<'ast> Visitor<'ast> for Collector {
         type Error = !;
+
+        fn visit_select_statement(
+            &mut self,
+            stmt: &'ast SelectStatement,
+        ) -> Result<(), Self::Error> {
+            self.reads += 1;
+            let features = &mut self.features;
+            features.has_nested_select |= self.depth > 0;
+            features.has_cte |= !stmt.ctes.is_empty();
+            features.has_join |= stmt.tables.len() + stmt.join.len() > 1;
+            features.has_grouping |= stmt.group_by.is_some();
+            features.has_having |= stmt.having.is_some();
+            features.has_order_by |= stmt.order.is_some();
+            features.has_limit |= !stmt.limit_clause.is_empty();
+            self.depth += 1;
+            visit::walk_select_statement(self, stmt);
+            self.depth -= 1;
+            Ok(())
+        }
+
+        fn visit_join_clause(&mut self, join: &'ast JoinClause) -> Result<(), Self::Error> {
+            self.features.has_right_join |= matches!(
+                join.operator,
+                JoinOperator::RightJoin | JoinOperator::RightOuterJoin
+            );
+            self.features.has_using |= matches!(join.constraint, JoinConstraint::Using(_));
+            visit::walk_join_clause(self, join)
+        }
+
+        fn visit_table_expr(&mut self, table: &'ast TableExpr) -> Result<(), Self::Error> {
+            if let TableExprInner::Values { rows } = &table.inner {
+                self.features.has_values = true;
+                self.features.has_projected_row |=
+                    rows.iter().flatten().any(|e| matches!(e, Expr::Row { .. }));
+            }
+            visit::walk_table_expr(self, table)
+        }
+
+        fn visit_field_definition_expr(
+            &mut self,
+            field: &'ast FieldDefinitionExpr,
+        ) -> Result<(), Self::Error> {
+            self.features.has_star |= matches!(
+                field,
+                FieldDefinitionExpr::All | FieldDefinitionExpr::AllInTable(_)
+            );
+            self.features.has_projected_row |= matches!(
+                field,
+                FieldDefinitionExpr::Expr {
+                    expr: Expr::Row { .. },
+                    ..
+                }
+            );
+            visit::walk_field_definition_expr(self, field)
+        }
+
+        fn visit_expr(&mut self, expr: &'ast Expr) -> Result<(), Self::Error> {
+            match expr {
+                Expr::WindowFunction { .. } => self.features.has_window_function = true,
+                Expr::In {
+                    rhs: InValue::List(_),
+                    ..
+                } => self.features.has_in_list = true,
+                Expr::Array(ArrayArguments::Subquery(_)) => self.features.has_array_subquery = true,
+                Expr::UnaryOp {
+                    op: UnaryOperator::Not,
+                    ..
+                } => self.features.has_not = true,
+                _ => {}
+            }
+            let reads = self.reads;
+            visit::walk_expr(self, expr)?;
+            let folds = !matches!(
+                expr,
+                Expr::Literal(_) | Expr::Cast { .. } | Expr::Row { .. }
+            );
+            self.features.has_constant_expr |= folds && self.reads == reads;
+            Ok(())
+        }
+
+        fn visit_where_clause(&mut self, expr: &'ast Expr) -> Result<(), Self::Error> {
+            let reads = self.reads;
+            self.visit_expr(expr)?;
+            self.features.has_constant_where |= self.reads == reads;
+            Ok(())
+        }
+
+        fn visit_function_expr(&mut self, function: &'ast FunctionExpr) -> Result<(), Self::Error> {
+            if is_aggregate(function) {
+                self.features.has_grouping = true;
+                self.reads += 1;
+            }
+            visit::walk_function_expr(self, function)
+        }
+
+        fn visit_column(&mut self, column: &'ast Column) -> Result<(), Self::Error> {
+            self.features.has_unqualified_column |= column.table.is_none();
+            self.reads += 1;
+            visit::walk_column(self, column)
+        }
 
         fn visit_literal(&mut self, literal: &'ast Literal) -> Result<(), Self::Error> {
             match literal {
-                Literal::Placeholder(ItemPlaceholder::QuestionMark) => self.question_marks += 1,
-                Literal::Placeholder(ItemPlaceholder::DollarNumber(n)) => {
-                    self.highest_number = self.highest_number.max(*n as usize)
+                Literal::Placeholder(ItemPlaceholder::QuestionMark) => {
+                    self.question_marks += 1;
+                    self.reads += 1;
                 }
+                Literal::Placeholder(ItemPlaceholder::DollarNumber(n)) => {
+                    self.highest_number = self.highest_number.max(*n as usize);
+                    self.reads += 1;
+                }
+                Literal::Preserved(_) => self.features.has_preserved_literal = true,
                 _ => {}
             }
             Ok(())
         }
     }
 
-    let mut count = ParameterCount::default();
-    count.visit_select_statement(query);
-    let params = count.question_marks.max(count.highest_number);
+    let mut collector = Collector::default();
+    collector.visit_select_statement(query);
+    let params = collector.question_marks.max(collector.highest_number);
     let client_params = u16::try_from(params)
         .map_err(|_| unsupported_err!("{params} parameters, more than {}", u16::MAX))?;
-    Ok(QueryFeatures { client_params })
+    Ok(QueryFeatures {
+        client_params,
+        ..collector.features
+    })
 }
 
 struct ReorderNumberedPlaceholdersVisitor {
@@ -1583,6 +1837,169 @@ mod tests {
 
     fn parse_select_statement_postgres(q: &str) -> SelectStatement {
         parse_select_statement(q, Dialect::PostgreSQL)
+    }
+
+    mod query_features {
+        use super::*;
+
+        fn features(dialect: Dialect, sql: &str) -> QueryFeatures {
+            let query = readyset_sql_parsing::parse_select_with_config(
+                readyset_sql_parsing::ParsingPreset::OnlySqlparser,
+                dialect,
+                sql,
+            )
+            .unwrap();
+            query_features(&query).unwrap()
+        }
+
+        #[test]
+        fn qualified_point_lookup_has_nothing_to_gate_on() {
+            let f = features(Dialect::PostgreSQL, "SELECT t.a FROM t WHERE t.id = 1");
+            assert!(!f.has_nested_select && !f.joins_or_groups());
+            assert!(!f.has_cte && !f.has_star && !f.has_values && !f.has_window_function);
+            assert!(!f.has_in_list && !f.has_limit);
+            assert!(!f.has_using && !f.has_right_join && !f.has_array_subquery);
+            assert!(!f.has_unqualified_column && !f.has_order_by && !f.has_preserved_literal);
+            assert!(!f.has_constant_expr && !f.has_not && !f.has_constant_where);
+            assert!(!f.has_projected_row);
+            assert_eq!(f.client_params, 0);
+        }
+
+        #[test]
+        fn a_statement_without_subquery_or_having_skips_the_subquery_passes() {
+            let f = features(Dialect::PostgreSQL, "SELECT * FROM t WHERE t.y = 1");
+            assert!(!f.has_nested_select && !f.has_having);
+        }
+
+        #[test]
+        fn a_row_in_a_filter_is_not_projected() {
+            let f = features(
+                Dialect::MySQL,
+                "SELECT t.a FROM t WHERE (t.a, t.b) = (1, 2)",
+            );
+            assert!(!f.has_projected_row);
+        }
+
+        #[test]
+        fn casts_and_aggregates_are_not_constant() {
+            let f = features(
+                Dialect::PostgreSQL,
+                "SELECT count(*) FROM t WHERE t.d = CAST('2024-01-01' AS DATE)",
+            );
+            assert!(!f.has_constant_expr && !f.has_constant_where);
+        }
+
+        #[test]
+        fn each_construct_sets_its_flag() {
+            type Check = fn(&QueryFeatures) -> bool;
+            let cases: &[(Dialect, &str, Check)] = &[
+                (
+                    Dialect::PostgreSQL,
+                    "WITH c AS (SELECT t.a FROM t) SELECT c.a FROM c",
+                    |f| f.has_cte && f.has_nested_select,
+                ),
+                (Dialect::PostgreSQL, "SELECT * FROM t", |f| f.has_star),
+                (Dialect::PostgreSQL, "SELECT t.* FROM t", |f| f.has_star),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT t.a FROM t JOIN u ON t.a = u.a",
+                    |f| f.has_join,
+                ),
+                (Dialect::PostgreSQL, "SELECT t.a FROM t, u", |f| f.has_join),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT t.a FROM t JOIN u USING (a)",
+                    |f| f.has_using,
+                ),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT t.a FROM t RIGHT JOIN u ON t.a = u.a",
+                    |f| f.has_right_join,
+                ),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT t.a FROM t WHERE t.a IN (SELECT u.a FROM u)",
+                    |f| f.has_nested_select,
+                ),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT d.a FROM (SELECT t.a FROM t) AS d",
+                    |f| f.has_nested_select,
+                ),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT v.a FROM (VALUES (1)) AS v(a)",
+                    |f| f.has_values,
+                ),
+                (Dialect::PostgreSQL, "SELECT count(t.a) FROM t", |f| {
+                    f.has_grouping
+                }),
+                (Dialect::PostgreSQL, "SELECT t.a FROM t GROUP BY t.a", |f| {
+                    f.has_grouping
+                }),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT t.a FROM t GROUP BY t.a HAVING count(t.b) > 1",
+                    |f| f.has_having,
+                ),
+                (Dialect::PostgreSQL, "SELECT t.a FROM t ORDER BY t.a", |f| {
+                    f.has_order_by
+                }),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT ARRAY(SELECT u.a FROM u) FROM t",
+                    |f| f.has_array_subquery && f.has_nested_select,
+                ),
+                (Dialect::PostgreSQL, "SELECT a FROM t", |f| {
+                    f.has_unqualified_column
+                }),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT t.a, row_number() OVER (ORDER BY t.b) FROM t",
+                    |f| f.has_window_function,
+                ),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT t.a FROM t WHERE t.a IN (1, 2)",
+                    |f| f.has_in_list,
+                ),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT d.a FROM (SELECT t.a FROM t LIMIT 5) AS d",
+                    |f| f.has_limit,
+                ),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT t.a FROM t WHERE t.a = $2 AND t.b = $1",
+                    |f| f.client_params == 2,
+                ),
+                (
+                    Dialect::MySQL,
+                    "SELECT t.a FROM t WHERE t.a = ? AND t.b = ?",
+                    |f| f.client_params == 2,
+                ),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT t.a FROM t WHERE t.a = 1 + 1",
+                    |f| f.has_constant_expr,
+                ),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT t.a FROM t WHERE NOT (t.a = 1)",
+                    |f| f.has_not,
+                ),
+                (Dialect::MySQL, "SELECT t.a FROM t WHERE 1", |f| {
+                    f.has_constant_where
+                }),
+                (Dialect::MySQL, "SELECT ROW(t.a, t.b) FROM t", |f| {
+                    f.has_projected_row
+                }),
+            ];
+            for (dialect, sql, check) in cases {
+                let f = features(*dialect, sql);
+                assert!(check(&f), "{sql}: {f:?}");
+            }
+        }
     }
 
     mod user_placeholders {
@@ -3950,14 +4367,38 @@ mod tests {
             stmt
         }
 
+        #[test]
+        fn a_projected_row_is_refused_on_mysql_only() {
+            for (dialect, refused) in [(Dialect::MySQL, true), (Dialect::PostgreSQL, false)] {
+                let mut stmt = readyset_sql_parsing::parse_select_with_config(
+                    readyset_sql_parsing::ParsingPreset::OnlySqlparser,
+                    dialect,
+                    "SELECT ROW(t.x, t.y) FROM t",
+                )
+                .unwrap();
+                let params = rewrite_params(dialect);
+                let result = rewrite_equivalent_deep(&mut stmt, params, rewrite_context(dialect));
+                assert_eq!(result.is_err(), refused, "{dialect:?}: {result:?}");
+            }
+        }
+
         /// An always-true WHERE is dropped, so the read shares its rewritten form, and hence its
-        /// cache, with the unfiltered read.
+        /// cache, with the unfiltered read. That includes a WHERE that becomes always true once a
+        /// derived table is inlined.
         #[test]
         fn an_always_true_where_rewrites_like_no_where() {
             for (dialect, filtered) in [
                 (Dialect::MySQL, "SELECT x FROM t WHERE 1 = 1"),
                 (Dialect::MySQL, "SELECT x FROM t WHERE TRUE"),
                 (Dialect::PostgreSQL, "SELECT x FROM t WHERE TRUE"),
+                (
+                    Dialect::MySQL,
+                    "SELECT d.x FROM (SELECT t.x, 1 AS b FROM t) AS d WHERE d.b",
+                ),
+                (
+                    Dialect::PostgreSQL,
+                    "SELECT d.x FROM (SELECT t.x, TRUE AS b FROM t) AS d WHERE d.b",
+                ),
             ] {
                 assert_eq!(
                     deep_rewritten(filtered, dialect),

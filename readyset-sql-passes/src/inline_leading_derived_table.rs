@@ -115,7 +115,7 @@ use std::mem;
 use tracing::trace;
 
 pub trait InlineLeadingDerivedTable: Sized {
-    /// Hoist the leading-FROM derived table when possible.
+    /// Hoist the leading-FROM derived table when possible, and return whether it did.
     ///
     /// `unique_cols_schema` plumbs the unique-column catalog through to the
     /// inlining-eligibility check, where the canonical (non-LATERAL)
@@ -131,7 +131,7 @@ pub trait InlineLeadingDerivedTable: Sized {
         &mut self,
         unique_cols_schema: &U,
         opaque_aliases: &HashSet<SqlIdentifier>,
-    ) -> ReadySetResult<&mut Self>;
+    ) -> ReadySetResult<bool>;
 
     /// Inline the leading derived table once unnesting has finished, normalizing what unnesting
     /// leaves behind so that it can be.
@@ -161,7 +161,7 @@ impl InlineLeadingDerivedTable for SelectStatement {
         &mut self,
         unique_cols_schema: &U,
         opaque_aliases: &HashSet<SqlIdentifier>,
-    ) -> ReadySetResult<&mut Self> {
+    ) -> ReadySetResult<bool> {
         let mut rewritten = hoist_lhsmost_derived_table_rewrite_impl(
             self,
             true,
@@ -184,7 +184,7 @@ impl InlineLeadingDerivedTable for SelectStatement {
                 ">LHS-most derived table hoisted");
         }
 
-        Ok(self)
+        Ok(rewritten)
     }
 
     fn inline_leading_derived_table_after_unnest<U: UniqueColumnsSchema>(
@@ -192,7 +192,8 @@ impl InlineLeadingDerivedTable for SelectStatement {
         unique_cols_schema: &U,
     ) -> ReadySetResult<&mut Self> {
         fix_groupby_without_aggregates(self)?;
-        self.inline_leading_derived_table(unique_cols_schema, &HashSet::new())
+        self.inline_leading_derived_table(unique_cols_schema, &HashSet::new())?;
+        Ok(self)
     }
 }
 

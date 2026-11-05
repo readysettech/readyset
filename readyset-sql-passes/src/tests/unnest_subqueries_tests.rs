@@ -1,8 +1,7 @@
 use crate::ArrayConstructorRewrite;
 use crate::drop_redundant_join::{UniqueColumnsSchema, drop_redundant_self_joins_main};
 use crate::unnest_subqueries::{
-    NonNullSchema, UnnestSubqueries, UnusedUniqueColumnsSchema, is_correlation_pinned_at_most_one,
-    unnest_subqueries_main,
+    NonNullSchema, is_correlation_pinned_at_most_one, unnest_subqueries_main,
 };
 use readyset_errors::ReadySetResult;
 use readyset_sql::ast::{Column, Relation, SelectStatement};
@@ -7824,20 +7823,4 @@ fn grouped_window_not_in_entry_needs_no_set_semantics() {
            ON ("spj"."qty" = "GNL"."ROW_NUMBER() OVER(ORDER BY ""p"".""weight"" ASC NULLS LAST)")
            WHERE ("GNL"."ROW_NUMBER() OVER(ORDER BY ""p"".""weight"" ASC NULLS LAST)" IS NULL)"#,
     );
-}
-
-/// A statement with no subquery is returned untouched: the body panics on a star projection, so
-/// `Ok` shows the pass returned early.
-#[test]
-fn a_statement_without_subquery_returns_early() {
-    let mut stmt = parse_select_with_config(
-        PARSING_CONFIG,
-        Dialect::PostgreSQL,
-        "SELECT * FROM t WHERE t.y = 1",
-    )
-    .unwrap();
-    let original = stmt.clone();
-    stmt.unnest_subqueries(&SpjNonNullSchema::default(), &UnusedUniqueColumnsSchema)
-        .unwrap();
-    assert_eq!(stmt, original);
 }

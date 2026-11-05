@@ -8,19 +8,19 @@ use crate::rewrite_utils::{
     and_predicates_skip_true, are_group_by_keys_pinned_by_correlation, as_sub_query_with_alias,
     as_sub_query_with_alias_mut, bubble_alias_to_anchor_top, classify_on_atom,
     collect_local_from_items, columns_iter, conjoin_all_dedup, construct_null_check_expr,
-    construct_projecting_wrapper, construct_scalar_expr, contains_nested_select, contains_select,
-    correlated_relations, decompose_conjuncts, default_alias_for_select_item_expression,
-    ensure_first_field_alias, expect_field_as_expr, expect_field_as_expr_mut,
-    expect_only_subquery_from_with_alias, expect_only_subquery_from_with_alias_mut,
-    expect_sub_query_with_alias, expect_sub_query_with_alias_mut,
-    extract_aggregate_fallback_for_expr, extract_correlation_keys, find_group_by_key,
-    find_rhs_join_clause, for_each_window_function, get_from_item_reference_name,
-    get_select_item_alias, get_unique_alias, has_alias, is_aggregate_only_without_group_by,
-    is_aggregated_expr, is_aggregated_select, is_literal_one, is_literal_positive, is_literal_zero,
-    make_first_field_ref_name, move_correlated_constraints_from_join_to_where,
-    partition_correlated_predicates, preserve_uncorrelated_top_k, project_statement_columns_if,
-    resolve_field_expr_by_alias, resolve_group_by_exprs, rewrite_top_k_in_place,
-    rewrite_top_k_in_place_with_partition, split_expr_mut,
+    construct_projecting_wrapper, construct_scalar_expr, contains_select, correlated_relations,
+    decompose_conjuncts, default_alias_for_select_item_expression, ensure_first_field_alias,
+    expect_field_as_expr, expect_field_as_expr_mut, expect_only_subquery_from_with_alias,
+    expect_only_subquery_from_with_alias_mut, expect_sub_query_with_alias,
+    expect_sub_query_with_alias_mut, extract_aggregate_fallback_for_expr, extract_correlation_keys,
+    find_group_by_key, find_rhs_join_clause, for_each_window_function,
+    get_from_item_reference_name, get_select_item_alias, get_unique_alias, has_alias,
+    is_aggregate_only_without_group_by, is_aggregated_expr, is_aggregated_select, is_literal_one,
+    is_literal_positive, is_literal_zero, make_first_field_ref_name,
+    move_correlated_constraints_from_join_to_where, partition_correlated_predicates,
+    preserve_uncorrelated_top_k, project_statement_columns_if, resolve_field_expr_by_alias,
+    resolve_group_by_exprs, rewrite_top_k_in_place, rewrite_top_k_in_place_with_partition,
+    split_expr_mut,
 };
 use crate::unnest_subqueries_3vl::{
     ProbeRegistry, RhsContext, SelectList3vlFlags, SelectList3vlInput,
@@ -183,10 +183,6 @@ impl UnnestSubqueries for SelectStatement {
         schema: &dyn NonNullSchema,
         unique_cols_schema: &U,
     ) -> ReadySetResult<&mut Self> {
-        // This pass only rewrites subqueries in FROM, WHERE and the select list.
-        if !contains_nested_select(self) {
-            return Ok(self);
-        }
         if unnest_subqueries_main(self, schema, unique_cols_schema)?.has_rewrites() {
             trace!(target: "unnest_subqueries",
                 statement = %self.display(Dialect::PostgreSQL),

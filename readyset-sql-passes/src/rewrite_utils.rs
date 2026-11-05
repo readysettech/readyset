@@ -33,6 +33,10 @@ use std::mem;
 /// The pass's result is dropped, unless the pass starts with `let name =`: then `name` holds the
 /// result and the trace logs it too. With `if cond,` first, the pass only runs, and is traced, when
 /// `cond` holds, and otherwise `name` gets its type's default.
+///
+/// `cond` must be false only when the pass has nothing to do for the query. Debug builds check
+/// that: they still run a skipped pass on a copy of the query, and panic if the pass would have
+/// changed or refused it.
 macro_rules! trace_pass {
     // Runs and traces a pass, and evaluates to its result, which then names the logged field.
     (@run $dialect:expr, $name:ident, $query:ident . $pass:ident $args:tt $($try:tt)?) => {{
@@ -54,6 +58,39 @@ macro_rules! trace_pass {
         $pass($query $($args)*) $($try)?;
         trace_pass!(@trace $dialect, $query, $pass);
     }};
+    // Runs a pass its gate skipped on a copy of the query, in debug builds only.
+    (@skipped $query:ident . $pass:ident $args:tt $($try:tt)?) => {
+        #[cfg(debug_assertions)]
+        {
+            let mut copy = (*$query).clone();
+            {
+                let $query = &mut copy;
+                let _result = $query.$pass $args;
+                $(
+                    let _ = stringify!($try);
+                    let pass = stringify!($pass);
+                    assert!(_result.is_ok(), "{pass} was skipped but refuses the query");
+                )?
+            }
+            assert!(copy == *$query, "{} was skipped but changes the query", stringify!($pass));
+        }
+    };
+    (@skipped $pass:ident ($query:ident $($args:tt)*) $($try:tt)?) => {
+        #[cfg(debug_assertions)]
+        {
+            let mut copy = (*$query).clone();
+            {
+                let $query = &mut copy;
+                let _result = $pass($query $($args)*);
+                $(
+                    let _ = stringify!($try);
+                    let pass = stringify!($pass);
+                    assert!(_result.is_ok(), "{pass} was skipped but refuses the query");
+                )?
+            }
+            assert!(copy == *$query, "{} was skipped but changes the query", stringify!($pass));
+        }
+    };
     (@trace $dialect:expr, $query:ident, $pass:ident $(, $($field:tt)*)?) => {
         tracing::trace!(
             pass = stringify!($pass),
@@ -65,12 +102,15 @@ macro_rules! trace_pass {
         let $name = if $cond {
             trace_pass!(@run $dialect, $name, $($pass)*)
         } else {
+            trace_pass!(@skipped $($pass)*);
             Default::default()
         };
     };
     ($dialect:expr, if $cond:expr, $($pass:tt)*) => {
         if $cond {
             trace_pass!(@run $dialect, $($pass)*)
+        } else {
+            trace_pass!(@skipped $($pass)*)
         }
     };
     ($dialect:expr, let $name:ident = $($pass:tt)*) => {
