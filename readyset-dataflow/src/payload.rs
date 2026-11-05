@@ -5,7 +5,7 @@ use dataflow_state::MaterializedNodeState;
 use itertools::Itertools;
 use readyset_client::{self, KeyComparison, PacketData, PacketTrace, ReplayKeys};
 use readyset_data::DfType;
-use readyset_sql::ast::Relation;
+use readyset_sql::ast::{Relation, SqlIdentifier};
 use serde::{Deserialize, Serialize};
 use strum::{EnumCount, EnumDiscriminants, EnumIter, IntoStaticStr};
 use vec1::Vec1;
@@ -368,8 +368,11 @@ pub enum DomainRequest {
     },
 
     /// Each base table has an offset up to which data has been persisted to disk, and this
-    /// request type requests the minimum of those offsets for the base tables in the domain
-    RequestMinPersistedReplicationOffset,
+    /// request type requests the minimum of those offsets for the base tables in the domain that
+    /// are in `catalog`
+    RequestMinPersistedReplicationOffset {
+        catalog: Option<SqlIdentifier>,
+    },
 
     /// Request a map of all replication offsets of the base table nodes in the domain
     RequestReplicationOffsets,

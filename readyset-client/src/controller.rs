@@ -1036,12 +1036,13 @@ impl ReadySetHandle {
 
     simple_request!(
         /// Each base table has an offset up to which data has been persisted to disk, and this
-        /// method returns the minimum of those offsets. If no base tables have unpersisted data,
-        /// this method returns `PersistencePoint::Persisted`.
+        /// method returns the minimum of those offsets over the base tables in `catalog`. If none
+        /// of those tables have unpersisted data, this method returns
+        /// `PersistencePoint::Persisted`.
         ///
         /// See [the documentation for PersistentState](::readyset_dataflow::state::persistent_state)
         /// for more information about replication offsets.
-        min_persisted_replication_offset() -> PersistencePoint
+        min_persisted_replication_offset(catalog: Option<SqlIdentifier>) -> PersistencePoint
     );
 
     simple_request!(

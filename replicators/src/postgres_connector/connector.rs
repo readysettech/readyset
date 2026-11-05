@@ -758,7 +758,7 @@ async fn fetch_min_persisted_replication_offset(
     set_failpoint_return_err!(failpoints::POSTGRES_MIN_PERSISTED_RPC);
     match tokio::time::timeout(
         MIN_PERSISTED_RPC_TIMEOUT,
-        controller.min_persisted_replication_offset(),
+        controller.min_persisted_replication_offset(None),
     )
     .await
     {

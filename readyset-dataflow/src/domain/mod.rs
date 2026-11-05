@@ -43,7 +43,7 @@ use readyset_client::{
 };
 use readyset_data::DfType;
 use readyset_errors::{ReadySetError, ReadySetResult, internal, internal_err};
-use readyset_sql::ast::Relation;
+use readyset_sql::ast::{Relation, SqlIdentifier};
 use readyset_util::SizeOf;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
@@ -2720,9 +2720,9 @@ impl Domain {
                 index,
             } => self.handle_ready(node_idx, purge, index),
             DomainRequest::GetStatistics => self.handle_get_statistics(),
-            DomainRequest::RequestMinPersistedReplicationOffset => Ok(Some(bincode::serialize(
-                &self.min_persisted_replication_offset()?,
-            )?)),
+            DomainRequest::RequestMinPersistedReplicationOffset { catalog } => Ok(Some(
+                bincode::serialize(&self.min_persisted_replication_offset(catalog.as_ref())?)?,
+            )),
             DomainRequest::RequestReplicationOffsets => {
                 Ok(Some(bincode::serialize(&self.replication_offsets())?))
             }
@@ -4890,12 +4890,13 @@ impl Domain {
 
     pub fn min_persisted_replication_offset(
         &self,
+        catalog: Option<&SqlIdentifier>,
     ) -> ReadySetResult<BaseTableState<PersistencePoint>> {
         let mut cur_min = PersistencePoint::Persisted;
 
         for (idx, n) in self.nodes.iter() {
             let node = n.borrow();
-            if node.is_base() && !node.is_dropped() {
+            if node.is_base() && !node.is_dropped() && node.name().catalog.as_ref() == catalog {
                 if let Some(state) = self.state.get(idx) {
                     match (&mut cur_min, state.persisted_up_to()?) {
                         (_, PersistencePoint::Persisted) => continue,

@@ -3218,7 +3218,7 @@ mod tests {
                 .is_ok()
         }
 
-        let min_persisted_offset = noria.min_persisted_replication_offset().await.unwrap();
+        let min_persisted_offset = noria.min_persisted_replication_offset(None).await.unwrap();
 
         assert_eq!(min_persisted_offset, PersistencePoint::Persisted);
 
@@ -3251,9 +3251,60 @@ mod tests {
             .await
             .unwrap();
 
-        let min_persisted_offset = noria.min_persisted_replication_offset().await.unwrap();
+        let min_persisted_offset = noria.min_persisted_replication_offset(None).await.unwrap();
 
         assert_eq!(min_persisted_offset, PersistencePoint::UpTo(offset1));
+
+        shutdown_tx.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn min_persisted_replication_offset_by_catalog() {
+        let mut builder = Builder::for_tests();
+        builder.set_dialect(Dialect::PostgreSQL);
+        builder.set_persistence(get_persistence_params("min_persisted_by_catalog"));
+        let (mut noria, shutdown_tx) = builder.start_local().await.unwrap();
+
+        let t1 =
+            parse_create_table(Dialect::PostgreSQL, "CREATE TABLE public.t1 (id int)").unwrap();
+        let mut t2 =
+            parse_create_table(Dialect::PostgreSQL, "CREATE TABLE public.t2 (id int)").unwrap();
+        t2.table.catalog = Some("db2".into());
+        let (t1_name, t2_name) = (t1.table.clone(), t2.table.clone());
+        eventually! {
+            noria
+                .extend_recipe(ChangeList::from_changes(
+                    vec![
+                        Change::CreateTable { statement: t1.clone(), pg_meta: None },
+                        Change::CreateTable { statement: t2.clone(), pg_meta: None },
+                    ],
+                    DataDialect::DEFAULT_POSTGRESQL,
+                ))
+                .await
+                .is_ok()
+        }
+
+        // t1 lags behind t2, and holds back only its own catalog's minimum.
+        let t1_offset = ReplicationOffset::from(PostgresPosition::commit_start(0x100.into()));
+        let t2_offset = ReplicationOffset::from(PostgresPosition::commit_start(0x200.into()));
+        for (name, offset) in [(t1_name, &t1_offset), (t2_name, &t2_offset)] {
+            let mut table = noria.table(name).await.unwrap();
+            table
+                .perform_all([
+                    TableOperation::Insert(vec![1.into()]),
+                    TableOperation::SetReplicationOffset(offset.clone()),
+                ])
+                .await
+                .unwrap();
+        }
+
+        let min = noria.min_persisted_replication_offset(None).await.unwrap();
+        assert_eq!(min, PersistencePoint::UpTo(t1_offset));
+        let min = noria
+            .min_persisted_replication_offset(Some("db2".into()))
+            .await
+            .unwrap();
+        assert_eq!(min, PersistencePoint::UpTo(t2_offset));
 
         shutdown_tx.shutdown().await;
     }

@@ -671,9 +671,10 @@ impl Leader {
                 return_serialized!(ds.get_info()?)
             }
             (&Method::POST, "/min_persisted_replication_offset") => {
+                let catalog: Option<SqlIdentifier> = bincode::deserialize(&body)?;
                 let res = {
                     let ds = self.dataflow_state_handle.read().await;
-                    ds.min_persisted_replication_offset().await
+                    ds.min_persisted_replication_offset(catalog.as_ref()).await
                 }?;
                 return_serialized!(res);
             }
