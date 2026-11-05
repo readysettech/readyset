@@ -26,11 +26,10 @@ pub struct Runner<B: PsqlBackend, C> {
     enable_statement_logging: bool,
 }
 
-/// Indicates whether the client is initiating a TLS connection, or the client has closed the
-/// stream.
+/// Indicates whether the client is initiating a TLS connection, or the session has ended.
 #[derive(Clone, Copy)]
 enum MainLoopStatus {
-    // The stream has closed
+    // The session has ended
     Terminate,
     // Restart the main loop after intiating a TLS connection
     RestartWithTls,
@@ -176,6 +175,8 @@ impl<B: PsqlBackend, C: AsyncRead + AsyncWrite + Unpin> Runner<B, C> {
             };
             let Some(message) = next else { break };
             let result = match message {
+                // Terminate ends the session in every protocol state.
+                Ok(FrontendMessage::Terminate) => break,
                 Ok(msg) => self.handle_request(msg).await,
                 Err(e) => Err(Error::from(e)),
             };

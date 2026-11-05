@@ -372,8 +372,7 @@ impl Protocol {
 
                 Flush => Ok(Response::Empty),
 
-                // A request to terminate the connection.
-                Terminate => Ok(Response::Empty),
+                Terminate => Err(Error::InternalError("unexpected Terminate".into())),
 
                 m => Err(Error::UnsupportedMessage(m)),
             },
@@ -1725,28 +1724,6 @@ mod tests {
             )),
             _ => panic!(),
         }
-    }
-
-    #[test]
-    fn terminate() {
-        let mut protocol = Protocol::new(TlsMode::Disabled);
-        let mut backend = Backend::new();
-        let mut channel = Channel::<NullBytestream>::new(NullBytestream);
-
-        let startup_request = FrontendMessage::StartupMessage {
-            protocol_version: 12345,
-            user: Some(bytes_str("user_name")),
-            database: Some(bytes_str("database_name")),
-            application_name: None,
-        };
-        block_on(protocol.on_request(startup_request, &mut backend, &mut channel)).unwrap();
-
-        // A Terminate message is accepted (no response message is returned).
-        let request = FrontendMessage::Terminate;
-        assert!(matches!(
-            block_on(protocol.on_request(request, &mut backend, &mut channel)).unwrap(),
-            Response::Empty
-        ));
     }
 
     #[tokio::test]

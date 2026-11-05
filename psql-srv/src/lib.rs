@@ -224,12 +224,14 @@ pub enum QueryResponse<R> {
 /// How long a client gets to complete the TLS handshake and authenticate by default.
 pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Run a `Backend` on the provided bytestream until the bytestream is remotely closed.
+/// Run a `Backend` on the provided bytestream until the frontend sends Terminate or closes the
+/// bytestream.
 ///
 /// * `backend` - A `Backend` object that emulates a PostgreSQL database as described above.
 /// * `channel` - A bytestream channel connected to a PostgreSQL frontend. Requests sent by the
 ///   frontend on this channel will be forwarded to `backend`, and the `backend`'s responses will be
-///   returned to the frontend. When `channel` is closed by the frontend, `run_backend` returns.
+///   returned to the frontend. When the frontend sends Terminate or closes `channel`,
+///   `run_backend` returns and `channel` is closed.
 /// * `enable_statement_logging` - Whether to log statements received from the client.
 /// * `tls_acceptor` - An object that performs a TLS handshake and creates a `TlsStream` or returns
 ///   an error.
