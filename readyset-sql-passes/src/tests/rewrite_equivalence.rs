@@ -332,6 +332,7 @@ fn rewrite_params(dialect: Dialect) -> AdapterRewriteParams {
         // Literals stay literal, so the emitted statement runs as-is.  Auto-parameterization
         // happens after the passes under test and does not affect them.
         autoparameterize: false,
+        features: Default::default(),
     }
 }
 

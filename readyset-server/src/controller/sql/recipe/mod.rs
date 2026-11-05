@@ -255,6 +255,7 @@ impl Recipe {
             server_supports_pagination: self.mir_config().allow_paginate
                 && self.mir_config().allow_topk,
             autoparameterize: true,
+            features: Default::default(),
         }
     }
 

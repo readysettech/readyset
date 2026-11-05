@@ -1646,6 +1646,7 @@ where
                 .server_worker_options
                 .feature_mixed_comparisons,
             autoparameterize: true,
+            features: Default::default(),
         };
 
         let migration_request_timeout = if options.migration_request_timeout_ms > 0 {

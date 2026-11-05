@@ -94,8 +94,8 @@ pub struct QueryParameters {
     slots: LiteralSlots,
     /// Whether the query arrived with placeholders, which only a bind can fill.
     has_user_placeholders: bool,
-    /// How many values the client binds.
-    client_params: u16,
+    /// What the statement held as the client sent it, for the Readyset rewrite.
+    features: QueryFeatures,
 }
 
 impl QueryParameters {
@@ -203,6 +203,10 @@ pub struct AdapterRewriteParams {
     /// the reads that carry those same literals; any other read goes upstream. Defaults to
     /// `true`.
     pub autoparameterize: bool,
+    /// Facts about the statement, such as its parameter count. The rewrite fills them in from its
+    /// first walk, so callers leave this at its default.
+    #[serde(skip)]
+    pub features: QueryFeatures,
 }
 
 impl AdapterRewriteParams {
@@ -213,6 +217,7 @@ impl AdapterRewriteParams {
             server_supports_pagination: false,
             server_supports_mixed_comparisons: false,
             autoparameterize: true,
+            features: QueryFeatures::default(),
         }
     }
 }
@@ -241,8 +246,8 @@ impl<C: AdapterRewriteContext> AdapterRewriteContext for &C {}
 fn rewrite_equivalent_parameters(
     query: &mut SelectStatement,
     flags: AdapterRewriteParams,
-    client_params: u16,
 ) -> ReadySetResult<QueryParameters> {
+    let client_params = flags.features.client_params;
     let span = trace_span!("adapter_rewrites", part = "equivalent_parameters").entered();
     // `trace_pass!` in this function's dialect.
     macro_rules! pass {
@@ -269,7 +274,7 @@ fn rewrite_equivalent_parameters(
         has_user_placeholders: placeholder_count > auto_parameterized.params.len(),
         auto_parameters: auto_parameterized.params,
         slots: auto_parameterized.slots,
-        client_params,
+        features: flags.features,
     })
 }
 
@@ -306,7 +311,7 @@ fn rewrite_equivalent_parameters(
 ///    Audit trail: the warning log.
 pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
     query: &mut SelectStatement,
-    flags: AdapterRewriteParams,
+    mut flags: AdapterRewriteParams,
     context: C,
 ) -> ReadySetResult<QueryParameters> {
     let span = trace_span!("adapter_rewrites", part = "equivalent_deep").entered();
@@ -316,7 +321,7 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
     }
     trace!(parent: &span, query = %query.display(flags.dialect), "Going to rewrite for deep caching");
 
-    let client_params = client_parameter_count(query)?;
+    flags.features = query_features(query)?;
     // Settle the placeholder spelling before any pass below reads one, counting the client's
     // parameters first so that count is over the spelling they sent.
     pass!(standardize_placeholders(query)?);
@@ -373,7 +378,7 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
     }
     pass!(query.order_limit_removal(&context)?);
 
-    rewrite_equivalent_parameters(query, flags, client_params)
+    rewrite_equivalent_parameters(query, flags)
 }
 
 /// Returns true if the query's WHERE clause will produce a range-based index
@@ -431,8 +436,9 @@ pub fn rewrite_for_readyset(
         auto_parameters,
         slots,
         has_user_placeholders: _,
-        client_params,
+        features,
     } = prev;
+    let client_params = features.client_params;
     assert_eq!(dialect, flags.dialect);
 
     // A literal `OFFSET 0` skips no rows, so normalize it away up front. Otherwise `is_topk()`
@@ -1357,8 +1363,16 @@ where
     )))
 }
 
-/// How many values a client binds to `query`, which is one per `?` or the highest `$n`.
-fn client_parameter_count(query: &SelectStatement) -> ReadySetResult<u16> {
+/// What the rewrite passes need to know about a statement, collected in one walk before any pass
+/// runs.
+#[derive(Debug, Default, Clone, Copy, Hash, PartialEq, Eq)]
+pub struct QueryFeatures {
+    /// How many values the client binds: one per `?`, or the highest `$n`.
+    client_params: u16,
+}
+
+/// Collects the [`QueryFeatures`] of `query` in one walk.
+fn query_features(query: &SelectStatement) -> ReadySetResult<QueryFeatures> {
     #[derive(Default)]
     struct ParameterCount {
         question_marks: usize,
@@ -1383,8 +1397,9 @@ fn client_parameter_count(query: &SelectStatement) -> ReadySetResult<u16> {
     let mut count = ParameterCount::default();
     count.visit_select_statement(query);
     let params = count.question_marks.max(count.highest_number);
-    u16::try_from(params)
-        .map_err(|_| unsupported_err!("{params} parameters, more than {}", u16::MAX))
+    let client_params = u16::try_from(params)
+        .map_err(|_| unsupported_err!("{params} parameters, more than {}", u16::MAX))?;
+    Ok(QueryFeatures { client_params })
 }
 
 struct ReorderNumberedPlaceholdersVisitor {
@@ -1575,14 +1590,11 @@ mod tests {
 
         fn expects_user_params(dialect: Dialect, sql: &str) -> bool {
             let mut query = parse_select_statement(sql, dialect);
-            let client_params = client_parameter_count(&query).unwrap();
-            rewrite_equivalent_parameters(
-                &mut query,
-                AdapterRewriteParams::new(dialect),
-                client_params,
-            )
-            .unwrap()
-            .expects_user_params()
+            let mut flags = AdapterRewriteParams::new(dialect);
+            flags.features = query_features(&query).unwrap();
+            rewrite_equivalent_parameters(&mut query, flags)
+                .unwrap()
+                .expects_user_params()
         }
 
         #[test]
@@ -2167,13 +2179,7 @@ mod tests {
         use super::*;
 
         fn rewrite_params(dialect: Dialect) -> AdapterRewriteParams {
-            AdapterRewriteParams {
-                dialect,
-                server_supports_topk: false,
-                server_supports_pagination: false,
-                server_supports_mixed_comparisons: false,
-                autoparameterize: true,
-            }
+            AdapterRewriteParams::new(dialect)
         }
 
         struct TestAdapterRewriteContext {
@@ -4383,13 +4389,7 @@ mod tests {
         }
 
         fn rewrite_params(dialect: Dialect) -> AdapterRewriteParams {
-            AdapterRewriteParams {
-                dialect,
-                server_supports_topk: false,
-                server_supports_pagination: false,
-                server_supports_mixed_comparisons: false,
-                autoparameterize: true,
-            }
+            AdapterRewriteParams::new(dialect)
         }
 
         /// A test context that actually populates schema data to exercise resolve_schemas

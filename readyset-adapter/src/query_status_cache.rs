@@ -2716,6 +2716,7 @@ mod tests {
             server_supports_pagination: false,
             server_supports_mixed_comparisons: false,
             autoparameterize,
+            features: Default::default(),
         };
         let mut stmt = select_statement(query).unwrap();
         let out = readyset_sql_passes::adapter_rewrites::rewrite_query(&mut stmt, params, &context)
