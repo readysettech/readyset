@@ -1,6 +1,7 @@
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
+use proptest::prelude::Just;
 use readyset_util::fmt::fmt_with;
 use serde::{Deserialize, Serialize};
 use test_strategy::Arbitrary;
@@ -15,9 +16,15 @@ use crate::{
 ///
 /// This type is (perhaps surprisingly) quite pervasive - it's used as not only the names for tables
 /// and views, but also all nodes in the graph (both MIR and dataflow).
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Arbitrary)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Arbitrary)]
 #[non_exhaustive]
 pub struct Relation {
+    /// The Postgres database of the relation, or `None` for the database in the upstream URL.
+    /// Always `None` for MySQL, whose databases are schemas.
+    #[serde(default)]
+    #[strategy(Just(None))]
+    pub catalog: Option<SqlIdentifier>,
+
     /// The optional schema for the relation.
     ///
     /// Note that this name is maximally general - what MySQL calls a "database" is actually much
@@ -26,6 +33,21 @@ pub struct Relation {
 
     /// The name of the relation itself
     pub name: SqlIdentifier,
+}
+
+/// Hash the catalog only when it is set, so a relation in the upstream URL's database hashes as it
+/// did before relations had a catalog, and query IDs derived from it stay the same.
+impl Hash for Relation {
+    fn hash<H>(&self, state: &mut H)
+    where
+        H: Hasher,
+    {
+        if self.catalog.is_some() {
+            self.catalog.hash(state);
+        }
+        self.schema.hash(state);
+        self.name.hash(state);
+    }
 }
 
 impl From<SqlIdentifier> for Relation {
@@ -124,7 +146,11 @@ impl DialectDisplay for Relation {
 impl Relation {
     /// Return a relation with the given schema and name.
     pub fn new(schema: Option<SqlIdentifier>, name: SqlIdentifier) -> Self {
-        Self { schema, name }
+        Self {
+            catalog: None,
+            schema,
+            name,
+        }
     }
 
     /// Like [`display()`](Self::display) except the schema and table name will not be quoted.
@@ -485,6 +511,7 @@ impl Eq for NonReplicatedRelation {}
 #[cfg(test)]
 mod tests {
     use std::assert_matches;
+    use std::hash::DefaultHasher;
 
     use sqlparser::ast::{Ident, ObjectName};
 
@@ -493,6 +520,35 @@ mod tests {
     fn object_name(parts: &[&str]) -> ObjectName {
         let idents: Vec<_> = parts.iter().map(|part| Ident::new(*part)).collect();
         ObjectName::from(idents)
+    }
+
+    fn hash(relation: &Relation) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        relation.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    #[test]
+    fn a_recorded_relation_without_a_catalog_loads() {
+        let relation = Relation::new(Some("s".into()), "t".into());
+        let mut recorded = serde_json::to_value(&relation).expect("relation should serialize");
+        recorded
+            .as_object_mut()
+            .expect("relation serializes as an object")
+            .remove("catalog")
+            .expect("catalog should have been there to remove");
+
+        let loaded: Relation =
+            serde_json::from_value(recorded).expect("relation without catalog should load");
+        assert_eq!(loaded, relation);
+    }
+
+    #[test]
+    fn relation_hash_includes_catalog() {
+        let relation = Relation::new(Some("s".into()), "t".into());
+        let mut in_catalog = relation.clone();
+        in_catalog.catalog = Some("d".into());
+        assert_ne!(hash(&in_catalog), hash(&relation));
     }
 
     #[test]
