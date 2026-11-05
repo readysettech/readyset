@@ -16,6 +16,7 @@ use crate::{
 /// This type is (perhaps surprisingly) quite pervasive - it's used as not only the names for tables
 /// and views, but also all nodes in the graph (both MIR and dataflow).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Arbitrary)]
+#[non_exhaustive]
 pub struct Relation {
     /// The optional schema for the relation.
     ///
