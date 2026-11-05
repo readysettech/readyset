@@ -30,7 +30,7 @@ use readyset_client::replay_path::ReplayPathInfo;
 use readyset_client::status::{CurrentStatus, ReadySetControllerStatus, ReplicationStatus};
 use readyset_client::{GraphvizOptions, TableStatus, ViewCreateRequest, WorkerDescriptor};
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
-use readyset_sql::ast::Relation;
+use readyset_sql::ast::{Relation, SqlIdentifier};
 use readyset_sql::Dialect;
 use readyset_sql_parsing::ParsingPreset;
 use readyset_telemetry_reporter::TelemetrySender;
@@ -703,9 +703,10 @@ impl Leader {
                 if self.running_recovery.is_some() {
                     return Err(ReadySetError::ControllerRecovering);
                 }
+                let catalog: Option<SqlIdentifier> = bincode::deserialize(&body)?;
                 let res = {
                     let ds = self.dataflow_state_handle.read().await;
-                    ds.replication_offsets().await
+                    ds.replication_offsets(catalog.as_ref()).await
                 }?;
                 return_serialized!(res);
             }
@@ -736,7 +737,7 @@ impl Leader {
             (&Method::POST, "/status") => {
                 let ds = self.dataflow_state_handle.read().await;
                 let replication_offsets = if ds.all_domains_placed() {
-                    Some(ds.replication_offsets().await?)
+                    Some(ds.replication_offsets(None).await?)
                 } else {
                     None
                 };

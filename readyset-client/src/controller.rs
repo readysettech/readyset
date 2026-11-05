@@ -14,7 +14,7 @@ use petgraph::graph::NodeIndex;
 use readyset_errors::{
     internal, internal_err, rpc_err, rpc_err_no_downcast, ReadySetError, ReadySetResult,
 };
-use readyset_sql::ast::{NonReplicatedRelation, Relation};
+use readyset_sql::ast::{NonReplicatedRelation, Relation, SqlIdentifier};
 use readyset_sql_passes::adapter_rewrites::AdapterRewriteParams;
 use replication_offset::ReplicationOffsets;
 use reqwest::StatusCode;
@@ -1026,12 +1026,12 @@ impl ReadySetHandle {
     );
 
     simple_request!(
-        /// Get a set of all replication offsets for the entire system.
+        /// Get the replication offset of the schema and of the base tables in `catalog`.
         ///
         /// See [the documentation for
         /// PersistentState](::readyset_dataflow::state::persistent_state) for more information
         /// about replication offsets.
-        replication_offsets() -> ReplicationOffsets
+        replication_offsets(catalog: Option<SqlIdentifier>) -> ReplicationOffsets
     );
 
     simple_request!(

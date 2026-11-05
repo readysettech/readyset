@@ -741,7 +741,7 @@ impl MySqlReplicator<'_> {
             .map_err(log_err)?;
 
         // Replication offsets could change following a schema update, so get a new list
-        let replication_offsets = noria.replication_offsets().await?;
+        let replication_offsets = noria.replication_offsets(None).await?;
 
         self.dump_tables(
             noria,

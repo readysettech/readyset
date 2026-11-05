@@ -925,13 +925,15 @@ impl DfState {
         Ok(cur_min)
     }
 
-    /// Returns a struct containing the set of all replication offsets within the system, including
-    /// the replication offset for the schema stored in the controller and the replication offsets
-    /// of all base tables
+    /// Returns a struct containing the replication offset for the schema stored in the controller
+    /// and the replication offsets of the base tables in `catalog`
     ///
     /// See [the documentation for PersistentState](::readyset_dataflow::state::persistent_state)
     /// for more information about replication offsets.
-    pub(super) async fn replication_offsets(&self) -> ReadySetResult<ReplicationOffsets> {
+    pub(super) async fn replication_offsets(
+        &self,
+        catalog: Option<&SqlIdentifier>,
+    ) -> ReadySetResult<ReplicationOffsets> {
         let domains = self.domains_with_base_tables().await?;
         self.query_domains::<_, NodeMap<BaseTableState<Option<ReplicationOffset>>>>(
             domains
@@ -951,6 +953,9 @@ impl DfState {
                     }
 
                     let table_name = self.ingredients[*ni].name();
+                    if table_name.catalog.as_ref() != catalog {
+                        continue;
+                    }
                     match offset {
                         BaseTableState::Initialized(offset) => {
                             acc.tables.insert(table_name.clone(), offset);

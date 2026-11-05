@@ -1079,7 +1079,7 @@ impl<'a> PostgresReplicator<'a> {
             .set_schema_replication_offset(Some(&wal_position))
             .await?;
 
-        let replication_offsets = self.noria.replication_offsets().await?;
+        let replication_offsets = self.noria.replication_offsets(None).await?;
 
         if !full_snapshot {
             tables.retain(|t| {

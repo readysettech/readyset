@@ -6500,7 +6500,7 @@ async fn pgsql_group_commit_truncate_preserves_pending_position() {
         let offsets = ctx
             .controller()
             .await
-            .replication_offsets()
+            .replication_offsets(None)
             .await
             .expect("replication_offsets RPC");
         let a_offset = offsets
@@ -6585,7 +6585,7 @@ async fn pgsql_group_commit_truncate_preserves_pending_position() {
     let offsets = ctx
         .controller()
         .await
-        .replication_offsets()
+        .replication_offsets(None)
         .await
         .expect("replication_offsets RPC");
     let a_offset = offsets

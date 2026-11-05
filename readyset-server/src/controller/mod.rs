@@ -1161,7 +1161,7 @@ impl Controller {
                     .dataflow_state_handle
                     .read()
                     .await
-                    .replication_offsets()
+                    .replication_offsets(None)
                     .await
                     .ok()
                     .and_then(|offsets| offsets.min_present_offset().ok().flatten().cloned())
@@ -1244,7 +1244,7 @@ impl Controller {
                 let ds = leader.dataflow_state_handle.read().await;
                 let offset: ReplicationOffset = position.parse()?;
 
-                let replication_offsets = ds.replication_offsets().await?;
+                let replication_offsets = ds.replication_offsets(None).await?;
 
                 // Block cross-dialect position changes (e.g. MySQL -> PostgreSQL)
                 // but allow switching between MySQL offset types (file+pos <-> GTID).
@@ -2202,7 +2202,7 @@ async fn handle_controller_request(
 #[cfg(test)]
 mod tests {
     use std::assert_matches;
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
     use std::time::Duration;
 
     use petgraph::visit::IntoNodeReferences;
@@ -2217,10 +2217,12 @@ mod tests {
     use readyset_sql_parsing::parse_create_table;
     use readyset_sql_parsing::parse_select;
     use readyset_util::eventually;
+    use replication_offset::postgres::PostgresPosition;
     use replication_offset::ReplicationOffset;
     use replicators::MySqlPosition;
 
-    use crate::integration_utils::start_simple;
+    use crate::integration_utils::{get_persistence_params, start_simple};
+    use crate::Builder;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn remove_query() {
@@ -2328,7 +2330,7 @@ mod tests {
         .await
         .unwrap();
 
-        let offsets = noria.replication_offsets().await.unwrap();
+        let offsets = noria.replication_offsets(None).await.unwrap();
 
         let mysql_pos: MySqlPosition = offsets.schema.unwrap().try_into().unwrap();
         assert_eq!(mysql_pos.position, 1);
@@ -2348,6 +2350,54 @@ mod tests {
         assert_eq!(mysql_pos.position, 3);
 
         assert_eq!(offsets.tables[&"t3".into()], None);
+
+        shutdown_tx.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn replication_offsets_by_catalog() {
+        readyset_tracing::init_test_logging();
+        let mut builder = Builder::for_tests();
+        builder.set_dialect(Dialect::PostgreSQL);
+        builder.set_persistence(get_persistence_params("replication_offsets_by_catalog"));
+        let (mut noria, shutdown_tx) = builder.start_local().await.unwrap();
+
+        let t1 =
+            parse_create_table(Dialect::PostgreSQL, "CREATE TABLE public.t1 (id int);").unwrap();
+        let mut t2 =
+            parse_create_table(Dialect::PostgreSQL, "CREATE TABLE public.t2 (id int);").unwrap();
+        t2.table.catalog = Some("db2".into());
+        let (t1_name, t2_name) = (t1.table.clone(), t2.table.clone());
+        eventually! {
+            noria
+                .extend_recipe(ChangeList::from_changes(
+                    vec![
+                        Change::CreateTable { statement: t1.clone(), pg_meta: None },
+                        Change::CreateTable { statement: t2.clone(), pg_meta: None },
+                    ],
+                    DataDialect::DEFAULT_POSTGRESQL,
+                ))
+                .await
+                .is_ok()
+        }
+
+        let t1_offset = ReplicationOffset::from(PostgresPosition::commit_start(0x100.into()));
+        let t2_offset = ReplicationOffset::from(PostgresPosition::commit_start(0x200.into()));
+        let mut table = noria.table(t1_name.clone()).await.unwrap();
+        table
+            .set_replication_offset(t1_offset.clone())
+            .await
+            .unwrap();
+        let mut table = noria.table(t2_name.clone()).await.unwrap();
+        table
+            .set_replication_offset(t2_offset.clone())
+            .await
+            .unwrap();
+
+        let offsets = noria.replication_offsets(None).await.unwrap();
+        assert_eq!(offsets.tables, HashMap::from([(t1_name, Some(t1_offset))]));
+        let offsets = noria.replication_offsets(Some("db2".into())).await.unwrap();
+        assert_eq!(offsets.tables, HashMap::from([(t2_name, Some(t2_offset))]));
 
         shutdown_tx.shutdown().await;
     }

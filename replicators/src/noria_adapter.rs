@@ -387,7 +387,7 @@ impl<'a> NoriaAdapter<'a> {
         let mut replication_offsets = retry_with_exponential_backoff!(
             {
                 let mut noria = noria.clone();
-                noria.replication_offsets().await
+                noria.replication_offsets(None).await
             },
             retries: 5,
             delay: 250,
@@ -539,7 +539,7 @@ impl<'a> NoriaAdapter<'a> {
                 snapshot_result?;
 
                 // Get updated offsets, after potential replication happened
-                replication_offsets = noria.replication_offsets().await?;
+                replication_offsets = noria.replication_offsets(None).await?;
 
                 // If we have some offsets in `replication_offsets`, that means some tables were
                 // already snapshot before we started up. But if we're in this block
@@ -711,7 +711,7 @@ impl<'a> NoriaAdapter<'a> {
         let replication_offsets = retry_with_exponential_backoff!(
             {
                 let mut noria = noria.clone();
-                noria.replication_offsets().await
+                noria.replication_offsets(None).await
             },
             retries: 5,
             delay: 250,
@@ -907,7 +907,7 @@ impl<'a> NoriaAdapter<'a> {
             .start_replication(&repl_slot_name, PUBLICATION_NAME, version_num)
             .await?;
 
-        let replication_offsets = noria.replication_offsets().await?;
+        let replication_offsets = noria.replication_offsets(None).await?;
         trace!(?replication_offsets, "Loaded replication offsets");
         let (mut min_pos, max_pos) = match (
             replication_offsets.min_present_offset()?,
@@ -1662,7 +1662,7 @@ impl<'a> NoriaAdapter<'a> {
         retry_with_exponential_backoff!(
             || async {
                 let mut noria = self.noria.clone();
-                noria.replication_offsets().await
+                noria.replication_offsets(None).await
             },
             retries: 5,
             delay: 250,
