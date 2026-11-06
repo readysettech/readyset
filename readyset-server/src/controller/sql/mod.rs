@@ -135,12 +135,13 @@ pub(crate) struct SqlIncorporator {
     /// Internally, we just represent custom types as named aliases for a [`DfType`].
     custom_types: HashMap<Relation, DfType>,
 
-    /// Map from postgresql `oid` for custom types to the names of those custom types.
+    /// Map from the catalog and postgresql `oid` of custom types to the names of those custom
+    /// types. An `oid` is unique only within its catalog.
     ///
     /// # Invariants
     ///
     /// All values in this map will also be keys in `self.custom_types`.
-    custom_types_by_oid: HashMap<u32, Relation>,
+    custom_types_by_oid: HashMap<(Option<SqlIdentifier>, u32), Relation>,
 
     pub(crate) config: Config,
 
@@ -813,7 +814,8 @@ impl SqlIncorporator {
             ..
         } = ty
         {
-            self.custom_types_by_oid.insert(oid, name.clone());
+            self.custom_types_by_oid
+                .insert((name.catalog.clone(), oid), name.clone());
         }
         self.custom_types.insert(name, ty);
     }
@@ -829,12 +831,13 @@ impl SqlIncorporator {
         change: AlterTypeChange,
     ) -> ReadySetResult<(&DfType, Option<Relation>)> {
         let old_name = if !self.custom_types.contains_key(name) {
-            let Some(old_name) = self.custom_types_by_oid.remove(&oid) else {
+            let key = (name.catalog.clone(), oid);
+            let Some(old_name) = self.custom_types_by_oid.remove(&key) else {
                 return Err(invalid_query_err!(
                     "Could not find custom type with oid {oid}"
                 ));
             };
-            self.custom_types_by_oid.insert(oid, name.clone());
+            self.custom_types_by_oid.insert(key, name.clone());
             let ty = self
                 .custom_types
                 .remove(&old_name)
@@ -1898,5 +1901,53 @@ impl ImpliedTablesContext for SqlIncorporatorRewriteContext<'_> {
 impl RewriteDialectContext for SqlIncorporatorRewriteContext<'_> {
     fn dialect(&self) -> Dialect {
         self.dialect
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn enum_type(oid: u32, variants: &[&str]) -> DfType {
+        let metadata = PgEnumMetadata {
+            name: "e".into(),
+            schema: "public".into(),
+            oid,
+            array_oid: oid + 1,
+        };
+        DfType::from_enum_variants(variants.iter().map(|v| v.to_string()), Some(metadata))
+    }
+
+    fn enum_variants(ty: &DfType) -> Vec<String> {
+        match ty {
+            DfType::Enum { variants, .. } => variants.iter().cloned().collect(),
+            _ => panic!("not an enum: {ty:?}"),
+        }
+    }
+
+    #[test]
+    fn custom_types_by_oid_per_catalog() {
+        let mut inc = SqlIncorporator::new(Dialect::DEFAULT_POSTGRESQL);
+        let e = Relation::new(Some("public".into()), "e".into());
+        let e2 = Relation::new(Some("public".into()), "e2".into());
+        let mut db2_e = e.clone();
+        db2_e.catalog = Some("db2".into());
+        let mut db2_e2 = e2.clone();
+        db2_e2.catalog = Some("db2".into());
+
+        inc.add_custom_type(e.clone(), enum_type(100, &["a"]));
+        inc.add_custom_type(db2_e.clone(), enum_type(100, &["x"]));
+
+        let change = AlterTypeChange::SetVariants {
+            new_variants: vec!["a".into(), "b".into()],
+            original_variants: None,
+        };
+        let (_, old_name) = inc.alter_custom_type(100, &e2, change).unwrap();
+        assert_eq!(old_name, Some(e.clone()));
+
+        assert!(inc.get_custom_type(&e).is_none());
+        assert_eq!(enum_variants(inc.get_custom_type(&e2).unwrap()), ["a", "b"]);
+        assert_eq!(enum_variants(inc.get_custom_type(&db2_e).unwrap()), ["x"]);
+        assert!(inc.get_custom_type(&db2_e2).is_none());
     }
 }
