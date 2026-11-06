@@ -801,23 +801,35 @@ fn escape_file_name_part(s: &str) -> Cow<'_, str> {
 
 /// Return the name of a base table's RocksDB directory, with each part escaped so that `-` only
 /// appears between parts.
+///
+/// A table in a catalog always has a schema part, and a lone `=` stands for no schema, since
+/// escaping never produces it.
 fn base_table_file_name(prefix: &str, table: &Relation, shard: usize) -> String {
     let prefix = prefix.replace('-', "_");
     let name = escape_file_name_part(&table.name);
-    match &table.schema {
-        Some(schema) => format!("{prefix}-{}-{name}-{shard}", escape_file_name_part(schema)),
-        None => format!("{prefix}-{name}-{shard}"),
+    let schema = table.schema.as_deref().map(escape_file_name_part);
+    match (&table.catalog, schema) {
+        (Some(catalog), schema) => format!(
+            "{prefix}-{}-{}-{name}-{shard}",
+            escape_file_name_part(catalog),
+            schema.unwrap_or(Cow::Borrowed("="))
+        ),
+        (None, Some(schema)) => format!("{prefix}-{schema}-{name}-{shard}"),
+        (None, None) => format!("{prefix}-{name}-{shard}"),
     }
 }
 
 /// Return the name of a base table's RocksDB directory from before schema and table names were
-/// escaped.
-fn legacy_base_table_file_name(prefix: &str, table: &Relation, shard: usize) -> String {
+/// escaped, or `None` for a table in a catalog, which never had such a name.
+fn legacy_base_table_file_name(prefix: &str, table: &Relation, shard: usize) -> Option<String> {
+    if table.catalog.is_some() {
+        return None;
+    }
     let prefix = prefix.replace('-', "_");
-    match &table.schema {
+    Some(match &table.schema {
         Some(schema) => format!("{prefix}-{schema}-{}-{shard}", table.name),
         None => format!("{prefix}-{}-{shard}", table.name),
-    }
+    })
 }
 
 /// Creates the materialized node state for the given node.
@@ -830,7 +842,7 @@ async fn initialize_state(
     node_idx: LocalNodeIndex,
     indices: HashSet<Index>,
     base_name: String,
-    legacy_name: String,
+    legacy_name: Option<String>,
     table: Relation,
     unique_keys: Vec<Box<[usize]>>,
     persistence_params: PersistenceParameters,
@@ -860,7 +872,7 @@ async fn initialize_state(
             {
                 let base_name = base_name.clone();
                 tokio::task::spawn_blocking(move || {
-                    if legacy_name != base_name {
+                    if let Some(legacy_name) = legacy_name.filter(|n| *n != base_name) {
                         match persistence_params.rename_legacy_db(&legacy_name, &base_name) {
                             Ok(true) => info!(%legacy_name, %base_name, "Renamed base table state"),
                             Ok(false) => {}
@@ -5246,11 +5258,17 @@ mod test {
         Relation::new(schema.map(Into::into), name.into())
     }
 
+    fn relation_in(catalog: &str, schema: Option<&str>, name: &str) -> Relation {
+        let mut table = relation(schema, name);
+        table.catalog = Some(catalog.into());
+        table
+    }
+
     #[test]
     fn base_table_file_name_keeps_plain_names() {
         for table in [relation(Some("public"), "t"), relation(None, "t")] {
             assert_eq!(
-                base_table_file_name("my-prefix", &table, 1),
+                Some(base_table_file_name("my-prefix", &table, 1)),
                 legacy_base_table_file_name("my-prefix", &table, 1),
             );
         }
@@ -5269,6 +5287,22 @@ mod test {
     }
 
     #[test]
+    fn base_table_file_name_includes_catalog() {
+        assert_eq!(
+            base_table_file_name("readyset", &relation_in("db2", Some("public"), "t"), 0),
+            "readyset-db2-public-t-0"
+        );
+        assert_eq!(
+            base_table_file_name("readyset", &relation_in("my-db", Some("public"), "t"), 0),
+            "readyset-my=2Ddb-public-t-0"
+        );
+        assert_eq!(
+            legacy_base_table_file_name("readyset", &relation_in("db2", Some("public"), "t"), 0),
+            None
+        );
+    }
+
+    #[test]
     fn base_table_file_names_are_distinct() {
         let names = [
             relation(Some("a-b"), "c"),
@@ -5277,6 +5311,12 @@ mod test {
             relation(Some("a"), "b=2Dc"),
             relation(Some("a-"), "b"),
             relation(Some("a"), "-b"),
+            relation(Some("a"), "b"),
+            relation_in("a", None, "b"),
+            relation_in("a", Some(""), "b"),
+            relation_in("a", Some("="), "b"),
+            relation_in("a", Some("b"), "c"),
+            relation_in("a-b", Some("c"), "d"),
         ]
         .map(|table| base_table_file_name("readyset", &table, 0));
         assert!(names.iter().all_unique(), "{names:?}");
