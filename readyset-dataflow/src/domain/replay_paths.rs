@@ -221,36 +221,61 @@ impl ReplayPaths {
             .flat_map(move |(tag, path)| {
                 match &path.trigger {
                     TriggerEndpoint::Local(key) | TriggerEndpoint::Start(key) => {
-                        let maybe_downstream_keys =
-                            path.target_index.as_ref().and_then(|_target_index| {
-                                if let Some(destination_index) = &path.destination_index {
-                                    let result = remapped_keys.remove(
-                                        path.last_segment().node, // The node with generated columns (join)
-                                        &destination_index.columns,
-                                        node,           // The source node we're evicting from
-                                        &index.columns, // The columns we're evicting from in the source
-                                        keys,           // The keys being evicted
+                        let downstream_keys = {
+                            // The generated columns belong to the same node that holds the source
+                            // columns (e.g. Paginate). The replay path's source is keyed on the
+                            // generated columns, so the keys must be remapped first.
+                            if key != index && self.columns_are_generated(node, &key.columns) {
+                                let result = remapped_keys.remove(
+                                    node,
+                                    &key.columns,
+                                    node,
+                                    &index.columns,
+                                    keys,
+                                );
+                                if result.is_some() {
+                                    tracing::trace!(
+                                        ?tag,
+                                        ?node,
+                                        ?index,
+                                        target_node = ?path.last_segment().node,
+                                        num_remapped = result.as_ref().map(|v| v.len()),
+                                        "found remapped keys for eviction from the same node holding the source columns"
                                     );
-                                    if result.is_some() {
-                                        tracing::trace!(
-                                            ?tag,
-                                            ?node,
-                                            ?index,
-                                            destination_index = ?destination_index,
-                                            target_node = ?path.last_segment().node,
-                                            num_remapped = result.as_ref().map(|v| v.len()),
-                                            "found remapped keys for eviction"
-                                        );
-                                    }
-                                    result
-                                } else {
-                                    None
                                 }
-                            });
+                                result
+                            } else if let Some(destination_index) = &path.destination_index
+                                && self.columns_are_generated(
+                                    path.last_segment().node,
+                                    &destination_index.columns,
+                                )
+                            {
+                                let result = remapped_keys.remove(
+                                    path.last_segment().node, // The node with generated columns (join)
+                                    &destination_index.columns,
+                                    node,           // The source node we're evicting from
+                                    &index.columns, // The columns we're evicting from in the source
+                                    keys,           // The keys being evicted
+                                );
+                                if result.is_some() {
+                                    tracing::trace!(
+                                        ?tag,
+                                        ?node,
+                                        ?index,
+                                        destination_index = ?destination_index,
+                                        target_node = ?path.last_segment().node,
+                                        num_remapped = result.as_ref().map(|v| v.len()),
+                                        "found remapped keys for eviction"
+                                    );
+                                }
+                                result
+                            } else {
+                                None
+                            }
+                        };
 
-                        if let Some(downstream) = maybe_downstream_keys {
-                            // CRITICAL: Use the ORIGINAL path (which points to the join node),
-                            // but with the REMAPPED keys!
+                        if let Some(downstream) = downstream_keys {
+                            // CRITICAL: Use the ORIGINAL path (which either ends at a straddled join, or starts with the evicted Paginate node), but with the REMAPPED keys!
                             Either::Left(iter::once((*tag, path, Cow::Owned(downstream))))
                         } else if key == index {
                             // TODO: what if the key is the same, but with the columns in another
