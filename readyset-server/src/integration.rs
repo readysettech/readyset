@@ -7569,6 +7569,134 @@ async fn read_sorted(
     rows
 }
 
+/// Builds a graph in which the join `q` has the base table `a` as its right input but runs in
+/// another domain, so `q` reads `a` through an ingress, and that ingress is partial:
+///
+/// - `ab` joins `a` with `b` on `id` and emits the columns of `b`. It runs in the domain of `b`
+///   and reads `a` through an ingress there. A partial reader on `ab`, keyed on `c1`, makes the
+///   ingress partial.
+/// - A second migration adds `q`, which joins `ab` with `a` on `k`. Its reader key is
+///   `(ab.c1, a.c2)`, with one column from each input. Because `ab` already reads `a`, `q` runs in
+///   the domain of `ab` and reads `a` through the same ingress.
+async fn straddled_join_beside_an_ingress(
+    name: &str,
+) -> (crate::Handle, ShutdownSender, [readyset_client::Table; 2]) {
+    let (mut g, shutdown_tx) = start_simple_unsharded(name).await;
+    let columns = || make_columns(&["id", "k", "c1", "c2"]);
+    let (a, b, ab) = g
+        .migrate(move |mig| {
+            let a = mig.add_base("a", columns(), Base::new().with_primary_key([0]));
+            let b = mig.add_base("b", columns(), Base::new().with_primary_key([0]));
+            let emit = (0..4).map(|c| (Side::Right, c)).collect();
+            let ab = Join::new(a, b, JoinType::Inner, vec![(0, 0)], emit, true, None);
+            let ab = mig.add_ingredient("ab", columns(), ab);
+            mig.maintain_anonymous(ab, &Index::hash_map(vec![2]));
+            (a, b, ab)
+        })
+        .await;
+    g.migrate(move |mig| {
+        let emit = vec![
+            (Side::Left, 0),
+            (Side::Right, 0),
+            (Side::Left, 2),
+            (Side::Right, 3),
+        ];
+        let q = Join::new(ab, a, JoinType::Inner, vec![(1, 1)], emit, true, None);
+        let q = mig.add_ingredient("q", make_columns(&["abid", "aid", "c1", "c2"]), q);
+        mig.maintain_anonymous(q, &Index::hash_map(vec![2, 3]));
+    })
+    .await;
+    let states = g.materialization_info().await.unwrap();
+    let ingress = states
+        .iter()
+        .find(|m| m.node_name.name == "a" && m.node_description != "B")
+        .expect("an ingress of a");
+    assert!(ingress.partial, "{ingress:?}");
+    let q = states
+        .iter()
+        .find(|m| m.node_name.name == "q" && m.node_description != "R")
+        .expect("the state of q");
+    // Check that the right input of `q` is the partial ingress. The description of a join gives
+    // the node index of its right input after the join symbol U+22C8.
+    let dot = g.graphviz(Default::default()).await.unwrap();
+    let q_right = dot.lines().find_map(|line| {
+        let (head, right) = line.split_once('\u{22c8}')?;
+        let join = head.trim().split(' ').next()?.trim_start_matches('n');
+        let right = right.trim_start().split(':').next()?;
+        (join.parse::<usize>().ok()? == q.node_index.index())
+            .then(|| right.parse::<usize>().ok())?
+    });
+    assert_eq!(q_right, Some(ingress.node_index.index()), "{dot}");
+    let tables = [
+        g.table_by_index(a).await.unwrap(),
+        g.table_by_index(b).await.unwrap(),
+    ];
+    (g, shutdown_tx, tables)
+}
+
+/// Reads the key `(c1, c2)` from the reader on `q` that [`straddled_join_beside_an_ingress`]
+/// builds. Returns the sorted rows, or `None` if the read fails or gets no reply in 5 seconds.
+async fn read_straddled_join(g: &mut crate::Handle, c1: i32, c2: i32) -> Option<Vec<Vec<DfValue>>> {
+    let mut q = g.view("q").await.ok()?.into_reader_handle()?;
+    let key = [c1.into(), c2.into()];
+    let lookup = q.lookup(&key, Dialect::DEFAULT_MYSQL);
+    let rows = tokio::time::timeout(Duration::from_secs(5), lookup)
+        .await
+        .ok()?
+        .ok()?;
+    Some(rows.into_vec().into_iter().sorted().collect())
+}
+
+async fn insert_into_both(tables: &mut [readyset_client::Table; 2], row: [i32; 4]) {
+    for table in tables {
+        table.insert(row.map(DfValue::from).to_vec()).await.unwrap();
+    }
+}
+
+/// Reads a key while both tables are empty, so the reader holds the key with no rows, then inserts
+/// a matching row into each table. The join key of the new rows is a hole in the right input of
+/// `q`, but the reader holds their key and must return the joined row.
+#[tokio::test(flavor = "multi_thread")]
+async fn straddled_join_beside_a_partial_ingress_takes_a_write_at_a_filled_key() {
+    let (mut g, shutdown_tx, mut tables) =
+        straddled_join_beside_an_ingress("sj_partial_ingress_write").await;
+    eventually!(
+        attempts: 10,
+        run_test: { read_straddled_join(&mut g, 1, 1).await },
+        then_assert: |rows| assert_eq!(rows, Some(vec![]))
+    );
+    insert_into_both(&mut tables, [1, 1, 1, 1]).await;
+    eventually!(
+        attempts: 10,
+        run_test: { read_straddled_join(&mut g, 1, 1).await },
+        then_assert: |rows| assert_eq!(rows, Some(vec![vec![DfValue::from(1); 4]]))
+    );
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn straddled_join_beside_a_partial_ingress_reads_a_cold_key() {
+    let (mut g, shutdown_tx, [mut a, mut b]) =
+        straddled_join_beside_an_ingress("sj_partial_ingress_read").await;
+    // The left input joins on id 1. The right row has a separate id and matches on k.
+    a.insert(vec![1.into(), 8.into(), 0.into(), 0.into()])
+        .await
+        .unwrap();
+    a.insert(vec![2.into(), 7.into(), 0.into(), 4.into()])
+        .await
+        .unwrap();
+    b.insert(vec![1.into(), 7.into(), 3.into(), 0.into()])
+        .await
+        .unwrap();
+    let expected = Some(vec![vec![1.into(), 2.into(), 3.into(), 4.into()]]);
+    eventually!(
+        attempts: 10,
+        run_test: { read_straddled_join(&mut g, 3, 4).await },
+        then_assert: |rows| assert_eq!(rows, expected)
+    );
+    shutdown_tx.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[ignore] // with full materialization, needs post-lookup filters or it returns too many rows
 async fn straddled_join_range_query() {

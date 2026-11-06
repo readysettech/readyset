@@ -258,6 +258,34 @@ impl Materializations {
         //  3. Recursively add indexes for replay obligations.
         //
 
+        // With `rhs_full_mat` set, the domain upqueries only the left input for a replay key with
+        // columns from both inputs, and the join reads its right input directly. That lookup must
+        // not miss. A base table is fully materialized only in its own domain. A join in another
+        // domain reads it through an ingress, whose state can be partial, so the lookup can miss
+        // on a key that has rows in the base table. Clear the flag on a join whose right input is
+        // an ingress. The domain then upqueries each input, as it does for any partial right input.
+        //
+        // This runs before the steps below because they plan indexes and replay paths from the
+        // columns that the join reports for its inputs, and those columns depend on the flag.
+        for &ni in new {
+            let reads_an_ingress = match graph[ni].as_internal() {
+                Some(NodeOperator::Join(join)) => {
+                    join.is_rhs_full_mat() && graph[join.rhs().as_global()].is_ingress()
+                }
+                _ => false,
+            };
+            if !reads_an_ingress {
+                continue;
+            }
+            antithesis_sdk::assert_reachable!(
+                "planner clears rhs_full_mat for a join whose right input is an ingress"
+            );
+            debug!(node = %ni.index(), "clearing rhs_full_mat because the right input is an ingress");
+            if let Some(NodeOperator::Join(join)) = graph[ni].as_mut_internal() {
+                join.clear_rhs_full_mat();
+            }
+        }
+
         // Holds all lookup obligations. Keyed by the node that should be materialized.
         let mut lookup_obligations: HashMap<NodeIndex, HashSet<LookupIndex>> = HashMap::new();
 

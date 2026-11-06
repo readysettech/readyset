@@ -710,6 +710,16 @@ impl Join {
             let other_records = match other_lookup.take() {
                 IngredientLookupResult::Records(recs) => recs,
                 IngredientLookupResult::Miss => {
+                    if self.rhs_full_mat && other == *self.right {
+                        // This lookup must not miss while `rhs_full_mat` is set. The flag makes a
+                        // straddled read upquery the left input only, so a reader can hold the key
+                        // of these records while the right input has a hole at their join key. The
+                        // join drops records that miss, and that reader does not get them.
+                        antithesis_sdk::assert_unreachable!(
+                            "join missed a lookup into the base it reads directly",
+                            &serde_json::json!({ "node": other.id(), "columns": on_cols_os })
+                        );
+                    }
                     misses.extend(group.into_iter().map(|record| {
                         Miss::builder()
                             .on(other)
@@ -1128,17 +1138,42 @@ impl Join {
         let lookup_key = PointKey::from(os_key.to_vec());
         let lookup = self.lookup(os_node, os_key_cols, &lookup_key, nodes, state, lookup_mode)?;
         match lookup {
-            IngredientLookupResult::Records(records) => records
-                .map(|r| r.map(|row| Record::Positive(row.to_vec())))
-                .collect::<Result<Records, ReadySetError>>(),
+            IngredientLookupResult::Records(records) => {
+                antithesis_sdk::assert_reachable!("straddled join looked up its right input");
+                records
+                    .map(|r| r.map(|row| Record::Positive(row.to_vec())))
+                    .collect::<Result<Records, ReadySetError>>()
+            }
             IngredientLookupResult::Miss => {
-                unreachable!("Straddled lookup should not miss");
+                // The join does this lookup only when `rhs_full_mat` is set, and the planner clears
+                // the flag when the right input is an ingress, whose state can be partial. A miss
+                // means that the flag is set on a join whose right input is partial.
+                antithesis_sdk::assert_unreachable!(
+                    "straddled join looked up a hole in its right input",
+                    &serde_json::json!({ "node": os_node.id(), "columns": os_key_cols })
+                );
+                internal!("Straddled lookup missed on {os_node:?} over columns {os_key_cols:?}")
             }
         }
     }
     /// Returns true if the right side of the join is fully materialized.
     pub fn is_rhs_full_mat(&self) -> bool {
         self.rhs_full_mat
+    }
+
+    pub fn rhs(&self) -> IndexPair {
+        self.right
+    }
+
+    /// Clears the `rhs_full_mat` flag so that a miss on a straddled key upqueries both inputs.
+    /// When the flag is set, the miss upqueries only the left input, and the join looks up the
+    /// right input directly.
+    ///
+    /// The planner must call this before it traces replay paths through the join, because the call
+    /// changes the right input columns that `column_source` reports for a straddled key. It must
+    /// also call this before it sends the join to its domain, because the domain gets a copy.
+    pub fn clear_rhs_full_mat(&mut self) {
+        self.rhs_full_mat = false;
     }
 
     /// Returns the side of the join that is more efficient to trigger an upquery in case of a straddled join.
