@@ -29,5 +29,12 @@ readyset-data = { path = "../readyset-data" }
 readyset-errors = { path = "../readyset-errors" }
 readyset-util = { path = "../readyset-util" }
 
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "records"
+harness = false
+
 [lints]
 workspace = true

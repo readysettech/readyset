@@ -6449,6 +6449,7 @@ dependencies = [
  "anyhow",
  "bincode",
  "chrono",
+ "criterion",
  "database-utils",
  "metrics",
  "petgraph 0.6.5",
