@@ -189,6 +189,8 @@ steps:
           failed-download-exit-code: 0
           ruby-image: ${PUBLIC_REPO_BASE:-public.ecr.aws}/docker/library/ruby:3.1-alpine
     agents: { queue: t3a-small }
+    timeout_in_minutes: 10
+    soft_fail: true  # Don't fail the build over this.
 
   - label: ':rust: Run doctests :books:'
     key: rust-dectests
