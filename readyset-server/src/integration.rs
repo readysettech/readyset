@@ -1279,6 +1279,67 @@ async fn it_recovers_persisted_bases() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn replayed_view_keeps_search_path() {
+    readyset_tracing::init_test_logging();
+    let authority_store = Arc::new(LocalAuthorityStore::new());
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("replayed_view_keeps_search_path");
+    let persistence_params = PersistenceParameters::new(
+        DurabilityMode::Permanent,
+        Some(path.to_string_lossy().into()),
+        None,
+        None,
+        0,
+    );
+    let mut builder = Builder::for_tests();
+    builder.set_dialect(SqlDialect::PostgreSQL);
+    builder.set_persistence(persistence_params);
+
+    let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
+        authority_store.clone(),
+    )));
+    let (mut g, shutdown_tx) = builder.clone().start(authority.clone()).await.unwrap();
+    g.backend_ready().await;
+    let ddl = vec![
+        "CREATE TABLE public.t (id int PRIMARY KEY);",
+        "CREATE VIEW v AS SELECT id FROM t;",
+    ];
+    eventually! {
+        g.extend_recipe(
+            ChangeList::from_strings(ddl.clone(), Dialect::DEFAULT_POSTGRESQL)
+                .unwrap()
+                .with_schema_search_path(vec!["public".into()]),
+        )
+        .await
+        .is_ok()
+    };
+    shutdown_tx.shutdown().await;
+    if let Authority::LocalAuthority(l) = authority.as_ref() {
+        l.delete_ephemeral();
+    }
+
+    let authority = Arc::new(Authority::from(LocalAuthority::new_with_store(
+        authority_store,
+    )));
+    let (mut g, shutdown_tx) = builder.start(authority).await.unwrap();
+    g.backend_ready().await;
+    eventually! {
+        g.extend_recipe(
+            ChangeList::from_strings(
+                vec!["CREATE CACHE FROM SELECT id FROM v;"],
+                Dialect::DEFAULT_POSTGRESQL,
+            )
+            .unwrap()
+            .with_schema_search_path(vec!["public".into()]),
+        )
+        .await
+        .is_ok()
+    };
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn mutator_churn() {
     let (mut g, shutdown_tx) = start_simple_unsharded("mutator_churn").await;
     let vote = g

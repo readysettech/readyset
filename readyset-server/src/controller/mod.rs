@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Debug, Formatter};
 use std::future;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,7 +25,7 @@ use readyset_client::recipe::ChangeList;
 use readyset_client::{ControllerConnectionPool, ControllerDescriptor, TableStatus};
 use readyset_data::Dialect;
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
-use readyset_sql::ast::Relation;
+use readyset_sql::ast::{Relation, SqlIdentifier};
 use readyset_sql_parsing::ParsingPreset;
 use readyset_telemetry_reporter::TelemetrySender;
 use readyset_util::redacted::RedactedString;
@@ -1722,30 +1722,39 @@ impl AuthorityLeaderElectionState {
         }
 
         let dialect = state.dataflow_state.recipe.dialect();
-        let mut changes: Vec<Change> = Vec::new();
+        // Changes grouped by the search path they are applied with. Tables have an empty search
+        // path, so they are applied before views.
+        let mut changes: BTreeMap<Vec<SqlIdentifier>, Vec<Change>> = BTreeMap::new();
+        let unqualified = changes.entry(Vec::new()).or_default();
 
         // Custom types first; table DDL may reference them.
         for entry in custom_types {
-            changes.push(Change::CreateType {
+            unqualified.push(Change::CreateType {
                 name: entry.name,
                 ty: entry.ty,
             });
         }
         for relation in non_replicated {
-            changes.push(Change::AddNonReplicatedRelation(relation));
+            unqualified.push(Change::AddNonReplicatedRelation(relation));
         }
-        if !ddl_entries.is_empty() {
-            let stmts: Vec<String> = ddl_entries.into_iter().map(|e| e.unparsed_stmt).collect();
-            let ddl = ChangeList::from_strings(stmts, dialect)?;
-            changes.extend(ddl.changes);
+        for entry in ddl_entries {
+            let ddl = ChangeList::from_strings(vec![entry.unparsed_stmt], dialect)?;
+            changes
+                .entry(entry.schema_search_path)
+                .or_default()
+                .extend(ddl.changes);
         }
 
-        let n_changes = changes.len();
-        let changelist = ChangeList::from_changes(changes, dialect);
-        state
-            .dataflow_state
-            .extend_recipe(changelist.into(), false, None)
-            .await?;
+        let mut n_changes = 0;
+        for (schema_search_path, changes) in changes {
+            n_changes += changes.len();
+            let changelist = ChangeList::from_changes(changes, dialect)
+                .with_schema_search_path(schema_search_path);
+            state
+                .dataflow_state
+                .extend_recipe(changelist.into(), false, None)
+                .await?;
+        }
         info!(n_changes, "Replayed persisted schema catalog");
         Ok(())
     }
