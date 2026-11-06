@@ -120,60 +120,64 @@ steps:
     agents: { queue: c7a-2xlarge-nospot }
     retry: *retry_on_agent_kill
 
-  - label: ":rust: Run tests: {{ matrix.arch }}"
+  # No need to run tests for both architectures on Gerrit CL builds.
+  - group: ":rust: Run tests"
     key: rust-tests
-    command: |
-      [ -d public ] && cd public
-      ../.buildkite/retrieve_last_artifact.sh '**/proptest-regressions/*.txt'
-      ../.buildkite/retrieve_last_artifact.sh '**/*.proptest-regressions'
-      .buildkite/run-tests.sh
-      echo "~~~ Show sccache stats"
-      sccache --show-stats
-    timeout_in_minutes: 60
-    plugins:
-      - docker-compose#${DOCKER_COMPOSE_PLUGIN_VERSION}:
-          run: app
-          tty: true           # nextest makes colored output if we use tty
-          env:
-            - BUILDKITE_PARALLEL_JOB
-            - BUILDKITE_JOB_ID
-            - BUILDKITE_API_TOKEN             # buildkite vars needed to fetch regression artifacts
-            - BUILDKITE_GRAPHQL_API_TOKEN
-            - BUILDKITE_ORGANIZATION_SLUG
-            - BUILDKITE_PIPELINE_SLUG
-            - BUILDKITE_BRANCH
-            - BUILDKITE_STEP_KEY
-            - BUILDKITE_LABEL
-            - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
-            - SCCACHE_REGION=us-east-2
-            - CARGO_INCREMENTAL=0
-            - RUST_BACKTRACE=full
-            - CARGO_TERM_PROGRESS_WHEN=never     # disable progress bars if tty=true
-            - PROPTEST_CASES=5 # just smoke-test proptests, otherwise they get really slow
-          volumes:
-            - 'target:/workdir/public/target'
-          config:
-            - "${GIT_PUBLIC_ROOT}build/docker-compose.ci-tcv.yml"
-          mount-buildkite-agent: true
-          quiet-pull: true    # don't log all the image pulls
-          progress: plain     # more log reduction
-          pull-retries: 3
-          upload-container-logs: always
-      - ecr#${ECR_PLUGIN_VERSION}:
-          login: true
-          retries: 3
-    agents: { queue: "{{ matrix.queue }}" }
-    matrix:
-      setup:
-        queue:
-          - "c6a-4xlarge-nospot"
-        arch:
-          - "x86"
-      adjustments:
-        - with:
-            queue: "c7g-4xlarge-nospot"
-            arch: "arm"
-    retry: *retry_on_agent_kill
+    steps:
+      - &rust_tests
+        label: ":rust: Run tests: arm"
+        key: rust-tests-arm
+        command: |
+          [ -d public ] && cd public
+          ../.buildkite/retrieve_last_artifact.sh '**/proptest-regressions/*.txt'
+          ../.buildkite/retrieve_last_artifact.sh '**/*.proptest-regressions'
+          .buildkite/run-tests.sh
+          echo "~~~ Show sccache stats"
+          sccache --show-stats
+        timeout_in_minutes: 60
+        plugins:
+          - docker-compose#${DOCKER_COMPOSE_PLUGIN_VERSION}:
+              run: app
+              tty: true           # nextest makes colored output if we use tty
+              env:
+                - BUILDKITE_PARALLEL_JOB
+                - BUILDKITE_JOB_ID
+                - BUILDKITE_API_TOKEN             # buildkite vars needed to fetch regression artifacts
+                - BUILDKITE_GRAPHQL_API_TOKEN
+                - BUILDKITE_ORGANIZATION_SLUG
+                - BUILDKITE_PIPELINE_SLUG
+                - BUILDKITE_BRANCH
+                - BUILDKITE_STEP_KEY
+                - BUILDKITE_LABEL
+                - SCCACHE_BUCKET=readysettech-build-sccache-us-east-2
+                - SCCACHE_REGION=us-east-2
+                - CARGO_INCREMENTAL=0
+                - RUST_BACKTRACE=full
+                - CARGO_TERM_PROGRESS_WHEN=never     # disable progress bars if tty=true
+                - PROPTEST_CASES=5 # just smoke-test proptests, otherwise they get really slow
+              volumes:
+                - 'target:/workdir/public/target'
+              config:
+                - "${GIT_PUBLIC_ROOT}build/docker-compose.ci-tcv.yml"
+              mount-buildkite-agent: true
+              quiet-pull: true    # don't log all the image pulls
+              progress: plain     # more log reduction
+              pull-retries: 3
+              upload-container-logs: always
+          - ecr#${ECR_PLUGIN_VERSION}:
+              login: true
+              retries: 3
+        agents: { queue: c7g-4xlarge-nospot }
+        retry: *retry_on_agent_kill
+
+      # Add x86 run when not a Gerrit CL build, or if dist packages were requested.
+      - <<: *rust_tests
+        label: ":rust: Run tests: x86"
+        key: rust-tests-x86
+        if: >-
+          (build.env("GERRIT_CHANGE_ID") == null && build.env("GERRIT_PATCHSET") == null)
+          || build.env("BUILD_DIST_PACKAGE_ON_CL") != null
+        agents: { queue: c6a-4xlarge-nospot }
 
   - label: ":junit: Annotate JUnit XML"
     depends_on:

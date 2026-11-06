@@ -12,19 +12,13 @@ readyset_mcp_common_values:
         signal_reason: none
         limit: 3
 
+# No need to run step for both architectures on Gerrit CL builds.
 steps:
-  - label: ":linux: Build readyset-mcp: {{ matrix.arch }}"
-    key: build-readyset-mcp
+  - &build_readyset_mcp
+    label: ":linux: Build readyset-mcp: arm"
+    key: build-readyset-mcp-arm
     command: |
       set -e  # exit on error
-      if [[ {{ matrix.arch }} == "x86" ]]; then
-        MUSL_TARGET="x86_64-unknown-linux-musl"
-      elif [[ {{ matrix.arch }} == "arm" ]]; then
-        MUSL_TARGET="aarch64-unknown-linux-musl"
-      else
-        echo "Unknown musl target: {{ matrix.arch }}"
-        exit 1
-      fi
       cd /workdir/public
       rustup target add $$MUSL_TARGET
       # Must set vendored-openssl feature when building for musl:
@@ -48,28 +42,24 @@ steps:
             - RUST_BACKTRACE=full
             - BUILDKITE_COMMIT
             - CARGO_TERM_PROGRESS_WHEN=never     # disable progress bars
+            - MUSL_TARGET
           shell: ["/bin/bash", "-c"]
           mount-buildkite-agent: true
       - ecr#${ECR_PLUGIN_VERSION}:
           login: true
           retries: 3
-    agents:
-      queue: "{{ matrix.queue }}"
+    env:
+      MUSL_TARGET: aarch64-unknown-linux-musl
+    agents: { queue: c7g-4xlarge }
     retry: *retry_on_agent_kill
-    matrix:
-      setup:
-        queue:
-          - "c6a-4xlarge"
-          - "c7g-4xlarge"
-        arch:
-          - "x86"
-          - "arm"
-      adjustments:
-        - with:
-            queue: "c6a-4xlarge"
-            arch: "arm"
-          skip: true
-        - with:
-            queue: "c7g-4xlarge"
-            arch: "x86"
-          skip: true
+
+  # Add x86 run when not a Gerrit CL build, or if dist packages were requested.
+  - <<: *build_readyset_mcp
+    label: ":linux: Build readyset-mcp: x86"
+    key: build-readyset-mcp-x86
+    if: >-
+      (build.env("GERRIT_CHANGE_ID") == null && build.env("GERRIT_PATCHSET") == null)
+      || build.env("BUILD_DIST_PACKAGE_ON_CL") != null
+    env:
+      MUSL_TARGET: x86_64-unknown-linux-musl
+    agents: { queue: c6a-4xlarge }
