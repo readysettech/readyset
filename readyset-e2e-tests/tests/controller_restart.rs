@@ -5,9 +5,12 @@
 use mysql_async::Row;
 use mysql_async::prelude::Queryable;
 use readyset_client::consensus::AuthorityControl;
-use readyset_client_test_helpers::{TestBuilder, derive_test_name};
+use readyset_client_test_helpers::{Adapter, TestBuilder, derive_test_name};
 use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
+use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
 use readyset_util::eventually;
+use replication_offset::ReplicationOffset;
+use replication_offset::postgres::PostgresPosition;
 use test_utils::{tags, upstream};
 
 async fn readyset_status(conn: &mut mysql_async::Conn) -> String {
@@ -246,6 +249,39 @@ async fn a_cache_on_a_dropped_table_leaves_the_others_restored() {
         cache_names(&mut rs_conn).await
     }, then_assert: |names| {
         assert_eq!(names, ["first", "last"]);
+    });
+
+    shutdown_tx.shutdown().await;
+}
+
+/// The schema replication offset for a `Some` catalog survives a controller restart.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn catalog_schema_replication_offsets_survive_controller_restart() {
+    readyset_tracing::init_test_logging();
+    let db_name = derive_test_name();
+    PostgreSQLAdapter::recreate_database(&db_name).await;
+
+    let (_rs_opts, mut handle, shutdown_tx) = TestBuilder::default()
+        .recreate_database(false)
+        .replicate_db(&db_name)
+        .build::<PostgreSQLAdapter>()
+        .await;
+
+    let offset = ReplicationOffset::from(PostgresPosition::commit_start(0x100.into()));
+    eventually! {
+        handle
+            .set_schema_replication_offset(Some("db2".into()), Some(&offset))
+            .await
+            .is_ok()
+    }
+
+    let (_rs_opts, mut handle, shutdown_tx) = shutdown_tx.restart(handle).await;
+    eventually!(run_test: {
+        handle.replication_offsets(Some("db2".into())).await.ok().and_then(|o| o.schema)
+    }, then_assert: |schema| {
+        assert_eq!(schema, Some(offset.clone()));
     });
 
     shutdown_tx.shutdown().await;

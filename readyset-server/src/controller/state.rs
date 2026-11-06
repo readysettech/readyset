@@ -1291,6 +1291,10 @@ impl DfState {
         };
     }
 
+    pub(super) fn clear_schema_replication_offsets(&mut self) {
+        self.schema_replication_offsets.clear();
+    }
+
     pub(super) async fn flush_partial(&mut self) -> ReadySetResult<u64> {
         // get statistics for current domain sizes
         // and evict all state from partial nodes
@@ -2185,6 +2189,19 @@ impl DfStateHandle {
                     .await
                 {
                     error!(%error, "Failed to persist schema replication offset");
+                }
+            }
+            let catalog_offsets: HashMap<_, _> = new_state
+                .schema_replication_offsets
+                .iter()
+                .filter_map(|(catalog, offset)| Some((catalog.clone()?, offset.clone())))
+                .collect();
+            if !catalog_offsets.is_empty() {
+                if let Err(error) = authority
+                    .overwrite_catalog_schema_replication_offsets(catalog_offsets)
+                    .await
+                {
+                    error!(%error, "Failed to persist catalog schema replication offsets");
                 }
             }
         } else {

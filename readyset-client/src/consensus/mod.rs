@@ -53,6 +53,7 @@ const SHALLOW_CACHE_VARIABLES_ALLOWLIST_PATH: &str = "shallow_cache_variables_al
 const SHALLOW_CACHE_SCHEMAS_ALLOWLIST_PATH: &str = "shallow_cache_schemas_allowlist";
 const PERSISTENT_STATS_PATH: &str = "persistent_stats";
 const SCHEMA_REPLICATION_OFFSET_PATH: &str = "schema_replication_offset";
+const CATALOG_SCHEMA_REPLICATION_OFFSETS_PATH: &str = "catalog_schema_replication_offsets";
 const SCHEMA_CATALOG_PATH: &str = "schema_catalog";
 const CUSTOM_TYPES_PATH: &str = "custom_types";
 const NON_REPLICATED_RELATIONS_PATH: &str = "non_replicated_relations";
@@ -457,6 +458,36 @@ pub trait AuthorityControl: Send + Sync {
         self.read_modify_write::<_, ReplicationOffset, ReadySetError>(
             SCHEMA_REPLICATION_OFFSET_PATH,
             move |_| Ok(offset.clone()),
+        )
+        .await??;
+        Ok(())
+    }
+
+    /// Return the stored schema [`ReplicationOffset`] for each `Some` catalog.
+    async fn catalog_schema_replication_offsets(
+        &self,
+    ) -> ReadySetResult<HashMap<SqlIdentifier, ReplicationOffset>> {
+        Ok(self
+            .try_read::<Vec<(SqlIdentifier, ReplicationOffset)>>(
+                CATALOG_SCHEMA_REPLICATION_OFFSETS_PATH,
+            )
+            .await?
+            .unwrap_or_default()
+            .into_iter()
+            .collect())
+    }
+
+    /// Persist the schema [`ReplicationOffset`] for each `Some` catalog. The offsets are stored
+    /// as a list of pairs because JSON map keys must be strings, and [`SqlIdentifier`] serializes
+    /// as bytes.
+    async fn overwrite_catalog_schema_replication_offsets(
+        &self,
+        offsets: HashMap<SqlIdentifier, ReplicationOffset>,
+    ) -> ReadySetResult<()> {
+        let offsets: Vec<_> = offsets.into_iter().collect();
+        self.read_modify_write::<_, Vec<(SqlIdentifier, ReplicationOffset)>, ReadySetError>(
+            CATALOG_SCHEMA_REPLICATION_OFFSETS_PATH,
+            move |_| Ok(offsets.clone()),
         )
         .await??;
         Ok(())

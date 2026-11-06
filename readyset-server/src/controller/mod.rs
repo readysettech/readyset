@@ -1782,7 +1782,7 @@ impl AuthorityLeaderElectionState {
 
             // Build a fresh ControllerState from authority-persisted inputs. The previously
             // persisted ControllerState is intentionally not consulted: the inputs needed at
-            // startup are config (from CLI), schema replication offset, schema catalog
+            // startup are config (from CLI), schema replication offsets, schema catalog
             // (tables, views, custom types, non-replicated markers), and cache DDL. The
             // dataflow graph is regenerated from these on every leader election.
             let schema_replication_offset = self
@@ -1790,11 +1790,21 @@ impl AuthorityLeaderElectionState {
                 .schema_replication_offset()
                 .await
                 .unwrap_or_default();
+            let catalog_schema_replication_offsets = self
+                .authority
+                .catalog_schema_replication_offsets()
+                .await
+                .unwrap_or_default();
             let mut state =
                 ControllerState::new(self.config.clone(), self.permissive_writes, self.dialect);
             state
                 .dataflow_state
                 .set_schema_replication_offset(None, schema_replication_offset);
+            for (catalog, offset) in catalog_schema_replication_offsets {
+                state
+                    .dataflow_state
+                    .set_schema_replication_offset(Some(catalog), Some(offset));
+            }
             if let Err(error) =
                 Self::replay_persisted_schema_catalog(&self.authority, &mut state).await
             {
@@ -1802,9 +1812,7 @@ impl AuthorityLeaderElectionState {
                     %error,
                     "Schema catalog replay failed; forcing upstream resnapshot"
                 );
-                state
-                    .dataflow_state
-                    .set_schema_replication_offset(None, None);
+                state.dataflow_state.clear_schema_replication_offsets();
             }
             let cache_ddl = match self.authority.cache_ddl_requests().await? {
                 res if res.is_empty() => None,
