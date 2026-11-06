@@ -199,6 +199,8 @@ pub struct PostgresWalConnector {
     in_transaction: bool,
     /// A handle to the controller
     controller: ReadySetHandle,
+    /// The catalog of the replicated relations
+    catalog: Option<SqlIdentifier>,
     /// The most recent min-persisted LSN we successfully fetched from the controller. We
     /// re-ack this if a later RPC fails, so a busy base-table domain can't push the
     /// replicator into restart territory just by failing to answer the persistence query.
@@ -273,6 +275,7 @@ impl PostgresWalConnector {
     pub(crate) async fn connect<S: AsRef<str>>(
         mut pg_config: pgsql::Config,
         dbname: S,
+        catalog: Option<SqlIdentifier>,
         config: &UpstreamConfig,
         next_position: Option<Lsn>,
         tls_connector: MakeTlsConnector,
@@ -323,6 +326,7 @@ impl PostgresWalConnector {
             // database, we'll always start replicating outside of a transaction
             in_transaction: false,
             controller,
+            catalog,
             last_successful_min_persisted_lsn: None,
             status_update_interval,
             had_table_error: false,
@@ -662,7 +666,9 @@ impl PostgresWalConnector {
         // not a reason to tear down the replicator; if we have a cached value from a
         // prior successful fetch, re-ack it so Postgres doesn't grow WAL retention any
         // more than it already would, and otherwise skip this status update entirely.
-        let rpc_result = fetch_min_persisted_replication_offset(&mut self.controller).await;
+        let rpc_result =
+            fetch_min_persisted_replication_offset(&mut self.controller, self.catalog.clone())
+                .await;
         let (lsn_to_ack, new_cache) =
             select_ack_lsn(rpc_result, cur_pos, self.last_successful_min_persisted_lsn)?;
         self.last_successful_min_persisted_lsn = new_cache;
@@ -746,7 +752,7 @@ impl PostgresWalConnector {
     }
 }
 
-/// Wraps the controller-level `min_persisted_replication_offset` RPC with
+/// Wraps the controller-level `min_persisted_replication_offset` RPC for `catalog` with
 /// an explicit timeout so a hung call can't block the replicator.
 ///
 /// Also hosts the [`failpoints::POSTGRES_MIN_PERSISTED_RPC`] failpoint so
@@ -754,11 +760,12 @@ impl PostgresWalConnector {
 /// needing an actual controller failure.
 async fn fetch_min_persisted_replication_offset(
     controller: &mut ReadySetHandle,
+    catalog: Option<SqlIdentifier>,
 ) -> ReadySetResult<PersistencePoint> {
     set_failpoint_return_err!(failpoints::POSTGRES_MIN_PERSISTED_RPC);
     match tokio::time::timeout(
         MIN_PERSISTED_RPC_TIMEOUT,
-        controller.min_persisted_replication_offset(None),
+        controller.min_persisted_replication_offset(catalog),
     )
     .await
     {

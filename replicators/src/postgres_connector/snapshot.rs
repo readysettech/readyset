@@ -21,6 +21,7 @@ use readyset_sql::Dialect;
 use readyset_sql::DialectDisplay;
 use readyset_sql_parsing::parse_sql_type_with_config;
 use readyset_sql_parsing::{parse_key_specification_with_config, ParsingPreset};
+use readyset_sql_passes::SetCatalog;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
 use replication_offset::postgres::PostgresPosition;
@@ -53,6 +54,8 @@ pub struct PostgresReplicator<'a> {
     /// A pool to be used for parallelizing snapshot tasks.
     pub(crate) pool: deadpool_postgres::Pool,
     pub(crate) noria: &'a mut readyset_client::ReadySetHandle,
+    /// The catalog of the snapshotted relations
+    catalog: Option<SqlIdentifier>,
     /// Filters out tables we are not interested in
     pub(crate) table_filter: &'a mut TableFilter,
     /// Parsing preset to use for parsing SQL types and key specifications
@@ -287,8 +290,8 @@ impl CustomTypeEntry {
         res.into_iter().map(TryInto::try_into).collect()
     }
 
-    pub(crate) fn into_relation(self) -> Relation {
-        Relation::new(Some(self.schema.into()), self.name.into())
+    pub(crate) fn into_relation(self, catalog: Option<SqlIdentifier>) -> Relation {
+        Relation::new(Some(self.schema.into()), self.name.into()).with_catalog(catalog)
     }
 }
 
@@ -392,11 +395,13 @@ impl TableEntry {
 
     async fn get_table<'a>(
         &self,
+        catalog: Option<SqlIdentifier>,
         transaction: &'a pgsql::Transaction<'a>,
         parsing_preset: ParsingPreset,
     ) -> Result<TableDescription, ReadySetError> {
         let table_relation =
-            Relation::new(Some(self.schema.clone().into()), self.name.clone().into());
+            Relation::new(Some(self.schema.clone().into()), self.name.clone().into())
+                .with_catalog(catalog);
         let columns = Self::get_columns(self.oid, transaction)
             .await
             .map_err(|e| {
@@ -513,7 +518,7 @@ impl TableDescription {
             }
         });
 
-        Ok(Change::CreateTable {
+        let mut change = Change::CreateTable {
             pg_meta: Some(PostgresTableMetadata {
                 oid: self.oid,
                 column_oids: self
@@ -563,7 +568,14 @@ impl TableDescription {
                 like: None,
                 options: Ok(vec![]),
             },
-        })
+        };
+        // Custom column types and foreign key targets are in the table's catalog.
+        if let (Some(catalog), Change::CreateTable { statement, .. }) =
+            (&self.name.catalog, &mut change)
+        {
+            statement.set_catalog(catalog);
+        }
+        Ok(change)
     }
 
     /// Indices into [`Self::columns`] of the columns that identify a row for diagnostics: the
@@ -738,6 +750,7 @@ impl<'a> PostgresReplicator<'a> {
         client: &'a mut pgsql::Client,
         pool: deadpool_postgres::Pool,
         noria: &'a mut readyset_client::ReadySetHandle,
+        catalog: Option<SqlIdentifier>,
         table_filter: &'a mut TableFilter,
         parsing_preset: ParsingPreset,
         table_status_tx: UnboundedSender<(Relation, TableStatus)>,
@@ -755,6 +768,7 @@ impl<'a> PostgresReplicator<'a> {
             transaction,
             pool,
             noria,
+            catalog,
             table_filter,
             parsing_preset,
             table_status_tx,
@@ -919,7 +933,8 @@ impl<'a> PostgresReplicator<'a> {
                                 NotReplicatedReason::Configuration
                             };
                         Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                            name: Relation::new(Some(te.schema.into()), te.name.into()),
+                            name: Relation::new(Some(te.schema.into()), te.name.into())
+                                .with_catalog(self.catalog.clone()),
                             reason: not_replicated_reason,
                         })
                     })
@@ -947,7 +962,7 @@ impl<'a> PostgresReplicator<'a> {
                             array_oid: ty.array_oid,
                         }),
                     ),
-                    name: ty.clone().into_relation(),
+                    name: ty.clone().into_relation(self.catalog.clone()),
                 },
                 DataDialect::DEFAULT_POSTGRESQL,
             );
@@ -967,7 +982,11 @@ impl<'a> PostgresReplicator<'a> {
             let table_name = &table.name.clone().to_string();
             let ri_cols = ri_columns_map.remove(&table.oid);
             let res = table
-                .get_table(get_transaction!(self), self.parsing_preset)
+                .get_table(
+                    self.catalog.clone(),
+                    get_transaction!(self),
+                    self.parsing_preset,
+                )
                 .and_then(|create_table| {
                     future::ready(
                         create_table
@@ -1015,7 +1034,8 @@ impl<'a> PostgresReplicator<'a> {
                                 name: Relation::new(
                                     Some(table.schema.into()),
                                     table.name.clone().into(),
-                                ),
+                                )
+                                .with_catalog(self.catalog.clone()),
                                 reason: NotReplicatedReason::from_string(&error.to_string()),
                             }),
                             DataDialect::DEFAULT_POSTGRESQL,
@@ -1039,7 +1059,8 @@ impl<'a> PostgresReplicator<'a> {
                             .map_err(Into::into),
                     )
                 })
-                .and_then(|view| {
+                .and_then(|mut view| {
+                    view.name.catalog = self.catalog.clone();
                     debug!(view = %view.display(readyset_sql::Dialect::PostgreSQL), "Extending recipe");
                     self.noria.extend_recipe_no_leader_ready(
                         ChangeList::from_change(
@@ -1063,7 +1084,8 @@ impl<'a> PostgresReplicator<'a> {
                     self.noria
                         .extend_recipe_no_leader_ready(ChangeList::from_change(
                             Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                                name: Relation::new(Some(view_schema.into()), view_name.into()),
+                                name: Relation::new(Some(view_schema.into()), view_name.into())
+                                    .with_catalog(self.catalog.clone()),
                                 reason: NotReplicatedReason::from_string(&error.to_string()),
                             }),
                             DataDialect::DEFAULT_POSTGRESQL,
@@ -1076,10 +1098,10 @@ impl<'a> PostgresReplicator<'a> {
         // The current schema was replicated, assign the current position
         debug!(%wal_position, "Setting schema replication offset after schema snapshot");
         self.noria
-            .set_schema_replication_offset(None, Some(&wal_position))
+            .set_schema_replication_offset(self.catalog.clone(), Some(&wal_position))
             .await?;
 
-        let replication_offsets = self.noria.replication_offsets(None).await?;
+        let replication_offsets = self.noria.replication_offsets(self.catalog.clone()).await?;
 
         if !full_snapshot {
             tables.retain(|t| {
@@ -1333,7 +1355,7 @@ impl<'a> PostgresReplicator<'a> {
 
 #[cfg(test)]
 mod tests {
-    use readyset_sql::ast::{Column, IndexKeyPart, SqlQuery, TableKey};
+    use readyset_sql::ast::{Column, IndexKeyPart, SqlQuery, SqlType, TableKey};
     use readyset_sql::Dialect;
     use readyset_sql_parsing::parse_query;
 
@@ -1756,6 +1778,62 @@ mod tests {
                 assert_eq!(ri_key[1], "email");
             }
             other => panic!("expected CreateTable, got {other:?}"),
+        }
+    }
+
+    /// Return the `CREATE TABLE` for `public.t` in `catalog`, which has an enum column and a
+    /// foreign key to `public.u`.
+    fn create_table_in(catalog: Option<SqlIdentifier>) -> CreateTableStatement {
+        let mut enum_column = column("e");
+        enum_column.sql_type = r#""public"."e""#.into();
+        let foreign_key = ConstraintEntry {
+            name: "t_a_fkey".into(),
+            definition: TableKey::ForeignKey {
+                constraint_name: None,
+                index_name: None,
+                columns: vec![Column {
+                    name: "a".into(),
+                    table: None,
+                }],
+                target_table: Relation::new(Some("public".into()), "u".into()),
+                target_columns: vec![Column {
+                    name: "id".into(),
+                    table: None,
+                }],
+                on_delete: None,
+                on_update: None,
+            },
+            kind: Some(ConstraintKind::ForeignKey),
+        };
+        let desc = TableDescription {
+            oid: 1,
+            name: Relation::new(Some("public".into()), "t".into()).with_catalog(catalog),
+            columns: vec![column("a"), enum_column],
+            constraints: vec![foreign_key],
+        };
+        match desc
+            .try_into_change(ParsingPreset::for_tests(), None, "C")
+            .unwrap()
+        {
+            Change::CreateTable { statement, .. } => statement,
+            other => panic!("expected CreateTable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn try_into_change_sets_catalog() {
+        for catalog in [None, Some(SqlIdentifier::from("db2"))] {
+            let statement = create_table_in(catalog.clone());
+            assert_eq!(statement.table.catalog, catalog);
+            let body = statement.body.unwrap();
+            let SqlType::Other(ty) = &body.fields[1].sql_type else {
+                panic!("expected a custom type, got {:?}", body.fields[1].sql_type);
+            };
+            assert_eq!(ty.catalog, catalog);
+            let Some(TableKey::ForeignKey { target_table, .. }) = body.keys.unwrap().pop() else {
+                panic!("expected a foreign key");
+            };
+            assert_eq!(target_table.catalog, catalog);
         }
     }
 }

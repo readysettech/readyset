@@ -24,7 +24,7 @@ use readyset_client::recipe::changelist::{Change, ChangeList};
 use readyset_client::{Modification, ReadySetHandle, Table, TableOperation, TableStatus};
 use readyset_data::{DfValue, Dialect, SqlEngine};
 use readyset_errors::{internal_err, set_failpoint_return_err, ReadySetError, ReadySetResult};
-use readyset_sql::ast::{NonReplicatedRelation, NotReplicatedReason, Relation};
+use readyset_sql::ast::{NonReplicatedRelation, NotReplicatedReason, Relation, SqlIdentifier};
 use readyset_sql::DialectDisplay;
 use readyset_sql_parsing::ParsingPreset;
 use readyset_telemetry_reporter::{TelemetryBuilder, TelemetryEvent, TelemetrySender};
@@ -158,10 +158,13 @@ pub fn replication_slot_name(config: &UpstreamConfig) -> String {
         None => REPLICATION_SLOT.to_string(),
     }
 }
+
 /// An adapter that converts database events into ReadySet API calls
 pub struct NoriaAdapter<'a> {
     /// The ReadySet API handle
     noria: ReadySetHandle,
+    /// The catalog of the replicated relations
+    catalog: Option<SqlIdentifier>,
     /// The binlog reader
     connector: Box<dyn Connector + Send + Sync>,
     /// The SQL dialect to pass to ReadySet when applying DDL changes
@@ -201,13 +204,14 @@ impl Drop for NoriaAdapter<'_> {
 }
 
 impl<'a> NoriaAdapter<'a> {
-    /// Replicate from `url` until an error. Sets `stream_started` once the upstream accepts the
-    /// binlog request.
+    /// Replicate from `url` until an error, putting Postgres relations in `catalog`. Sets
+    /// `stream_started` once the upstream accepts the binlog request.
     #[allow(clippy::too_many_arguments)]
     pub async fn start(
         noria: ReadySetHandle,
         config: &UpstreamConfig,
         url: &DatabaseURL,
+        catalog: Option<SqlIdentifier>,
         table_filter: &mut TableFilter,
         controller_tx: &UnboundedSender<ControllerMessage>,
         replicator_rx: &mut UnboundedReceiver<ReplicatorMessage>,
@@ -282,6 +286,7 @@ impl<'a> NoriaAdapter<'a> {
                     }
                     NoriaAdapter::start_inner_postgres(
                         options,
+                        catalog.clone(),
                         noria,
                         config,
                         controller_tx,
@@ -621,6 +626,7 @@ impl<'a> NoriaAdapter<'a> {
 
         let mut adapter = NoriaAdapter {
             noria: noria.clone(),
+            catalog: None,
             connector,
             replication_offsets,
             mutator_map: HashMap::new(),
@@ -682,6 +688,7 @@ impl<'a> NoriaAdapter<'a> {
     #[allow(clippy::too_many_arguments)]
     async fn start_inner_postgres(
         pgsql_opts: pgsql::Config,
+        catalog: Option<SqlIdentifier>,
         mut noria: ReadySetHandle,
         config: &UpstreamConfig,
         controller_tx: &UnboundedSender<ControllerMessage>,
@@ -711,7 +718,7 @@ impl<'a> NoriaAdapter<'a> {
         let replication_offsets = retry_with_exponential_backoff!(
             {
                 let mut noria = noria.clone();
-                noria.replication_offsets(None).await
+                noria.replication_offsets(catalog.clone()).await
             },
             retries: 5,
             delay: 250,
@@ -755,6 +762,7 @@ impl<'a> NoriaAdapter<'a> {
             PostgresWalConnector::connect(
                 pgsql_opts.clone(),
                 dbname,
+                catalog.clone(),
                 config,
                 pos,
                 tls_connector.clone(),
@@ -847,6 +855,7 @@ impl<'a> NoriaAdapter<'a> {
                 &mut client,
                 pool,
                 &mut noria,
+                catalog.clone(),
                 table_filter,
                 parsing_preset,
                 table_status_tx.clone(),
@@ -907,7 +916,7 @@ impl<'a> NoriaAdapter<'a> {
             .start_replication(&repl_slot_name, PUBLICATION_NAME, version_num)
             .await?;
 
-        let replication_offsets = noria.replication_offsets(None).await?;
+        let replication_offsets = noria.replication_offsets(catalog.clone()).await?;
         trace!(?replication_offsets, "Loaded replication offsets");
         let (mut min_pos, max_pos) = match (
             replication_offsets.min_present_offset()?,
@@ -940,6 +949,7 @@ impl<'a> NoriaAdapter<'a> {
 
         let mut adapter = NoriaAdapter {
             noria,
+            catalog,
             connector,
             replication_offsets,
             mutator_map: HashMap::new(),
@@ -1109,7 +1119,7 @@ impl<'a> NoriaAdapter<'a> {
 
         match self
             .noria
-            .extend_recipe_with_offset(changelist.clone(), None, pos, false)
+            .extend_recipe_with_offset(changelist.clone(), self.catalog.clone(), pos, false)
             .await
         {
             // ReadySet likely entered an invalid state, fail the replicator.
@@ -1204,7 +1214,7 @@ impl<'a> NoriaAdapter<'a> {
         // Update the log position for the schema
         debug!(%pos, "Setting schema replication offset");
         self.noria
-            .set_schema_replication_offset(None, Some(pos))
+            .set_schema_replication_offset(self.catalog.clone(), Some(pos))
             .await?;
 
         // Update the log position for the tables that are behind this offset
@@ -1664,7 +1674,7 @@ impl<'a> NoriaAdapter<'a> {
         retry_with_exponential_backoff!(
             || async {
                 let mut noria = self.noria.clone();
-                noria.replication_offsets(None).await
+                noria.replication_offsets(self.catalog.clone()).await
             },
             retries: 5,
             delay: 250,

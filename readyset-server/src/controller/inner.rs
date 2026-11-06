@@ -380,6 +380,7 @@ impl Leader {
                         noria,
                         &config,
                         &url,
+                        None,
                         &mut table_filter,
                         &controller_tx,
                         &mut replicator_rx,

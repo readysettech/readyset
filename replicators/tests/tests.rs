@@ -458,6 +458,7 @@ impl TestHandle {
                     ..config.unwrap_or_default()
                 },
                 &url,
+                None,
                 &mut table_filter,
                 controller_tx,
                 &mut replicator_rx,

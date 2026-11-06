@@ -273,6 +273,7 @@ impl TestHandle {
                 controller,
                 &config,
                 &url,
+                None,
                 &mut table_filter,
                 &controller_tx,
                 &mut replicator_rx,

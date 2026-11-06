@@ -153,6 +153,12 @@ impl Relation {
         }
     }
 
+    /// Return this relation in `catalog`.
+    pub fn with_catalog(mut self, catalog: Option<SqlIdentifier>) -> Self {
+        self.catalog = catalog;
+        self
+    }
+
     /// Like [`display()`](Self::display) except the schema and table name will not be quoted.
     ///
     /// This should not be used to emit SQL code and instead should mostly be for error messages.
