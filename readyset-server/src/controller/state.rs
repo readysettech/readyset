@@ -138,8 +138,8 @@ pub struct DfState {
 
     /// Current recipe
     pub(super) recipe: Recipe,
-    /// Latest replication position for the schema if from replica or binlog
-    schema_replication_offset: Option<ReplicationOffset>,
+    /// Latest replication position for the schema of each catalog if from replica or binlog
+    schema_replication_offsets: HashMap<Option<SqlIdentifier>, ReplicationOffset>,
     /// Schema generation number, incremented on every successful migration commit.
     /// Used to detect when cache creation attempts are using stale schema information.
     ///
@@ -174,7 +174,7 @@ impl DfState {
         persistence: PersistenceParameters,
         materializations: Materializations,
         recipe: Recipe,
-        schema_replication_offset: Option<ReplicationOffset>,
+        schema_replication_offsets: HashMap<Option<SqlIdentifier>, ReplicationOffset>,
         channel_coordinator: Arc<ChannelCoordinator>,
     ) -> Self {
         Self {
@@ -185,7 +185,7 @@ impl DfState {
             persistence,
             materializations,
             recipe,
-            schema_replication_offset,
+            schema_replication_offsets,
             schema_generation: SchemaGeneration::INITIAL,
             domains: Default::default(),
             domain_nodes: Default::default(),
@@ -196,8 +196,11 @@ impl DfState {
         }
     }
 
-    pub(super) fn schema_replication_offset(&self) -> &Option<ReplicationOffset> {
-        &self.schema_replication_offset
+    pub(super) fn schema_replication_offset(
+        &self,
+        catalog: Option<&SqlIdentifier>,
+    ) -> Option<&ReplicationOffset> {
+        self.schema_replication_offsets.get(&catalog.cloned())
     }
 
     fn reader_node_index(&self, query: &Relation) -> ReadySetResult<NodeIndex> {
@@ -942,7 +945,9 @@ impl DfState {
                 .map(|domain| (domain, DomainRequest::RequestReplicationOffsets)),
         )
         .try_fold(
-            ReplicationOffsets::with_schema_offset(self.schema_replication_offset.clone()),
+            ReplicationOffsets::with_schema_offset(
+                self.schema_replication_offset(catalog).cloned(),
+            ),
             |mut acc, (domain, domain_offs)| async move {
                 for (lni, offset) in domain_offs {
                     let ni = self.domain_nodes[&domain].get(lni).ok_or_else(|| {
@@ -1275,8 +1280,15 @@ impl DfState {
         Ok(())
     }
 
-    pub(super) fn set_schema_replication_offset(&mut self, offset: Option<ReplicationOffset>) {
-        self.schema_replication_offset = offset;
+    pub(super) fn set_schema_replication_offset(
+        &mut self,
+        catalog: Option<SqlIdentifier>,
+        offset: Option<ReplicationOffset>,
+    ) {
+        match offset {
+            Some(offset) => self.schema_replication_offsets.insert(catalog, offset),
+            None => self.schema_replication_offsets.remove(&catalog),
+        };
     }
 
     pub(super) async fn flush_partial(&mut self) -> ReadySetResult<u64> {
@@ -1495,9 +1507,9 @@ impl DfState {
         // Drop recipes from the replicator that we have already processed.
         if let (Some(new), Some(current)) = (
             &recipe_spec.replication_offset,
-            &self.schema_replication_offset,
+            self.schema_replication_offset(recipe_spec.catalog.as_ref()),
         ) {
-            if current >= new {
+            if current >= new.as_ref() {
                 // no-op
                 return Ok(());
             }
@@ -1538,7 +1550,11 @@ impl DfState {
             Ok(x) => {
                 if let Some(offset) = &recipe_spec.replication_offset {
                     debug!(%offset, "Updating schema replication offset");
-                    offset.try_max_into(&mut self.schema_replication_offset)?
+                    let mut current = self
+                        .schema_replication_offset(recipe_spec.catalog.as_ref())
+                        .cloned();
+                    offset.try_max_into(&mut current)?;
+                    self.set_schema_replication_offset(recipe_spec.catalog, current);
                 }
                 if !dry_run && should_increment_schema_generation {
                     self.schema_generation = self.schema_generation.next();
@@ -1634,7 +1650,7 @@ impl DfState {
             self.persistence.clone(),
             materializations,
             recipe,
-            None,
+            Default::default(),
             channel_coordinator,
         );
 
@@ -2163,7 +2179,7 @@ impl DfStateHandle {
         }
 
         if schema_persisted {
-            if let Some(offset) = new_state.schema_replication_offset() {
+            if let Some(offset) = new_state.schema_replication_offset(None) {
                 if let Err(error) = authority
                     .overwrite_schema_replication_offset(offset.clone())
                     .await

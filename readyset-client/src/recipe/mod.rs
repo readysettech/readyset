@@ -8,7 +8,7 @@ use std::fmt::Display;
 use readyset_errors::ReadySetError;
 use readyset_sql::ast::{
     CacheInner, CacheType, CreateCacheStatement, EvictionPolicy, Relation, SelectStatement,
-    TrxCachePolicy,
+    SqlIdentifier, TrxCachePolicy,
 };
 use readyset_sql::DialectDisplay;
 use readyset_util::fmt::fmt_with;
@@ -25,6 +25,8 @@ pub struct ExtendRecipeSpec<'a> {
     pub changes: ChangeList,
     /// Optional replication offset if recipe is installed from replication or binlog
     pub replication_offset: Option<Cow<'a, ReplicationOffset>>,
+    /// The catalog that `replication_offset` is the schema replication offset for
+    pub catalog: Option<SqlIdentifier>,
     /// Parameter that indicates if the leader is required to be ready before handling
     /// this RecipeSpec.
     ///
@@ -51,6 +53,7 @@ impl From<ChangeList> for ExtendRecipeSpec<'_> {
         Self {
             changes,
             replication_offset: None,
+            catalog: None,
             require_leader_ready: true,
             concurrently: false,
         }

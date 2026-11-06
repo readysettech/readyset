@@ -351,7 +351,7 @@ impl MySqlReplicator<'_> {
         let schema_offset = self.current_replication_offset().await?;
 
         noria
-            .set_schema_replication_offset(Some(&schema_offset))
+            .set_schema_replication_offset(None, Some(&schema_offset))
             .await?;
 
         let table_list = replicated_tables

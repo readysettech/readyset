@@ -954,9 +954,12 @@ impl Leader {
                 return_serialized!(ReadySetResult::Ok(()));
             }
             (&Method::POST, "/set_schema_replication_offset") => {
-                let body: Option<ReplicationOffset> = bincode::deserialize(&body)?;
+                let (catalog, offset): (Option<SqlIdentifier>, Option<ReplicationOffset>) =
+                    bincode::deserialize(&body)?;
                 let mut writer = self.dataflow_state_handle.write().await;
-                writer.as_mut().set_schema_replication_offset(body);
+                writer
+                    .as_mut()
+                    .set_schema_replication_offset(catalog, offset);
                 self.dataflow_state_handle.commit(writer, authority).await?;
                 return_serialized!(ReadySetResult::Ok(()));
             }

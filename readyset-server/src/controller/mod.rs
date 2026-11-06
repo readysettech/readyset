@@ -95,7 +95,7 @@ impl Debug for ControllerState {
             .field("config", &self.config)
             .field(
                 "schema_replication_offset",
-                &self.dataflow_state.schema_replication_offset(),
+                &self.dataflow_state.schema_replication_offset(None),
             )
             .finish()
     }
@@ -155,7 +155,7 @@ impl ControllerState {
             config.persistence.clone(),
             materializations,
             recipe,
-            None,
+            Default::default(),
             channel_coordinator,
         );
 
@@ -1273,7 +1273,9 @@ impl Controller {
             table_handle.set_replication_offset(offset.clone()).await?;
         }
 
-        noria.set_schema_replication_offset(Some(&offset)).await?;
+        noria
+            .set_schema_replication_offset(None, Some(&offset))
+            .await?;
 
         info!(%position, "Replication position updated");
         Ok(())
@@ -1792,7 +1794,7 @@ impl AuthorityLeaderElectionState {
                 ControllerState::new(self.config.clone(), self.permissive_writes, self.dialect);
             state
                 .dataflow_state
-                .set_schema_replication_offset(schema_replication_offset);
+                .set_schema_replication_offset(None, schema_replication_offset);
             if let Err(error) =
                 Self::replay_persisted_schema_catalog(&self.authority, &mut state).await
             {
@@ -1800,7 +1802,9 @@ impl AuthorityLeaderElectionState {
                     %error,
                     "Schema catalog replay failed; forcing upstream resnapshot"
                 );
-                state.dataflow_state.set_schema_replication_offset(None);
+                state
+                    .dataflow_state
+                    .set_schema_replication_offset(None, None);
             }
             let cache_ddl = match self.authority.cache_ddl_requests().await? {
                 res if res.is_empty() => None,
@@ -2295,7 +2299,7 @@ mod tests {
         );
 
         noria
-            .set_schema_replication_offset(Some(&offset))
+            .set_schema_replication_offset(None, Some(&offset))
             .await
             .unwrap();
         eventually! {
@@ -2368,21 +2372,39 @@ mod tests {
             parse_create_table(Dialect::PostgreSQL, "CREATE TABLE public.t2 (id int);").unwrap();
         t2.table.catalog = Some("db2".into());
         let (t1_name, t2_name) = (t1.table.clone(), t2.table.clone());
+        let t1_offset = ReplicationOffset::from(PostgresPosition::commit_start(0x200.into()));
+        let t2_offset = ReplicationOffset::from(PostgresPosition::commit_start(0x100.into()));
         eventually! {
             noria
-                .extend_recipe(ChangeList::from_changes(
-                    vec![
-                        Change::CreateTable { statement: t1.clone(), pg_meta: None },
-                        Change::CreateTable { statement: t2.clone(), pg_meta: None },
-                    ],
-                    DataDialect::DEFAULT_POSTGRESQL,
-                ))
+                .extend_recipe_with_offset(
+                    ChangeList::from_changes(
+                        vec![Change::CreateTable { statement: t1.clone(), pg_meta: None }],
+                        DataDialect::DEFAULT_POSTGRESQL,
+                    ),
+                    None,
+                    &t1_offset,
+                    false,
+                )
                 .await
                 .is_ok()
         }
+        // db2's DDL is applied even though its offset is below db1's.
+        noria
+            .extend_recipe_with_offset(
+                ChangeList::from_changes(
+                    vec![Change::CreateTable {
+                        statement: t2,
+                        pg_meta: None,
+                    }],
+                    DataDialect::DEFAULT_POSTGRESQL,
+                ),
+                Some("db2".into()),
+                &t2_offset,
+                false,
+            )
+            .await
+            .unwrap();
 
-        let t1_offset = ReplicationOffset::from(PostgresPosition::commit_start(0x100.into()));
-        let t2_offset = ReplicationOffset::from(PostgresPosition::commit_start(0x200.into()));
         let mut table = noria.table(t1_name.clone()).await.unwrap();
         table
             .set_replication_offset(t1_offset.clone())
@@ -2395,8 +2417,10 @@ mod tests {
             .unwrap();
 
         let offsets = noria.replication_offsets(None).await.unwrap();
+        assert_eq!(offsets.schema.as_ref(), Some(&t1_offset));
         assert_eq!(offsets.tables, HashMap::from([(t1_name, Some(t1_offset))]));
         let offsets = noria.replication_offsets(Some("db2".into())).await.unwrap();
+        assert_eq!(offsets.schema.as_ref(), Some(&t2_offset));
         assert_eq!(offsets.tables, HashMap::from([(t2_name, Some(t2_offset))]));
 
         shutdown_tx.shutdown().await;

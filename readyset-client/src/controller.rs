@@ -894,12 +894,14 @@ impl ReadySetHandle {
             .await
     }
 
-    /// Extend the existing recipe with the given set of queries and an optional replication offset
+    /// Extend the existing recipe with the given set of queries and the schema replication offset
+    /// for `catalog`
     ///
     /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
     pub async fn extend_recipe_with_offset<'a>(
         &'a mut self,
         changes: ChangeList,
+        catalog: Option<SqlIdentifier>,
         replication_offset: &'a ReplicationOffset,
         require_leader_ready: bool,
     ) -> ReadySetResult<()> {
@@ -908,6 +910,7 @@ impl ReadySetHandle {
         let request = ExtendRecipeSpec {
             changes,
             replication_offset: Some(Cow::Owned(replication_offset)),
+            catalog,
             require_leader_ready,
             concurrently: false,
         };
@@ -931,10 +934,11 @@ impl ReadySetHandle {
     );
 
     simple_request!(
-        /// Set the replication offset for the schema, which is stored with the recipe.
+        /// Set the schema replication offset for `catalog`, which is stored with the recipe.
         ///
         /// `Self::poll_ready` must have returned `Async::Ready` before you call this method.
         set_schema_replication_offset(
+            catalog: Option<SqlIdentifier>,
             replication_offset: Option<&ReplicationOffset>,
         ) -> ()
     );

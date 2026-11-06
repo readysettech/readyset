@@ -1109,7 +1109,7 @@ impl<'a> NoriaAdapter<'a> {
 
         match self
             .noria
-            .extend_recipe_with_offset(changelist.clone(), pos, false)
+            .extend_recipe_with_offset(changelist.clone(), None, pos, false)
             .await
         {
             // ReadySet likely entered an invalid state, fail the replicator.
@@ -1203,7 +1203,9 @@ impl<'a> NoriaAdapter<'a> {
     async fn handle_log_position(&mut self, pos: &ReplicationOffset) -> ReadySetResult<()> {
         // Update the log position for the schema
         debug!(%pos, "Setting schema replication offset");
-        self.noria.set_schema_replication_offset(Some(pos)).await?;
+        self.noria
+            .set_schema_replication_offset(None, Some(pos))
+            .await?;
 
         // Update the log position for the tables that are behind this offset
         let tables = self
