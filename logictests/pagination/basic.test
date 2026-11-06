@@ -1,0 +1,39 @@
+# Scripts in this directory run with --enable-pagination, so a literal or bound
+# LIMIT/OFFSET lowers to a Paginate node instead of being paged in the adapter.
+# Elsewhere the flag stays off: with it on the server refuses a parameterized
+# LIMIT, and a range predicate beside a non-zero OFFSET, which other scripts use.
+
+statement ok
+create table paged (id int PRIMARY KEY, grp varchar(4), val int);
+
+statement ok
+insert into paged values
+  (1,'a',10),(2,'a',20),(3,'a',30),(4,'a',40),(5,'b',50);
+
+statement ok
+create cache from SELECT paged.val FROM paged WHERE paged.grp = $1 ORDER BY paged.val LIMIT 2 OFFSET $2;
+
+# second page of a keyed, paginated read
+query I nosort
+SELECT paged.val FROM paged WHERE paged.grp = $1 ORDER BY paged.val LIMIT 2 OFFSET $2
+$1 = a
+$2 = 2
+----
+30
+40
+
+# first page, through the same cache
+query I nosort
+SELECT paged.val FROM paged WHERE paged.grp = $1 ORDER BY paged.val LIMIT 2 OFFSET $2
+$1 = a
+$2 = 0
+----
+10
+20
+
+# a page past the end is empty, not an error
+query I nosort
+SELECT paged.val FROM paged WHERE paged.grp = $1 ORDER BY paged.val LIMIT 2 OFFSET $2
+$1 = a
+$2 = 4
+----

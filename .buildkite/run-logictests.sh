@@ -7,6 +7,7 @@ MS_UPSTREAM="mysql://root:noria@mysql/noria"              # trufflehog:ignore
 cargo run --locked --bin readyset-logictest -- verify logictests
 TZ=UTC cargo run --locked --bin readyset-logictest -- verify logictests/timeseries --database-type postgresql
 cargo run --locked --bin readyset-logictest -- verify logictests/psql --database-type postgresql
+cargo run --locked --bin readyset-logictest -- verify logictests/pagination --database-type postgresql --enable-pagination
 cargo run --locked --bin readyset-logictest -- verify logictests/mysql --database-type mysql
 cargo run --locked --bin readyset-logictest -- verify logictests/replicated/psql --database-type postgresql --replication-url ${PG_UPSTREAM}
 cargo run --locked --bin readyset-logictest -- verify logictests/replicated/postgis --database-type postgresql --replication-url ${PG_UPSTREAM} --parsing-preset both-prefer-sqlparser

@@ -50,6 +50,10 @@ async fn start_noria_server(
         builder.set_straddled_joins(true);
         builder.set_post_lookup(true);
         builder.set_topk(true);
+        // Scripts covering paginated shapes opt in, so that a literal LIMIT/OFFSET lowers to a
+        // Paginate node and the adapter autoparameterizes the offset. Left off elsewhere: it also
+        // makes the server refuse a parameterized LIMIT, which other scripts use.
+        builder.set_pagination(run_opts.enable_pagination);
         builder.set_parsing_preset(run_opts.parsing_preset);
         builder.set_dialect(run_opts.database_type.into());
 

@@ -259,6 +259,12 @@ struct Verify {
     #[arg(long, conflicts_with_all = ["database_url", "readyset_url", "mysql", "postgresql"])]
     enable_reuse: bool,
 
+    /// Enable server-side pagination in Readyset.
+    ///
+    /// Only relevant for in-process Readyset instance.
+    #[arg(long, conflicts_with_all = ["database_url", "readyset_url", "mysql", "postgresql"])]
+    enable_pagination: bool,
+
     /// Number of parallel tasks to use to run tests. Ignored if --binlog-mysql is passed
     #[arg(long, short = 't', default_value = "32", env = "NORIA_LOGICTEST_TASKS")]
     tasks: usize,
@@ -473,6 +479,7 @@ impl From<&Verify> for RunOptions {
         Self {
             database_type: verify.database_type,
             enable_reuse: verify.enable_reuse,
+            enable_pagination: verify.enable_pagination,
             upstream_database_url: verify.target_database_url().cloned(),
             upstream_database_is_readyset: verify.readyset_url.is_some(),
             parsing_preset: verify.parsing_preset,

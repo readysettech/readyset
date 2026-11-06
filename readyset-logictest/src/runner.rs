@@ -83,6 +83,10 @@ pub struct RunOptions {
     pub replication_url: Option<String>,
     pub parsing_preset: ParsingPreset,
     pub enable_reuse: bool,
+    /// Enable server-side pagination. Off by default: with it on, a parameterized LIMIT or a
+    /// range predicate beside a non-zero OFFSET is refused rather than paged in the adapter,
+    /// which existing scripts rely on. Scripts that need a Paginate node opt in.
+    pub enable_pagination: bool,
     pub time: bool,
     pub verbose: bool,
     /// When true, continue running after query failures and report all failures at the end.
@@ -113,6 +117,7 @@ impl RunOptions {
             upstream_database_url: None,
             upstream_database_is_readyset: false,
             enable_reuse: false,
+            enable_pagination: false,
             time: false,
             replication_url: None,
             database_type,
