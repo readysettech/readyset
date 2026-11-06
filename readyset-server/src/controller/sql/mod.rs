@@ -898,7 +898,16 @@ impl SqlIncorporator {
     }
 
     pub(crate) fn drop_custom_type(&mut self, name: &Relation) -> Option<DfType> {
-        self.custom_types.remove(name)
+        let ty = self.custom_types.remove(name)?;
+        if let DfType::Enum {
+            metadata: Some(PgEnumMetadata { oid, .. }),
+            ..
+        } = ty
+        {
+            self.custom_types_by_oid
+                .remove(&(name.catalog.clone(), oid));
+        }
+        Some(ty)
     }
 
     pub(crate) fn get_custom_type(&self, name: &Relation) -> Option<&DfType> {
@@ -1949,5 +1958,24 @@ mod tests {
         assert_eq!(enum_variants(inc.get_custom_type(&e2).unwrap()), ["a", "b"]);
         assert_eq!(enum_variants(inc.get_custom_type(&db2_e).unwrap()), ["x"]);
         assert!(inc.get_custom_type(&db2_e2).is_none());
+    }
+
+    #[test]
+    fn drop_custom_type_forgets_oid() {
+        let mut inc = SqlIncorporator::new(Dialect::DEFAULT_POSTGRESQL);
+        let e = Relation::new(Some("public".into()), "e".into());
+        let e2 = Relation::new(Some("public".into()), "e2".into());
+
+        inc.add_custom_type(e.clone(), enum_type(100, &["a"]));
+        assert!(inc.drop_custom_type(&e).is_some());
+
+        let change = AlterTypeChange::SetVariants {
+            new_variants: vec!["a".into()],
+            original_variants: None,
+        };
+        let err = inc.alter_custom_type(100, &e2, change).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("Could not find custom type with oid 100"));
     }
 }
