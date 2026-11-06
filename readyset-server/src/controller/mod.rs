@@ -17,7 +17,8 @@ use http::{Method, StatusCode};
 use metrics::{counter, gauge, histogram};
 use readyset_client::consensus::{
     Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, CacheDDLRequest,
-    GetLeaderResult, PersistedUpstreamServers, UpstreamServerStore, WorkerDescriptor, WorkerId,
+    GetLeaderResult, PersistedUpstreamServers, SchemaCatalogEntry, UpstreamServerStore,
+    WorkerDescriptor, WorkerId,
 };
 use readyset_client::internal::DomainIndex;
 use readyset_client::recipe::changelist::Change;
@@ -27,6 +28,7 @@ use readyset_data::Dialect;
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{Relation, SqlIdentifier};
 use readyset_sql_parsing::ParsingPreset;
+use readyset_sql_passes::SetCatalog;
 use readyset_telemetry_reporter::TelemetrySender;
 use readyset_util::redacted::RedactedString;
 use readyset_util::retry_with_exponential_backoff;
@@ -1660,6 +1662,27 @@ async fn domain_exited_consumer(
     }
 }
 
+/// Parse a persisted schema catalog entry into changes that put its table or view in the entry's
+/// catalog. A view's definition is left as it was persisted.
+fn schema_catalog_entry_changes(
+    entry: SchemaCatalogEntry,
+    dialect: Dialect,
+) -> ReadySetResult<Vec<Change>> {
+    let mut changes = ChangeList::from_strings(vec![entry.unparsed_stmt], dialect)?.changes;
+    if let Some(catalog) = &entry.catalog {
+        for change in &mut changes {
+            match change {
+                Change::CreateTable { statement, .. } => {
+                    statement.set_catalog(catalog);
+                }
+                Change::CreateView(stmt) => stmt.name.catalog = Some(catalog.clone()),
+                _ => internal!("Schema catalog entry is not CREATE TABLE or CREATE VIEW"),
+            }
+        }
+    }
+    Ok(changes)
+}
+
 /// Manages this authority's leader election state and sends update
 /// along `event_tx` when the state changes.
 struct AuthorityLeaderElectionState {
@@ -1738,11 +1761,11 @@ impl AuthorityLeaderElectionState {
             unqualified.push(Change::AddNonReplicatedRelation(relation));
         }
         for entry in ddl_entries {
-            let ddl = ChangeList::from_strings(vec![entry.unparsed_stmt], dialect)?;
+            let schema_search_path = entry.schema_search_path.clone();
             changes
-                .entry(entry.schema_search_path)
+                .entry(schema_search_path)
                 .or_default()
-                .extend(ddl.changes);
+                .extend(schema_catalog_entry_changes(entry, dialect)?);
         }
 
         let mut n_changes = 0;
@@ -2229,6 +2252,7 @@ mod tests {
     use petgraph::visit::IntoNodeReferences;
 
     use dataflow::DomainIndex;
+    use readyset_client::consensus::SchemaCatalogEntry;
     use readyset_client::debug::info::KeyCount;
     use readyset_client::recipe::changelist::{Change, ChangeList};
     use readyset_client::{PersistencePoint, TableOperation, TableStatus, ViewCreateRequest};
@@ -2242,6 +2266,7 @@ mod tests {
     use replication_offset::ReplicationOffset;
     use replicators::MySqlPosition;
 
+    use super::schema_catalog_entry_changes;
     use crate::integration_utils::{get_persistence_params, start_simple};
     use crate::Builder;
 
@@ -3348,5 +3373,39 @@ mod tests {
         assert_eq!(min, PersistencePoint::UpTo(t2_offset));
 
         shutdown_tx.shutdown().await;
+    }
+
+    fn entry_changes(unparsed_stmt: &str, catalog: Option<&str>) -> Vec<Change> {
+        let entry = SchemaCatalogEntry {
+            unparsed_stmt: unparsed_stmt.into(),
+            schema_search_path: vec![],
+            dialect: DataDialect::DEFAULT_POSTGRESQL,
+            catalog: catalog.map(Into::into),
+        };
+        schema_catalog_entry_changes(entry, DataDialect::DEFAULT_POSTGRESQL).unwrap()
+    }
+
+    #[test]
+    fn schema_catalog_entry_changes_set_catalog() {
+        let table = r#"CREATE TABLE "public"."t" ("id" INT)"#;
+        let [Change::CreateTable { statement, .. }] = &entry_changes(table, None)[..] else {
+            panic!("expected CREATE TABLE");
+        };
+        assert_eq!(statement.table.catalog, None);
+        let [Change::CreateTable { statement, .. }] = &entry_changes(table, Some("db2"))[..] else {
+            panic!("expected CREATE TABLE");
+        };
+        assert_eq!(statement.table.catalog, Some("db2".into()));
+
+        let view = r#"CREATE VIEW "public"."v" AS SELECT "id" FROM "public"."t""#;
+        let [Change::CreateView(url_view)] = &entry_changes(view, None)[..] else {
+            panic!("expected CREATE VIEW");
+        };
+        let [Change::CreateView(db2_view)] = &entry_changes(view, Some("db2"))[..] else {
+            panic!("expected CREATE VIEW");
+        };
+        assert_eq!(url_view.name.catalog, None);
+        assert_eq!(db2_view.name.catalog, Some("db2".into()));
+        assert_eq!(db2_view.definition, url_view.definition);
     }
 }

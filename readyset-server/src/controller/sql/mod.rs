@@ -1743,6 +1743,7 @@ impl SqlIncorporator {
                 unparsed_stmt: stmt.display(sql_dialect).to_string(),
                 schema_search_path: Vec::new(),
                 dialect: self.dialect,
+                catalog: relation.catalog.clone(),
             });
         }
 
@@ -1757,6 +1758,7 @@ impl SqlIncorporator {
                 unparsed_stmt: stmt.display(sql_dialect).to_string(),
                 schema_search_path: view.schema_search_path.clone(),
                 dialect: self.dialect,
+                catalog: view.name.catalog.clone(),
             });
         }
 

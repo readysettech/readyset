@@ -82,6 +82,9 @@ pub struct SchemaCatalogEntry {
     pub schema_search_path: Vec<SqlIdentifier>,
     /// Dialect under which `unparsed_stmt` should be re-parsed on replay.
     pub dialect: Dialect,
+    /// The catalog of the table or view, which `unparsed_stmt` omits.
+    #[serde(default)]
+    pub catalog: Option<SqlIdentifier>,
 }
 
 /// A user-defined custom type persisted for replay at controller startup.  (`CREATE TYPE` is

@@ -588,11 +588,13 @@ mod tests {
                 unparsed_stmt: "CREATE TABLE s.t (a INT)".to_string(),
                 schema_search_path: vec!["s".into()],
                 dialect: Dialect::DEFAULT_POSTGRESQL,
+                catalog: None,
             },
             SchemaCatalogEntry {
                 unparsed_stmt: "CREATE VIEW s.v AS SELECT a FROM s.t".to_string(),
                 schema_search_path: vec!["s".into()],
                 dialect: Dialect::DEFAULT_POSTGRESQL,
+                catalog: Some("db2".into()),
             },
         ];
         authority
@@ -606,6 +608,7 @@ mod tests {
             unparsed_stmt: "CREATE TABLE s.u (b TEXT)".to_string(),
             schema_search_path: vec!["s".into()],
             dialect: Dialect::DEFAULT_POSTGRESQL,
+            catalog: None,
         }];
         authority
             .overwrite_schema_catalog(next.clone())
