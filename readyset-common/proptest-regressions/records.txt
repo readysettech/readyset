@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc f75f215d749b719f4c05f8dc39baf135e3ad05eac259f51851c716cf18854c92 # shrinks to records = [Positive([Int(3)]), Positive([Int(1)]), Negative([Int(3)]), Negative([Int(1)])]

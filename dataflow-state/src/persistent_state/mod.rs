@@ -4177,6 +4177,50 @@ mod tests {
     }
 
     #[test]
+    fn persistent_state_cleanup_repeated_updates() {
+        let mut state = setup_persistent("cleanup_repeated_updates", Some(&[0usize][..]));
+        state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
+        state.add_index(Index::new(IndexType::HashMap, vec![1]), None);
+        let old = vec![1.into(), "old".into()];
+        let middle = vec![1.into(), "middle".into()];
+        let new = vec![1.into(), "new".into()];
+        insert(&mut state, old.clone());
+        let mut records = vec![
+            (old, false),
+            (middle.clone(), true),
+            (middle, false),
+            (new.clone(), true),
+            (vec![2.into(), "temporary".into()], true),
+            (vec![3.into(), "temporary".into()], true),
+            (vec![2.into(), "temporary".into()], false),
+            (vec![3.into(), "temporary".into()], false),
+        ]
+        .into();
+        state.process_records(&mut records, None, None).unwrap();
+        for (col, key) in [(0, 1.into()), (1, "new".into())] {
+            let LookupResult::Some(rows) = state.lookup(&[col], &PointKey::Single(key)) else {
+                panic!("persistent state is full");
+            };
+            assert_eq!(
+                rows.into_iter().map(|r| r.into_owned()).collect::<Vec<_>>(),
+                vec![new.clone()]
+            );
+        }
+        for (col, key) in [
+            (0, 2.into()),
+            (0, 3.into()),
+            (1, "middle".into()),
+            (1, "old".into()),
+            (1, "temporary".into()),
+        ] {
+            let LookupResult::Some(rows) = state.lookup(&[col], &PointKey::Single(key)) else {
+                panic!("persistent state is full");
+            };
+            assert!(rows.is_empty());
+        }
+    }
+
+    #[test]
     fn replication_offset_roundtrip_mysql() {
         let mut state = setup_persistent("replication_offset_roundtrip_mysql", None);
         state.add_index(Index::new(IndexType::HashMap, vec![0]), None);
