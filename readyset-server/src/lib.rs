@@ -495,6 +495,32 @@ pub fn resolve_addr(addr: &str) -> anyhow::Result<IpAddr> {
         .ip())
 }
 
+/// Convert an absolute block-cache size in MiB to bytes.
+///
+/// `0` and any product that does not fit in [`usize`] are rejected. The absolute flag is not
+/// clamped to process memory or to the 16 GiB default cap.
+fn block_cache_mib_to_bytes(mb: u64) -> Option<usize> {
+    if mb == 0 {
+        return None;
+    }
+    mb.checked_mul(1024 * 1024)
+        .and_then(|bytes| usize::try_from(bytes).ok())
+}
+
+fn parse_block_cache_mb(raw: &str) -> Result<u64, String> {
+    let mb: u64 = raw.parse().map_err(|_| {
+        format!(
+            "invalid value '{raw}' for --rocksdb-block-cache-mb: expected an integer number of MiB"
+        )
+    })?;
+    if block_cache_mib_to_bytes(mb).is_none() {
+        return Err(format!(
+            "--rocksdb-block-cache-mb must be at least 1 and convert to a byte count that fits in usize (got {mb})"
+        ));
+    }
+    Ok(mb)
+}
+
 // Command-line options for running a `readyset-server` worker.
 //
 // This option struct is intended to be embedded inside of a larger option struct using
@@ -587,16 +613,37 @@ pub struct WorkerOptions {
     )]
     pub background_recovery_interval_seconds: u64,
 
-    /// Total capacity of the process-wide rocksdb block cache, in MiB. The cache is shared
-    /// across all PersistentState instances; sizing it well is the single biggest lever for
-    /// dataflow read performance on non-trivial cached queries. Default 1024 MiB.
+    /// Absolute capacity of the process-wide RocksDB block cache, in MiB. When unset, the
+    /// cache is 10% of the memory available to the process, clamped to 64 MiB-16 GiB. That
+    /// ceiling is filled lazily, so steady-state RSS grows toward it under read load. Hosts
+    /// above 10 GiB now get more than the old 1 GiB default (up to 16 GiB), and smaller hosts
+    /// get less. The block cache holds uncompressed blocks while the OS page cache holds
+    /// compressed SST files, so giving the cache most of RAM starves the page cache. This is
+    /// a read hit-ratio and latency lever. An explicit value is used as given: it is not
+    /// clamped to process memory or to 16 GiB. Conflicts with `--rocksdb-block-cache-percent`.
     #[arg(
         long,
         env = "ROCKSDB_BLOCK_CACHE_MB",
-        default_value = "1024",
-        hide = true
+        value_parser = parse_block_cache_mb,
+        conflicts_with = "rocksdb_block_cache_percent"
     )]
-    pub rocksdb_block_cache_mb: u64,
+    pub rocksdb_block_cache_mb: Option<u64>,
+
+    /// Percentage of process memory (1-100) for the process-wide RocksDB block cache, in
+    /// place of the 10% default. The result is clamped to 64 MiB-16 GiB and never exceeds
+    /// process memory. The ceiling is filled lazily, so steady-state RSS grows toward it
+    /// under read load. Hosts above 10 GiB now get more than the old 1 GiB default (up to
+    /// 16 GiB), and smaller hosts get less. The block cache holds uncompressed blocks while
+    /// the OS page cache holds compressed SST files, so giving the cache most of RAM starves
+    /// the page cache. This is a read hit-ratio and latency lever. Conflicts with
+    /// `--rocksdb-block-cache-mb`.
+    #[arg(
+        long,
+        env = "ROCKSDB_BLOCK_CACHE_PERCENT",
+        value_parser = clap::value_parser!(u64).range(1..=100),
+        conflicts_with = "rocksdb_block_cache_mb"
+    )]
+    pub rocksdb_block_cache_percent: Option<u64>,
 
     /// How long, in milliseconds, a reader will wait for an in-flight upquery before bailing out
     /// with `UpqueryTimeout`. The adapter treats `UpqueryTimeout` as a fall-through to upstream,
@@ -752,6 +799,39 @@ impl WorkerOptions {
         })
     }
 
+    /// Process-wide RocksDB block cache capacity, in bytes.
+    ///
+    /// `--rocksdb-block-cache-mb` wins as an absolute MiB capacity (not clamped).
+    /// `--rocksdb-block-cache-percent` replaces the 10% term in the same sizing function.
+    /// When neither is set, the capacity is 10% of process memory clamped to 64 MiB–16 GiB.
+    pub fn effective_block_cache_bytes(&self) -> usize {
+        let host_bytes = common::host_info::host_memory_bytes();
+        if let Some(mb) = self.rocksdb_block_cache_mb {
+            let bytes = block_cache_mib_to_bytes(mb)
+                .expect("--rocksdb-block-cache-mb must be non-zero and fit in usize");
+            info!(
+                host_bytes,
+                bytes, mb, "using --rocksdb-block-cache-mb for the rocksdb block cache"
+            );
+            bytes
+        } else if let Some(percent) = self.rocksdb_block_cache_percent {
+            let bytes = dataflow_state::block_cache_bytes_for_memory(host_bytes, percent);
+            info!(
+                host_bytes,
+                bytes, percent, "using --rocksdb-block-cache-percent for the rocksdb block cache"
+            );
+            bytes
+        } else {
+            let percent = dataflow_state::BLOCK_CACHE_DEFAULT_PERCENT;
+            let bytes = dataflow_state::block_cache_bytes_for_memory(host_bytes, percent);
+            info!(
+                host_bytes,
+                bytes, "--rocksdb-block-cache not set, defaulting to {percent}% of memory"
+            );
+            bytes
+        }
+    }
+
     pub fn storage_dir(&self, deployment: &str) -> PathBuf {
         self.storage_dir
             .clone()
@@ -817,7 +897,7 @@ pub async fn sleep() {
 mod tests {
     use std::path::PathBuf;
 
-    use clap::Parser;
+    use clap::{CommandFactory, Parser};
 
     use super::*;
 
@@ -865,6 +945,87 @@ mod tests {
         assert_eq!(
             worker_opts.effective_memory_limit() as u64,
             host_bytes / 100 * DEFAULT_MEMORY_LIMIT_PERCENT
+        );
+    }
+
+    #[test]
+    fn block_cache_defaults_to_share_of_host_memory() {
+        let worker_opts = Wrapper::parse_from(["test"]).worker_opts;
+        let host_bytes = common::host_info::host_memory_bytes();
+        let expected = dataflow_state::block_cache_bytes_for_memory(host_bytes, 10);
+        assert_eq!(worker_opts.effective_block_cache_bytes(), expected);
+
+        let builder =
+            Builder::from_worker_options(worker_opts, "test", PathBuf::from(".")).unwrap();
+        assert_eq!(builder.get_persistence().block_cache_bytes, expected);
+    }
+
+    #[test]
+    fn rocksdb_block_cache_mb_is_an_absolute_capacity() {
+        let one_gib = 1024usize * 1024 * 1024;
+
+        let worker_opts =
+            Wrapper::parse_from(["test", "--rocksdb-block-cache-mb", "1024"]).worker_opts;
+        assert_eq!(worker_opts.effective_block_cache_bytes(), one_gib);
+        let builder =
+            Builder::from_worker_options(worker_opts, "test", PathBuf::from(".")).unwrap();
+        assert_eq!(builder.get_persistence().block_cache_bytes, one_gib);
+
+        // Absolute flag is not clamped to process memory, even when the host is smaller than
+        // the requested cache.
+        let worker_opts =
+            Wrapper::parse_from(["test", "--rocksdb-block-cache-mb", "2048"]).worker_opts;
+        assert_eq!(worker_opts.effective_block_cache_bytes(), 2 * one_gib);
+
+        // Absolute flag is not clamped to the 16 GiB default cap either.
+        let worker_opts =
+            Wrapper::parse_from(["test", "--rocksdb-block-cache-mb", "32768"]).worker_opts;
+        assert_eq!(worker_opts.effective_block_cache_bytes(), 32 * one_gib);
+    }
+
+    #[test]
+    fn rocksdb_block_cache_percent_overrides_default_share() {
+        let worker_opts =
+            Wrapper::parse_from(["test", "--rocksdb-block-cache-percent", "25"]).worker_opts;
+        let host_bytes = common::host_info::host_memory_bytes();
+        assert_eq!(
+            worker_opts.effective_block_cache_bytes(),
+            dataflow_state::block_cache_bytes_for_memory(host_bytes, 25)
+        );
+    }
+
+    #[test]
+    fn rocksdb_block_cache_flag_parse_failures() {
+        assert!(Wrapper::try_parse_from([
+            "test",
+            "--rocksdb-block-cache-mb",
+            "1024",
+            "--rocksdb-block-cache-percent",
+            "10",
+        ])
+        .is_err());
+        assert!(Wrapper::try_parse_from(["test", "--rocksdb-block-cache-mb", "0"]).is_err());
+        assert!(Wrapper::try_parse_from(["test", "--rocksdb-block-cache-percent", "0"]).is_err());
+        assert!(Wrapper::try_parse_from(["test", "--rocksdb-block-cache-percent", "101"]).is_err());
+    }
+
+    #[test]
+    fn rocksdb_block_cache_flags_are_visible_in_help() {
+        let cmd = Wrapper::command();
+        for name in ["rocksdb-block-cache-mb", "rocksdb-block-cache-percent"] {
+            let arg = cmd
+                .get_arguments()
+                .find(|arg| arg.get_long() == Some(name))
+                .unwrap_or_else(|| panic!("missing --{name}"));
+            assert!(!arg.is_hide_set(), "--{name} is hidden");
+        }
+
+        let help = cmd.clone().render_long_help().to_string();
+        assert!(help.contains("--rocksdb-block-cache-mb"), "{help}");
+        assert!(help.contains("--rocksdb-block-cache-percent"), "{help}");
+        assert!(
+            help.to_ascii_lowercase().contains("page cache"),
+            "long help should describe the page-cache caveat: {help}"
         );
     }
 
