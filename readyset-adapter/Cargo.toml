@@ -81,6 +81,7 @@ criterion = { workspace = true }
 proptest = { workspace = true }
 rand = { workspace = true }
 test-strategy = { workspace = true }
+test-utils = { path = "../test-utils" }
 
 [lib]
 path = "src/lib.rs"

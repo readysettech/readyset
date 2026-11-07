@@ -6284,6 +6284,7 @@ dependencies = [
  "sqlparser 0.63.0",
  "streaming-iterator",
  "test-strategy",
+ "test-utils",
  "tokio",
  "tokio-stream",
  "tokio-util",

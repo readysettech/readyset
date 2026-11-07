@@ -192,7 +192,7 @@ async fn connect_rs(config: &UpstreamConfig, rs_addr: SocketAddr) -> Option<Data
             return None;
         }
     };
-    connect(url, verification).await
+    connect(url, verification, config.upstream_connect_timeout).await
 }
 
 /// Pick a server from `registry` and connect to it, marking down servers that refuse.
@@ -232,8 +232,9 @@ async fn connect_upstream(
 async fn connect(
     url: DatabaseURL,
     verification: ServerCertVerification,
+    timeout: Duration,
 ) -> Option<DatabaseConnection> {
-    let conn = match url.connect(&verification).await {
+    let conn = match url.connect_bounded(&verification, timeout).await {
         Ok(conn) => conn,
         Err(error) => {
             warn!(%error, "Failed to establish sampler upstream connection");
@@ -323,6 +324,8 @@ impl Sampler {
         self.last_executed_at = Some(std::time::Instant::now());
     }
 
+    /// On timeout, `conn` is reset to `None`: the reply to the canceled query can still arrive on
+    /// it and would be read as the answer to the next query.
     async fn query_with_timeout(
         timeout: Duration,
         conn: &mut Option<DatabaseConnection>,
@@ -341,6 +344,7 @@ impl Sampler {
                 rate_limit(true, SAMPLER_LOG_SAMPLER, || {
                     debug!(?name, "Sampler upstream read timeout");
                 });
+                *conn = None;
                 Err(DatabaseError::UpstreamQueryTimeout)
             }
         }
@@ -396,10 +400,13 @@ impl Sampler {
                 let hash = Some(normalize_and_hash(&mut rows_vec, has_order_by));
                 (hash, Some(rows_vec))
             }
-            Err(DatabaseError::UpstreamQueryTimeout) => {
+            Err(
+                e @ (DatabaseError::UpstreamQueryTimeout | DatabaseError::UpstreamConnectionNone),
+            ) => {
                 rate_limit(true, SAMPLER_LOG_SAMPLER, || {
-                    debug!("Sampler readyset query timed out; discarding sample");
+                    debug!(error = %e, "Sampler readyset query failed; discarding sample");
                 });
+                self.reconnect_rs_if_closed().await;
                 return;
             }
             Err(e) => {
@@ -438,10 +445,13 @@ impl Sampler {
                 let hash = Some(normalize_and_hash(&mut rows_vec, has_order_by));
                 (hash, Some(rows_vec))
             }
-            Err(DatabaseError::UpstreamQueryTimeout) => {
+            Err(
+                e @ (DatabaseError::UpstreamQueryTimeout | DatabaseError::UpstreamConnectionNone),
+            ) => {
                 rate_limit(true, SAMPLER_LOG_SAMPLER, || {
-                    debug!("Sampler upstream query timed out; discarding sample");
+                    debug!(error = %e, "Sampler upstream query failed; discarding sample");
                 });
+                self.reconnect_upstream_if_closed().await;
                 return;
             }
             Err(e) => {
@@ -536,13 +546,12 @@ impl Sampler {
             self.schedule_retry(entry);
         }
     }
-    /// Check if upstream connection is closed and create a new one if necessary.
+    /// Create a new upstream connection if the current one is closed or missing.
     async fn reconnect_upstream_if_closed(&mut self) {
         if self
             .upstream_conn
             .as_ref()
-            .map(|c| c.is_closed())
-            .unwrap_or(false)
+            .is_none_or(DatabaseConnection::is_closed)
         {
             debug!("Sampler upstream connection is closed, creating a new connection");
             counter!(QUERY_SAMPLER_RECONNECTS).increment(1);
@@ -551,19 +560,20 @@ impl Sampler {
             let (conn, server) = connected.unzip();
             self.upstream_conn = conn;
             self.upstream_server = server;
+            restore_schema_search_path(&mut self.upstream_conn, &self.schema_search_path).await;
         }
     }
 
-    /// Check if Readyset connection is closed and create a new one if necessary.
+    /// Create a new Readyset connection if the current one is closed or missing.
     async fn reconnect_rs_if_closed(&mut self) {
         if self
             .rs_conn
             .as_ref()
-            .map(|c| c.is_closed())
-            .unwrap_or(false)
+            .is_none_or(DatabaseConnection::is_closed)
         {
             debug!("Sampler Readyset connection is closed, creating a new connection");
             self.rs_conn = connect_rs(&self.upstream_config, self.rs_addr).await;
+            restore_schema_search_path(&mut self.rs_conn, &self.schema_search_path).await;
         }
     }
 
@@ -679,11 +689,94 @@ async fn set_schema_search_path(
     Ok(())
 }
 
+/// Apply the sampler's current search path to a new connection.
+async fn restore_schema_search_path(
+    conn: &mut Option<DatabaseConnection>,
+    schema_search_path: &[SqlIdentifier],
+) {
+    if conn.is_none() || schema_search_path.is_empty() {
+        return;
+    }
+    if let Err(error) = set_schema_search_path(conn, schema_search_path).await {
+        debug!(%error, "Sampler failed to set the search path on a new connection");
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::env;
+
     use readyset_client_metrics::EventType;
+    use readyset_util::shutdown::{self, ShutdownSender};
+    use test_utils::{tags, upstream};
 
     use super::*;
+
+    fn var(name: &str, default: &str) -> String {
+        env::var(name).unwrap_or_else(|_| default.to_owned())
+    }
+
+    /// A sampler whose upstream and Readyset connections both go to the test MySQL server.
+    async fn sampler_on_mysql() -> (Sampler, ShutdownSender) {
+        let host = var("MYSQL_HOST", "127.0.0.1");
+        let port: u16 = var("MYSQL_TCP_PORT", "3306").parse().unwrap();
+        let user = var("MYSQL_USER", "root");
+        let pass = var("MYSQL_PASSWORD", "noria");
+        let upstream_config =
+            UpstreamConfig::from_url(format!("mysql://{user}:{pass}@{host}:{port}/mysql")).unwrap();
+        let rs_addr = tokio::net::lookup_host((host.as_str(), port))
+            .await
+            .unwrap()
+            .next()
+            .unwrap();
+        let (shutdown_tx, shutdown_rx) = shutdown::channel();
+        let config = SamplerConfig {
+            upstream_timeout: Duration::from_millis(200),
+            ..Default::default()
+        };
+        let registry = Arc::new(SharedUpstreamRegistry::new(None));
+        let (sampler, _) =
+            sampler_builder(config, upstream_config, registry, shutdown_rx, rs_addr).await;
+        let mut sampler = sampler.unwrap();
+        sampler.rs_conn = connect_rs(&sampler.upstream_config, rs_addr).await;
+        (sampler, shutdown_tx)
+    }
+
+    async fn query(conn: &mut Option<DatabaseConnection>, q: &str) -> Vec<Vec<DfValue>> {
+        let timeout = Duration::from_secs(5);
+        let res = Sampler::query_with_timeout(timeout, conn, q, String::new()).await;
+        Vec::try_from(res.unwrap()).unwrap()
+    }
+
+    /// Times out a sampled query on the connection `side` picks, then checks that this connection
+    /// answers the next query with that query's own result.
+    async fn assert_in_sync_after_timeout(
+        sampler: &mut Sampler,
+        side: fn(&mut Sampler) -> &mut Option<DatabaseConnection>,
+    ) {
+        // The variable is per session, so only this side's query outlasts the timeout.
+        query(side(sampler), "SET @slow = 1").await;
+        let entry = Entry {
+            q: "SELECT SLEEP(COALESCE(@slow, 0))".into(),
+            event: QueryExecutionEvent::new(EventType::Query),
+            attempts: 0,
+            last_up_hash: None,
+            schema_search_path: vec![],
+        };
+        sampler.process_entry(entry).await;
+        // Let the reply to the timed-out query arrive.
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        assert_eq!(query(side(sampler), "SELECT 1, 2").await[0].len(), 2);
+    }
+
+    #[tokio::test]
+    #[tags(serial)]
+    #[upstream(mysql)]
+    async fn timeout_does_not_desync_connections() {
+        let (mut sampler, _shutdown_tx) = sampler_on_mysql().await;
+        assert_in_sync_after_timeout(&mut sampler, |s| &mut s.rs_conn).await;
+        assert_in_sync_after_timeout(&mut sampler, |s| &mut s.upstream_conn).await;
+    }
 
     fn sender(sample_rate: f64) -> (SampleSender, SamplerRx) {
         build_channel(&SamplerConfig {
