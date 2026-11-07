@@ -46,13 +46,14 @@ use readyset_errors::ReadySetError::ReplicationFailed;
 use readyset_errors::ReadySetResult;
 use readyset_sql::ast::{
     AlterTableStatement, Column, ColumnSpecification, CreateTableBody, CreateTableStatement,
-    NonReplicatedRelation, NotReplicatedReason, Relation,
+    NonReplicatedRelation, NotReplicatedReason, Relation, SqlIdentifier,
 };
 use readyset_sql::Dialect;
 use readyset_sql_parsing::{
     parse_alter_table_with_config, parse_create_view_with_config,
     parse_key_specification_with_config, parse_sql_type_with_config, ParsingConfig,
 };
+use readyset_sql_passes::SetCatalog;
 use serde::Deserialize;
 use tokio_postgres as pgsql;
 use tracing::info;
@@ -165,11 +166,13 @@ pub(crate) struct DdlEvent {
 
 impl DdlEvent {
     /// Convert this [`DdlEvent`] into a SQL DDL statement that can be sent to ReadySet directly
-    /// (using the ReadySet-native SQL dialect, not the postgresql dialect!)
+    /// (using the ReadySet-native SQL dialect, not the postgresql dialect!), with its relations in
+    /// `catalog`
     pub(crate) fn try_into_change(
         self,
         parsing_config: ParsingConfig,
         database_collation: &str,
+        catalog: Option<SqlIdentifier>,
     ) -> ReadySetResult<Change> {
         match self.data {
             DdlEventData::CreateTable {
@@ -178,7 +181,8 @@ impl DdlEvent {
                 columns,
                 constraints,
             } => {
-                let table = Relation::new(Some(self.schema.into()), name.into());
+                let table =
+                    Relation::new(Some(self.schema.into()), name.into()).with_catalog(catalog);
 
                 let column_oids = columns
                     .iter()
@@ -244,20 +248,27 @@ impl DdlEvent {
                     });
 
                 match create_table_body {
-                    Ok(body) => Ok(Change::CreateTable {
-                        statement: CreateTableStatement {
+                    Ok(body) => {
+                        let mut statement = CreateTableStatement {
                             if_not_exists: false,
                             table,
                             body: Ok(body),
                             like: None,
                             options: Ok(vec![]),
-                        },
-                        pg_meta: Some(PostgresTableMetadata {
-                            oid,
-                            column_oids,
-                            replica_identity_key: None,
-                        }),
-                    }),
+                        };
+                        // Custom column types and foreign key targets are in the table's catalog.
+                        if let Some(catalog) = statement.table.catalog.clone() {
+                            statement.set_catalog(&catalog);
+                        }
+                        Ok(Change::CreateTable {
+                            statement,
+                            pg_meta: Some(PostgresTableMetadata {
+                                oid,
+                                column_oids,
+                                replica_identity_key: None,
+                            }),
+                        })
+                    }
                     Err(desc) => Ok(Change::AddNonReplicatedRelation(NonReplicatedRelation {
                         name: table,
                         reason: NotReplicatedReason::from_string(&desc),
@@ -266,12 +277,13 @@ impl DdlEvent {
             }
             DdlEventData::AddNonReplicatedTable { name } => {
                 Ok(Change::AddNonReplicatedRelation(NonReplicatedRelation {
-                    name: Relation::new(Some(self.schema.into()), name.into()),
+                    name: Relation::new(Some(self.schema.into()), name.into())
+                        .with_catalog(catalog),
                     reason: NotReplicatedReason::Partitioned,
                 }))
             }
             DdlEventData::AlterTable { name, statement } => {
-                let stmt = match parse_alter_table_with_config(
+                let mut stmt = match parse_alter_table_with_config(
                     parsing_config,
                     Dialect::PostgreSQL,
                     statement,
@@ -288,14 +300,18 @@ impl DdlEvent {
                         }
                     }
                 };
+                stmt.table.catalog = catalog;
 
                 Ok(Change::AlterTable(stmt))
             }
-            DdlEventData::CreateView(stmt) => Ok(Change::CreateView(
-                parse_create_view_with_config(parsing_config, Dialect::PostgreSQL, stmt)?,
-            )),
+            DdlEventData::CreateView(stmt) => {
+                let mut stmt =
+                    parse_create_view_with_config(parsing_config, Dialect::PostgreSQL, stmt)?;
+                stmt.name.catalog = catalog;
+                Ok(Change::CreateView(stmt))
+            }
             DdlEventData::Drop(name) => Ok(Change::Drop {
-                name: name.into(),
+                name: Relation::from(name).with_catalog(catalog),
                 if_exists: false,
             }),
             DdlEventData::CreateType {
@@ -304,7 +320,8 @@ impl DdlEvent {
                 name,
                 variants,
             } => Ok(Change::CreateType {
-                name: Relation::new(Some(self.schema.clone().into()), name.clone().into()),
+                name: Relation::new(Some(self.schema.clone().into()), name.clone().into())
+                    .with_catalog(catalog),
                 ty: DfType::from_enum_variants(
                     variants.into_iter().map(|v| v.label),
                     Some(PgEnumMetadata {
@@ -322,7 +339,8 @@ impl DdlEvent {
                 original_variants,
             } => Ok(Change::AlterType {
                 oid,
-                name: Relation::new(Some(self.schema.clone().into()), name.into()),
+                name: Relation::new(Some(self.schema.clone().into()), name.into())
+                    .with_catalog(catalog),
                 change: AlterTypeChange::SetVariants {
                     new_variants: variants.into_iter().map(|v| v.label).collect(),
                     original_variants: original_variants
