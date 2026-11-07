@@ -442,7 +442,7 @@ impl PostgresWalConnector {
     }
 
     /// Thin wrapper around [`GroupCommitState::accumulate_row`] that
-    /// assembles the `Relation` from the WAL event's schema/table fields
+    /// assembles the `Relation` in `self.catalog` from the WAL event's schema/table fields
     /// and pairs each operation with `event_pos` (the position of the
     /// WAL event that produced these operations).
     fn accumulate_row(
@@ -452,7 +452,7 @@ impl PostgresWalConnector {
         ops: impl IntoIterator<Item = TableOperation>,
         event_pos: ReplicationOffset,
     ) -> bool {
-        let relation = Relation::new(Some(schema), table);
+        let relation = Relation::new(Some(schema), table).with_catalog(self.catalog.clone());
         self.group_commit
             .accumulate_row(relation, ops.into_iter().map(|op| (op, event_pos.clone())))
     }
@@ -986,7 +986,7 @@ impl Connector for PostgresWalConnector {
             }
 
             // Get the next buffered event, or read a new one with timeout.
-            let event = match self.peek.take() {
+            let mut event = match self.peek.take() {
                 Some(buffered) => {
                     // If the peek was stashed from a flush-pending-first
                     // branch (DDL or Truncate that arrived after BEGIN had
@@ -1041,7 +1041,9 @@ impl Connector for PostgresWalConnector {
                 info!(target: "replicator_statement", "{:?}", event);
             }
 
-            if let Err(ReadySetError::TableError { .. }) = event {
+            // The WAL reader builds the failing table's relation without a catalog.
+            if let Err(ReadySetError::TableError { table, .. }) = &mut event {
+                table.catalog = self.catalog.clone();
                 self.had_table_error = true;
             }
 
@@ -1178,7 +1180,8 @@ impl Connector for PostgresWalConnector {
                         self.peek = Some(Ok(WalEvent::Truncate { tables, lsn }));
                     }
 
-                    let table = Relation::new(Some(schema.into()), name.into());
+                    let table = Relation::new(Some(schema.into()), name.into())
+                        .with_catalog(self.catalog.clone());
                     cur_pos = cur_pos.with_lsn(lsn);
                     let event_pos: ReplicationOffset = cur_pos.into();
                     return Ok((
