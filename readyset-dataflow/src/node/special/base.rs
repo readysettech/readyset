@@ -344,6 +344,9 @@ impl Base {
                 TableOperation::DeleteRow { row } => {
                     failed_log.failed_delete(&row, value.as_deref());
                 }
+                TableOperation::DeleteByKey { .. } if value.is_none() => {
+                    failed_log.failed_delete_by_key(&key);
+                }
                 TableOperation::DeleteByKey { .. } => value = None,
 
                 TableOperation::InsertOrUpdate { row, .. } if value.is_none() => {
@@ -592,6 +595,14 @@ impl FailedOpLogger {
                 }
             }
         }
+    }
+
+    fn failed_delete_by_key(&mut self, key: &[DfValue]) {
+        self.delete_count += 1;
+        error!(
+            "{}Attempted to delete non-existing row:\n  key: {:?}",
+            self.prefix, key
+        );
     }
 
     fn failed_insert(&mut self, inserted_row: &Vec<DfValue>, current_row: Option<&[DfValue]>) {
@@ -886,6 +897,53 @@ mod tests {
                     set_snapshot_mode: None,
                 }
             )
+        }
+
+        #[test]
+        fn delete_by_key_non_existing_row() {
+            let mut b = Base::new().with_primary_key([0]);
+            let ni = LocalNodeIndex::make(0u32);
+            let mut state = MaterializedNodeState::Persistent(
+                PersistentState::new(
+                    String::from("delete_by_key_non_existing_row"),
+                    None,
+                    Vec::<Box<[usize]>>::new(),
+                    &PersistenceParameters::default(),
+                    PersistenceType::BaseTable,
+                    None,
+                )
+                .unwrap(),
+            );
+            state.add_index(Index::hash_map(vec![0]), None);
+            let mut recs = vec![Record::Positive(vec![2.into(), 3.into()])].into();
+            state.process_records(&mut recs, None, None).unwrap();
+            let mut state_map = NodeMap::new();
+            state_map.insert(ni, state);
+
+            let res = b
+                .process_ops(
+                    ni,
+                    &[Column::new("a".into(), DfType::Int)],
+                    vec![
+                        TableOperation::DeleteByKey {
+                            key: vec![1.into()],
+                        },
+                        TableOperation::DeleteByKey {
+                            key: vec![2.into()],
+                        },
+                        TableOperation::DeleteByKey {
+                            key: vec![2.into()],
+                        },
+                    ],
+                    &state_map,
+                    SnapshotMode::SnapshotModeDisabled,
+                    Relation::new(None, "test".into()),
+                )
+                .unwrap();
+            assert_eq!(
+                res.records,
+                vec![Record::Negative(vec![2.into(), 3.into()])].into()
+            );
         }
 
         #[test]
