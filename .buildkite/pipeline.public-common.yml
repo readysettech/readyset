@@ -183,6 +183,7 @@ steps:
     depends_on:
       - rust-tests
     allow_dependency_failure: true
+    checkout: { skip: true }  # the plugin only needs the uploaded artifacts
     plugins:
       - junit-annotate#v2.7.0:
           artifacts: target/nextest/**/junit-*.xml

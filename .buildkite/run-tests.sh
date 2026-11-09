@@ -3,19 +3,17 @@ set -euo pipefail
 
 upload_junit() {
     local junit_dir="target/nextest/${NEXTEST_PROFILE}"
-    local job_id="${BUILDKITE_JOB_ID:-local}"
+    local junit_file="${junit_dir}/junit-${BUILDKITE_JOB_ID:-local}.xml"
     # Rename JUnit XML with unique suffix before uploading so the
     # junit-annotate plugin (which globs junit-*.xml) can find it.
     if [[ -f "${junit_dir}/junit.xml" ]]; then
-        mv "${junit_dir}/junit.xml" \
-           "${junit_dir}/junit-${job_id}.xml"
+        mv "${junit_dir}/junit.xml" "$junit_file"
     fi
-    # Upload any JUnit files that exist
-    for f in "${junit_dir}"/junit*.xml; do
-        if [[ -f "$f" ]]; then
-            buildkite-agent artifact upload "$f"
-        fi
-    done
+    # The target dir is a docker volume that persists across jobs on an agent,
+    # so upload only this job's file.
+    if [[ -f "$junit_file" ]]; then
+        buildkite-agent artifact upload "$junit_file"
+    fi
 }
 
 upload_timings() {
