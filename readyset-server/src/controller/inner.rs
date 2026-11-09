@@ -6,7 +6,7 @@
     clippy::unreachable
 )]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -114,8 +114,9 @@ pub struct Leader {
     table_statuses: TableStatusState,
     /// Any TableStatus updates sent here will update this controller's state machine.
     table_status_tx: UnboundedSender<(Relation, TableStatus)>,
-    /// The running replication task, if replication is started.
-    pub(super) replicator: Option<ReplicationChannel>,
+    /// The running replication task of each replicated catalog. Empty while replication is
+    /// stopped or disabled.
+    pub(super) replication_channels: BTreeMap<Option<SqlIdentifier>, ReplicationChannel>,
     /// The CDC server list the replication task walks. Replaced in place by CHANGE CDC so a
     /// running task sees the new failover candidates.
     pub(super) cdc_server_list: Arc<RwLock<Option<UpstreamServers>>>,
@@ -199,14 +200,17 @@ impl Leader {
 
         // When the controller becomes the leader, we need to read updates
         // from the binlog.
-        self.replicator = self
+        if let Some(channel) = self
             .spawn_replicator(
                 controller_tx,
                 telemetry_sender,
                 shutdown_rx,
                 true, // server_startup: resnapshot to capture config changes
             )
-            .await;
+            .await
+        {
+            self.replication_channels.insert(None, channel);
+        }
     }
 
     /// Start replication/binlog synchronization in an infinite loop
@@ -618,15 +622,27 @@ impl Leader {
             }
             (&Method::POST, "/resnapshot_table") => {
                 let table: Relation = bincode::deserialize(&body)?;
-                if let Some(task) = &self.replicator {
-                    let _ = task.tx.send(ReplicatorMessage::ResnapshotTable { table });
+                if let Some(channel) = self.replication_channels.get(&table.catalog) {
+                    let _ = channel
+                        .tx
+                        .send(ReplicatorMessage::ResnapshotTable { table });
                 }
                 return_serialized!(());
             }
             (&Method::POST, "/add_filter_tables") => {
                 let tables: Vec<Relation> = bincode::deserialize(&body)?;
-                if let Some(task) = &self.replicator {
-                    let _ = task.tx.send(ReplicatorMessage::AddTables { tables });
+                let mut tables_by_catalog: HashMap<Option<SqlIdentifier>, Vec<Relation>> =
+                    HashMap::new();
+                for table in tables {
+                    tables_by_catalog
+                        .entry(table.catalog.clone())
+                        .or_default()
+                        .push(table);
+                }
+                for (catalog, tables) in tables_by_catalog {
+                    if let Some(channel) = self.replication_channels.get(&catalog) {
+                        let _ = channel.tx.send(ReplicatorMessage::AddTables { tables });
+                    }
                 }
                 return_serialized!(());
             }
@@ -726,14 +742,15 @@ impl Leader {
             }
             (&Method::POST, "/replication_server") => {
                 let server = self
-                    .replicator
-                    .as_ref()
+                    .replication_channels
+                    .get(&None)
                     .and_then(ReplicationChannel::active_cdc_server);
                 return_serialized!(server);
             }
             (&Method::POST, "/replication_lag_status") => {
-                let status = if let Some(task) = &self.replicator {
-                    task.lag_status
+                let status = if let Some(channel) = self.replication_channels.get(&None) {
+                    channel
+                        .lag_status
                         .read()
                         .map_err(|e| {
                             ReadySetError::Internal(format!(
@@ -814,8 +831,8 @@ impl Leader {
                     cdc_server: if self.replicator_config.replication_enabled
                         && !replication_stopped
                     {
-                        self.replicator
-                            .as_ref()
+                        self.replication_channels
+                            .get(&None)
                             .and_then(ReplicationChannel::active_cdc_server)
                     } else {
                         None
@@ -1342,7 +1359,7 @@ impl Leader {
             controller_tx,
             table_statuses,
             table_status_tx,
-            replicator: None,
+            replication_channels: BTreeMap::new(),
             cdc_server_list: Arc::new(RwLock::new(None)),
         }
     }

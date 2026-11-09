@@ -12,7 +12,7 @@ use database_utils::{validate_servers, UpstreamConfig, UpstreamServer};
 use dataflow::node::{self, Column};
 use dataflow::prelude::ChannelCoordinator;
 use dataflow::{DomainBuilder, DomainRequest};
-use futures::future::Either;
+use futures::future::{join_all, Either};
 use http::{Method, StatusCode};
 use metrics::{counter, gauge, histogram};
 use readyset_client::consensus::{
@@ -1079,23 +1079,31 @@ impl Controller {
             ));
         }
 
-        // Take the replicator task under a short write lock, then drop the lock before awaiting
-        // its handle.
-        let task = {
+        // Take the replication channels under a short write lock, then drop the lock before
+        // awaiting their tasks.
+        let channels = {
             let mut guard = inner.write().await;
             if let Some(ref mut leader) = *guard {
-                leader.replicator.take().ok_or_else(|| {
-                    ReadySetError::Internal("no replicator task is running".into())
-                })?
+                std::mem::take(&mut leader.replication_channels)
             } else {
                 return Err(ReadySetError::NotLeader);
             }
         };
+        if channels.is_empty() {
+            return Err(ReadySetError::Internal(
+                "no replicator task is running".into(),
+            ));
+        }
 
-        // Stop the replicator task (no lock held)
-        let stopped = task.stop(REPLICATOR_STOP_TIMEOUT).await;
+        // Stop the replicator tasks (no lock held)
+        let results = join_all(
+            channels
+                .into_values()
+                .map(|channel| channel.stop(REPLICATOR_STOP_TIMEOUT)),
+        )
+        .await;
         replication_stopped.store(true, Ordering::Release);
-        stopped?;
+        results.into_iter().collect::<ReadySetResult<()>>()?;
 
         // Log the position (re-acquire read lock briefly)
         let position = {
@@ -1136,20 +1144,20 @@ impl Controller {
 
         let mut guard = inner.write().await;
         if let Some(ref mut leader) = *guard {
-            leader.replicator = leader
+            let Some(channel) = leader
                 .spawn_replicator(
                     controller_tx,
                     telemetry_sender,
                     shutdown_rx,
                     false, // not server_startup: skip resnapshot, resume from current position
                 )
-                .await;
-
-            if leader.replicator.is_none() {
+                .await
+            else {
                 return Err(ReadySetError::Internal(
                     "replication could not be started; check server configuration".into(),
                 ));
-            }
+            };
+            leader.replication_channels.insert(None, channel);
 
             replication_stopped.store(false, Ordering::Release);
             info!("Replication started");
@@ -1423,13 +1431,13 @@ impl Controller {
                 return Ok(());
             };
             info!(servers = %servers.displays().join(", "), "CDC server list changed");
-            let active = leader
-                .replicator
-                .as_ref()
-                .and_then(ReplicationChannel::active_cdc_server);
             let running = !replication_stopped.load(Ordering::Acquire);
-            let restart =
-                running && active.is_some_and(|active| servers.position(&active).is_none());
+            let restart = running
+                && leader
+                    .replication_channels
+                    .values()
+                    .filter_map(ReplicationChannel::active_cdc_server)
+                    .any(|active| servers.position(&active).is_none());
             *leader
                 .cdc_server_list
                 .write()
