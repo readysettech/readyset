@@ -324,7 +324,7 @@ async fn verify_replication_slot(conn: &mut DatabaseConnection, options: &Option
         Dialect::MySQL => return Ok(()),
     }
 
-    let slot_name = replication_slot_name(&options.server_worker_options.replicator_config);
+    let slot_name = replication_slot_name(&options.server_worker_options.replicator_config, None);
     let row = conn
         .query(&format!(
             "SELECT database, current_database() FROM pg_replication_slots \

@@ -12,6 +12,7 @@ use mysql::{OptsBuilder, PoolConstraints, PoolOpts};
 use native_tls::Certificate;
 use postgres_native_tls::MakeTlsConnector;
 use postgres_protocol::escape::escape_literal;
+use sha2::{Digest, Sha256};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::{debug, error, info, info_span, trace, warn, Instrument};
 use {mysql_async as mysql, tokio_postgres as pgsql};
@@ -105,7 +106,7 @@ pub(crate) trait Connector {
 /// UpstreamConfig.
 pub async fn cleanup(config: UpstreamConfig) -> ReadySetResult<()> {
     if let DatabaseURL::PostgreSQL(mut options) = config.preferred_cdc_url()? {
-        let repl_slot_name = replication_slot_name(&config);
+        let repl_slot_name = replication_slot_name(&config, None);
         let resnapshot_slot_name = resnapshot_slot_name(&repl_slot_name);
 
         let dbname = options
@@ -152,11 +153,20 @@ pub fn resnapshot_slot_name(repl_slot_name: &String) -> String {
 /// Name of the primary logical replication slot Readyset creates on the upstream Postgres
 /// database. Incorporates the configured replication server id so that multiple Readyset
 /// deployments replicating from the same upstream cluster do not collide on slot names.
-pub fn replication_slot_name(config: &UpstreamConfig) -> String {
-    match &config.replication_server_id {
+///
+/// Slot names are unique across the server, so the slot for `catalog` ends in a hash of its name.
+pub fn replication_slot_name(config: &UpstreamConfig, catalog: Option<&SqlIdentifier>) -> String {
+    let mut name = match &config.replication_server_id {
         Some(server_id) => format!("{REPLICATION_SLOT}_{server_id}"),
         None => REPLICATION_SLOT.to_string(),
+    };
+    if let Some(catalog) = catalog {
+        // Slot names allow only lower case letters, digits and underscores.
+        let hash = hex::encode(Sha256::digest(catalog.as_bytes()));
+        name.push('_');
+        name.push_str(&hash[..8]);
     }
+    name
 }
 
 /// An adapter that converts database events into ReadySet API calls
@@ -277,7 +287,7 @@ impl<'a> NoriaAdapter<'a> {
                     )
                     .await?;
 
-                    let repl_slot_name = replication_slot_name(config);
+                    let repl_slot_name = replication_slot_name(config, catalog.as_ref());
 
                     // Notify controller that we are about to start a snapshot if we are
                     // restarting to resnapshot.
@@ -1807,16 +1817,32 @@ mod tests {
 
     use super::*;
 
+    fn slot_name(server_id: Option<&str>, catalog: Option<&str>) -> String {
+        let config = UpstreamConfig {
+            replication_server_id: server_id.map(|id| ReplicationServerId(id.to_owned())),
+            ..UpstreamConfig::default()
+        };
+        replication_slot_name(&config, catalog.map(SqlIdentifier::from).as_ref())
+    }
+
     #[test]
     fn slot_names_fit_postgres_identifier_limit() {
         // The longest replication server id that the configuration accepts.
-        let config = UpstreamConfig {
-            replication_server_id: Some(ReplicationServerId("a".repeat(43))),
-            ..UpstreamConfig::default()
-        };
-        let repl_slot_name = replication_slot_name(&config);
+        let repl_slot_name = slot_name(Some(&"a".repeat(43)), None);
         assert!(repl_slot_name.len() <= 63);
         assert!(resnapshot_slot_name(&repl_slot_name).len() <= 63);
+
+        // The longest replication server id that leaves room for a catalog's hash.
+        let repl_slot_name = slot_name(Some(&"a".repeat(34)), Some(&"a".repeat(63)));
+        assert_eq!(resnapshot_slot_name(&repl_slot_name).len(), 63);
+    }
+
+    #[test]
+    fn slot_names_are_stable() {
+        assert_eq!(slot_name(None, None), "readyset");
+        assert_eq!(slot_name(Some("x"), None), "readyset_x");
+        assert_eq!(slot_name(None, Some("db2")), "readyset_00213a71");
+        assert_eq!(slot_name(Some("x"), Some("db2")), "readyset_x_00213a71");
     }
 
     fn pos(p: u64) -> ReplicationOffset {
