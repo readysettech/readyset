@@ -504,6 +504,27 @@ impl Service<TableRequest> for Table {
     }
 }
 
+/// Reorder `key`, given in table column order, into the order of `key_cols`.
+fn key_from_column_order(
+    key_cols: &[usize],
+    mut key: Vec<DfValue>,
+) -> ReadySetResult<Vec<DfValue>> {
+    if key_cols.is_sorted() {
+        return Ok(key);
+    }
+    if key.len() != key_cols.len() {
+        return Err(ReadySetError::WrongKeyColumnCount(
+            key_cols.len(),
+            key.len(),
+        ));
+    }
+    // A key column's position in table column order is the number of key columns before it
+    Ok(key_cols
+        .iter()
+        .map(|col| std::mem::take(&mut key[key_cols.iter().filter(|c| *c < col).count()]))
+        .collect())
+}
+
 impl Table {
     /// Get the name of this base table.
     pub fn table_name(&self) -> &Relation {
@@ -524,6 +545,14 @@ impl Table {
     /// columns!
     pub fn schema(&self) -> Option<&CreateTableBody> {
         self.schema.as_ref()
+    }
+
+    /// Reorder `key`, given in table column order, into the order of this table's key columns.
+    ///
+    /// Replicated updates and deletes identify a row by its key values in table column order, while
+    /// [`TableOperation::Update`] and [`TableOperation::DeleteByKey`] expect them in key order.
+    pub fn key_from_column_order(&self, key: Vec<DfValue>) -> ReadySetResult<Vec<DfValue>> {
+        key_from_column_order(&self.key, key)
     }
 
     fn inject_dropped_cols(&self, r: &mut TableOperation) -> ReadySetResult<()> {
@@ -836,4 +865,44 @@ pub enum PersistencePoint {
     Persisted,
     /// The data in this table has been persisted up to this offset
     UpTo(ReplicationOffset),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(vals: &[i32]) -> Vec<DfValue> {
+        vals.iter().map(|v| DfValue::from(*v)).collect()
+    }
+
+    #[test]
+    fn key_from_column_order_keeps_sorted_key() {
+        assert_eq!(
+            key_from_column_order(&[0, 2], key(&[1, 2])).unwrap(),
+            key(&[1, 2])
+        );
+        assert_eq!(
+            key_from_column_order(&[], key(&[1, 2])).unwrap(),
+            key(&[1, 2])
+        );
+    }
+
+    #[test]
+    fn key_from_column_order_reorders_key() {
+        // PRIMARY KEY (b, a) on (a, b, c): values arrive as [a, b]
+        assert_eq!(
+            key_from_column_order(&[1, 0], key(&[1, 2])).unwrap(),
+            key(&[2, 1])
+        );
+        // PRIMARY KEY (d, a, c) on (a, b, c, d): values arrive as [a, c, d]
+        assert_eq!(
+            key_from_column_order(&[3, 0, 2], key(&[1, 3, 4])).unwrap(),
+            key(&[4, 1, 3])
+        );
+    }
+
+    #[test]
+    fn key_from_column_order_rejects_wrong_length() {
+        assert!(key_from_column_order(&[1, 0], key(&[1])).is_err());
+    }
 }

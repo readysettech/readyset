@@ -1321,6 +1321,12 @@ impl<'a> NoriaAdapter<'a> {
             return Ok(());
         }
 
+        for op in &mut kept {
+            if let TableOperation::Update { key, .. } | TableOperation::DeleteByKey { key } = op {
+                *key = table_mutator.key_from_column_order(std::mem::take(key))?;
+            }
+        }
+
         let batch_size = kept.len();
         kept.push(TableOperation::SetReplicationOffset(pos.clone()));
         let start = std::time::Instant::now();

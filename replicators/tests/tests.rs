@@ -4431,6 +4431,87 @@ async fn mysql_minimal_row_based_replication() {
     shutdown_tx.shutdown().await;
 }
 
+/// Replicated updates and deletes must find rows by key when the primary key lists its columns in a
+/// different order than the table, including when the key read in table order matches another row.
+async fn key_order_replication_inner(url: &str, session_setup: &str, text: fn(&str) -> DfValue) {
+    readyset_tracing::init_test_logging();
+    let mut client = DbConnection::connect(url).await.unwrap();
+    client
+        .query(
+            "DROP TABLE IF EXISTS key_order_ba;
+            CREATE TABLE key_order_ba (a int, b int, c int, PRIMARY KEY (b, a));
+            INSERT INTO key_order_ba VALUES (1, 2, 0), (2, 1, 0), (3, 4, 0), (4, 3, 0), (5, 6, 0);
+            DROP TABLE IF EXISTS key_order_ca;
+            CREATE TABLE key_order_ca (a int, b int, c varchar(10), PRIMARY KEY (c, a));
+            INSERT INTO key_order_ca VALUES (1, 0, 'x'), (2, 0, 'y'), (3, 0, 'z');",
+        )
+        .await
+        .unwrap();
+    if !session_setup.is_empty() {
+        client.query(session_setup).await.unwrap();
+    }
+
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), None)
+        .await
+        .unwrap();
+    ctx.controller_rx
+        .as_mut()
+        .unwrap()
+        .snapshot_completed()
+        .await
+        .unwrap();
+
+    client
+        .query(
+            "UPDATE key_order_ba SET c = 1 WHERE a = 3 AND b = 4;
+            DELETE FROM key_order_ba WHERE a = 1 AND b = 2;
+            DELETE FROM key_order_ba WHERE a = 5 AND b = 6;
+            UPDATE key_order_ca SET b = 1 WHERE a = 1;
+            DELETE FROM key_order_ca WHERE a = 2;",
+        )
+        .await
+        .unwrap();
+
+    let int = DfValue::from;
+    check_results!(
+        ctx,
+        "key_order_ba",
+        "key_order_ba",
+        &[
+            &[int(2), int(1), int(0)],
+            &[int(3), int(4), int(1)],
+            &[int(4), int(3), int(0)],
+        ],
+    );
+    check_results!(
+        ctx,
+        "key_order_ca",
+        "key_order_ca",
+        &[&[int(1), int(1), text("x")], &[int(3), int(0), text("z")]],
+    );
+
+    client.stop().await;
+    ctx.stop().await;
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(postgres)]
+async fn pgsql_key_order_replication() {
+    key_order_replication_inner(&pgsql_url(), "", |s| DfValue::from(s)).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial, slow)]
+#[upstream(mysql)]
+async fn mysql_minimal_row_key_order_replication() {
+    key_order_replication_inner(&mysql_url(), "SET binlog_row_image = minimal;", |s| {
+        DfValue::from_str_and_collation(s, Collation::Utf8AiCi)
+    })
+    .await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
 #[upstream(mysql)]
