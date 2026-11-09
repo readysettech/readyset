@@ -1561,7 +1561,8 @@ impl<'a> NoriaAdapter<'a> {
     fn is_heartbeat_table(&self, table: &Relation) -> bool {
         match self.dialect.engine() {
             SqlEngine::PostgreSQL => {
-                table.schema.as_deref() == Some(PG_HEARTBEAT_SCHEMA)
+                table.catalog == self.catalog
+                    && table.schema.as_deref() == Some(PG_HEARTBEAT_SCHEMA)
                     && table.name == PG_HEARTBEAT_TABLE_NAME
             }
             // MySQL doesn't use a separate schema for the heartbeat table — it lives

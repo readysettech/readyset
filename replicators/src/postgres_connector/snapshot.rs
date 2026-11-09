@@ -1234,8 +1234,9 @@ impl<'a> PostgresReplicator<'a> {
         Ok(())
     }
 
-    /// Get a list of ReadySet cache tables and compare against the list of upstream tables and
-    /// views, dropping any cache tables that are missing upstream or newly filtered out.
+    /// Get a list of ReadySet cache tables in `self.catalog` and compare against the list of
+    /// upstream tables and views, dropping any cache tables that are missing upstream or newly
+    /// filtered out.
     ///
     /// This function is called during snapshotting to detect and handle cases where we somehow
     /// have a leftover cache that doesn't correspond to any upstream table or view. Without
@@ -1249,7 +1250,9 @@ impl<'a> PostgresReplicator<'a> {
     ) -> ReadySetResult<()> {
         let mut leftover_tables = self.noria.tables().await?;
         leftover_tables.retain(|rel, _| {
-            if let Some(schema) = &rel.schema {
+            if rel.catalog != self.catalog {
+                false
+            } else if let Some(schema) = &rel.schema {
                 let schema = schema.as_str();
                 let name = rel.name.as_str();
 
