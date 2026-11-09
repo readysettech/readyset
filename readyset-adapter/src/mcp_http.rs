@@ -85,7 +85,7 @@ pub async fn serve(
     apply_rmcp_log_filter();
 
     let http_config = StreamableHttpServerConfig::default()
-        .with_stateful_mode(true)
+        .with_legacy_session_mode(true)
         .with_cancellation_token(cancel.child_token());
 
     // Disable the per-session keep-alive timeout. rmcp reaps idle sessions
