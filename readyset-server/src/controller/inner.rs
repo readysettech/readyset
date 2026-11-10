@@ -229,7 +229,7 @@ impl Leader {
         server_startup: bool,
     ) -> Option<ReplicationChannel> {
         if !self.replicator_config.replication_enabled {
-            let _ = controller_tx.send(ControllerMessage::SnapshotDone);
+            let _ = controller_tx.send(ControllerMessage::SnapshotDone { catalog: None });
             info!("Replication disabled; skipping snapshotting and replication");
             return None;
         }
@@ -242,7 +242,7 @@ impl Leader {
             // upstream.
             // Ignore the result since we will not error unless we have somehow dropped the rx half
             // of the channel
-            let _ = controller_tx.send(ControllerMessage::SnapshotDone);
+            let _ = controller_tx.send(ControllerMessage::SnapshotDone { catalog: None });
             info!("No primary instance specified");
             return None;
         }

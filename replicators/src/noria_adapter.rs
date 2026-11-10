@@ -244,7 +244,9 @@ impl<'a> NoriaAdapter<'a> {
                     // Notify controller that we are about to start a snapshot if we are
                     // restarting to resnapshot.
                     if resnapshot {
-                        let _ = controller_tx.send(ControllerMessage::SnapshotStarting);
+                        let _ = controller_tx.send(ControllerMessage::SnapshotStarting {
+                            catalog: catalog.clone(),
+                        });
                     }
                     NoriaAdapter::start_inner_mysql(
                         options,
@@ -292,7 +294,9 @@ impl<'a> NoriaAdapter<'a> {
                     // Notify controller that we are about to start a snapshot if we are
                     // restarting to resnapshot.
                     if resnapshot || full_snapshot {
-                        let _ = controller_tx.send(ControllerMessage::SnapshotStarting);
+                        let _ = controller_tx.send(ControllerMessage::SnapshotStarting {
+                            catalog: catalog.clone(),
+                        });
                     }
                     NoriaAdapter::start_inner_postgres(
                         options,
@@ -324,7 +328,9 @@ impl<'a> NoriaAdapter<'a> {
                 // The resnapshot re-creates changed tables, which removes the caches over them, so
                 // tell the leader at the decision, before the wait; it then refuses new caches
                 // until the resnapshot ends.
-                let _ = controller_tx.send(ControllerMessage::SnapshotStarting);
+                let _ = controller_tx.send(ControllerMessage::SnapshotStarting {
+                    catalog: catalog.clone(),
+                });
                 antithesis_sdk::assert_reachable!(
                     "replicator marks the leader not ready before the wait for a resnapshot"
                 );
@@ -681,7 +687,7 @@ impl<'a> NoriaAdapter<'a> {
 
         // Let Controller know that the initial snapshotting is complete. Ignores the error, which
         // will not occur unless the Controller dropped the rx half of this channel.
-        let _ = controller_tx.send(ControllerMessage::SnapshotDone);
+        let _ = controller_tx.send(ControllerMessage::SnapshotDone { catalog: None });
 
         info!(position = %current_pos, "Streaming replication started");
         if let Err(err) = adapter
@@ -991,7 +997,9 @@ impl<'a> NoriaAdapter<'a> {
 
         // Let Controller know that the initial snapshotting is complete. Ignores the error, which
         // will not occur unless the Controller dropped the rx half of this channel.
-        let _ = controller_tx.send(ControllerMessage::SnapshotDone);
+        let _ = controller_tx.send(ControllerMessage::SnapshotDone {
+            catalog: adapter.catalog.clone(),
+        });
 
         info!(position = %min_pos, "Streaming replication started");
         if let Err(err) = adapter

@@ -90,7 +90,7 @@ impl TestChannel {
         use ControllerMessage::*;
         loop {
             match self.rx.recv().await {
-                Some(SnapshotDone) => return Ok(()),
+                Some(SnapshotDone { .. }) => return Ok(()),
                 Some(UnrecoverableError(e)) => return Err(e),
                 Some(RecoverableError(e)) => return Err(e),
                 Some(_) => continue,

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::{Debug, Formatter};
 use std::future;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -451,6 +451,9 @@ pub struct Controller {
     config: Config,
     /// Whether we are the leader and ready to handle requests.
     leader_ready: Arc<AtomicBool>,
+    /// The catalogs whose replicator has not finished its snapshot. The leader is ready once this
+    /// is empty.
+    snapshots_pending: BTreeSet<Option<SqlIdentifier>>,
     /// Parsing mode for the controller, used in extend_recipe. Not part of the serialized
     /// [`Config`] so it can be changed on restart.
     parsing_preset: ParsingPreset,
@@ -551,6 +554,7 @@ impl Controller {
             config,
             parsing_preset,
             leader_ready: Arc::new(AtomicBool::new(false)),
+            snapshots_pending: BTreeSet::new(),
             maintenance_mode: Arc::new(AtomicBool::new(false)),
             replication_stopped: Arc::new(AtomicBool::new(false)),
             failover_mutex: Arc::new(tokio::sync::Mutex::new(())),
@@ -707,6 +711,7 @@ impl Controller {
                     self.events_handle.clone(),
                 );
                 self.leader_ready.store(false, Ordering::Release);
+                self.snapshots_pending = BTreeSet::from([None]);
 
                 leader
                     .start(
@@ -882,13 +887,16 @@ impl Controller {
                             ControllerMessage::ExitMaintenanceMode => {
                                 self.maintenance_mode.store(false, Ordering::Release);
                             }
-                            ControllerMessage::SnapshotStarting => {
+                            ControllerMessage::SnapshotStarting { catalog } => {
+                                self.snapshots_pending.insert(catalog);
                                 self.leader_ready.store(false, Ordering::Release);
                             },
-                            ControllerMessage::SnapshotDone => {
-                                self.leader_ready.store(true, Ordering::Release);
-
-                                self.maybe_recreate_caches().await?;
+                            ControllerMessage::SnapshotDone { catalog } => {
+                                self.snapshots_pending.remove(&catalog);
+                                if self.snapshots_pending.is_empty() {
+                                    self.leader_ready.store(true, Ordering::Release);
+                                    self.maybe_recreate_caches().await?;
+                                }
                                 let now = now();
                                 if let Err(error) = self.authority.update_persistent_stats(|stats| {
                                     let mut stats = stats.unwrap_or_default();

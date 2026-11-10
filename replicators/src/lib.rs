@@ -13,7 +13,7 @@ pub use mysql_connector::{is_gtid_mode_enabled, MYSQL_INTERNAL_DBS};
 pub use noria_adapter::{cleanup, replication_slot_name, NoriaAdapter};
 use readyset_client::{TableStatus, TABLE_STATUS_REPORT_INTERVAL};
 use readyset_errors::ReadySetError;
-use readyset_sql::ast::Relation;
+use readyset_sql::ast::{Relation, SqlIdentifier};
 pub use replication_offset::mysql::MySqlPosition;
 pub use replication_offset::postgres::PostgresPosition;
 use strum::EnumDiscriminants;
@@ -32,10 +32,10 @@ pub fn bench_binlog_json_to_df_value(
 
 #[derive(Debug, EnumDiscriminants)]
 pub enum ControllerMessage {
-    /// The replicator is about to begin a snapshot (initial or re-snapshot)
-    SnapshotStarting,
-    /// The replicator finished an initial base table snapshot
-    SnapshotDone,
+    /// The replicator of `catalog` is about to begin a snapshot (initial or re-snapshot)
+    SnapshotStarting { catalog: Option<SqlIdentifier> },
+    /// The replicator of `catalog` finished an initial base table snapshot
+    SnapshotDone { catalog: Option<SqlIdentifier> },
     /// The replicator finished startup and entered the main replication loop
     ReplicationStarted,
     /// The replicator encountered an unrecoverable error
