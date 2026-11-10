@@ -107,30 +107,6 @@ pub enum GetLeaderResult {
     NoLeader,
 }
 
-/// Restriction for how domains containing a particular kind of node can be scheduled onto a
-/// particular worker.
-#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub enum NodeTypeSchedulingRestriction {
-    /// No restrictions: all domains with or without this node type may be scheduled onto this
-    /// worker
-    #[default]
-    None,
-    /// Only domains containing this node type may be scheduled onto this worker
-    OnlyWithNodeType,
-    /// Domains containing this node type may never be scheduled onto this worker
-    NeverWithNodeType,
-}
-
-/// Configuration for how domains should be scheduled onto a particular worker.
-///
-/// The [`Default`] value for this struct allows any domain to be scheduled onto any worker.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Default)]
-pub struct WorkerSchedulingConfig {
-    /// Configuration for how domains containing or not containing reader nodes may be scheduled
-    /// onto this worker
-    pub reader_nodes: NodeTypeSchedulingRestriction,
-}
-
 /// Initial registration request body, sent from workers to controllers.
 /// ///
 /// (used for the `/worker_rx/register` route)
@@ -142,8 +118,6 @@ pub struct WorkerDescriptor {
     pub reader_addr: SocketAddr,
     /// True if this worker may become a leader
     pub leader_eligible: bool,
-    /// Configuration for how domains should be scheduled onto this worker
-    pub domain_scheduling_config: WorkerSchedulingConfig,
 }
 
 pub trait UpdateInPlace<E, F, P>: Send + Sync

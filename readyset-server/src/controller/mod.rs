@@ -18,7 +18,6 @@ use metrics::{counter, gauge, histogram};
 use readyset_client::consensus::{
     Authority, AuthorityControl, AuthorityWorkerHeartbeatResponse, CacheDDLRequest,
     GetLeaderResult, PersistedUpstreamServers, UpstreamServerStore, WorkerDescriptor, WorkerId,
-    WorkerSchedulingConfig,
 };
 use readyset_client::internal::DomainIndex;
 use readyset_client::recipe::changelist::Change;
@@ -171,23 +170,16 @@ impl ControllerState {
 pub struct Worker {
     healthy: bool,
     uri: Url,
-    /// Configuration for how domains should be scheduled onto this worker
-    domain_scheduling_config: WorkerSchedulingConfig,
     /// Channel into the in-process `crate::worker::Worker` task. Each variant of
     /// [`WorkerRequest`] carries its own typed `oneshot` for the response.
     worker_tx: Sender<WorkerRequest>,
 }
 
 impl Worker {
-    pub fn new(
-        instance_uri: Url,
-        domain_scheduling_config: WorkerSchedulingConfig,
-        worker_tx: Sender<WorkerRequest>,
-    ) -> Self {
+    pub fn new(instance_uri: Url, worker_tx: Sender<WorkerRequest>) -> Self {
         Worker {
             healthy: true,
             uri: instance_uri,
-            domain_scheduling_config,
             worker_tx,
         }
     }

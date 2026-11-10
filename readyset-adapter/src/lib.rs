@@ -59,10 +59,6 @@ pub enum DeploymentMode {
     #[default]
     Standalone,
 
-    /// This process should execute as an adapter with embedded readers.
-    #[value(name = "embedded-readers")]
-    EmbeddedReaders,
-
     /// This process should execute as an adapter with no locally cached data.
     #[value(name = "adapter")]
     Adapter,
@@ -72,18 +68,6 @@ impl DeploymentMode {
     pub fn is_standalone(&self) -> bool {
         matches!(self, DeploymentMode::Standalone)
     }
-
-    pub fn is_embedded_readers(&self) -> bool {
-        matches!(self, DeploymentMode::EmbeddedReaders)
-    }
-
-    /// Will this process be running reader nodes?
-    pub fn has_reader_nodes(&self) -> bool {
-        matches!(
-            self,
-            DeploymentMode::Standalone | DeploymentMode::EmbeddedReaders
-        )
-    }
 }
 
 impl FromStr for DeploymentMode {
@@ -91,7 +75,6 @@ impl FromStr for DeploymentMode {
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s {
             "standalone" => Ok(DeploymentMode::Standalone),
-            "embedded-readers" => Ok(DeploymentMode::EmbeddedReaders),
             "adapter" => Ok(DeploymentMode::Adapter),
             other => Err(anyhow!("Invalid deployment-mode type: {}", other)),
         }
@@ -102,7 +85,6 @@ impl Display for DeploymentMode {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {
             DeploymentMode::Standalone => write!(f, "standalone"),
-            DeploymentMode::EmbeddedReaders => write!(f, "embedded-readers"),
             DeploymentMode::Adapter => write!(f, "adapter"),
         }
     }

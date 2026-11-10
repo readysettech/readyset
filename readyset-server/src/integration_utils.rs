@@ -69,7 +69,6 @@ pub async fn build(prefix: &str, eviction: Option<(usize, Duration)>) -> (Handle
         Arc::new(Authority::from(LocalAuthority::new_with_store(
             authority_store,
         ))),
-        false,
         eviction,
     )
     .await
@@ -80,7 +79,6 @@ pub async fn build_custom(
     prefix: &str,
     controller: bool,
     authority: Arc<Authority>,
-    reader_only: bool,
     eviction: Option<(usize, Duration)>,
 ) -> (Handle, ShutdownSender) {
     readyset_tracing::init_test_logging();
@@ -92,10 +90,6 @@ pub async fn build_custom(
     builder.set_mixed_comparisons(true);
     builder.set_straddled_joins(true);
     builder.set_view_request_timeout(Duration::from_secs(10));
-
-    if reader_only {
-        builder.as_reader_only();
-    }
 
     if let Some((limit, period)) = eviction {
         builder.set_aggressively_update_state_sizes(true);

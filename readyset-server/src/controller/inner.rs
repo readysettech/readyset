@@ -981,7 +981,6 @@ impl Leader {
             let WorkerDescriptor {
                 worker_uri,
                 reader_addr,
-                domain_scheduling_config,
                 ..
             } = desc;
 
@@ -991,11 +990,7 @@ impl Leader {
                 return Err(internal_err!("worker {worker_uri} already registered"));
             }
 
-            let ws = Worker::new(
-                worker_uri.clone(),
-                domain_scheduling_config,
-                self.worker_tx.clone(),
-            );
+            let ws = Worker::new(worker_uri.clone(), self.worker_tx.clone());
 
             // Clean up any potential stale domains that may have been running on that worker
             if let Err(e) = ws.clear_domains().await {

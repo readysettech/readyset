@@ -6,10 +6,7 @@ use std::time::{self, Duration};
 
 use database_utils::{ReplicationServerId, UpstreamConfig, UpstreamServers};
 use dataflow::PersistenceParameters;
-use readyset_client::consensus::{
-    Authority, LocalAuthority, LocalAuthorityStore, NodeTypeSchedulingRestriction,
-    WorkerSchedulingConfig,
-};
+use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
 use readyset_sql_parsing::ParsingPreset;
 use readyset_telemetry_reporter::TelemetrySender;
 use readyset_util::shutdown::{self, ShutdownSender};
@@ -26,7 +23,6 @@ pub struct Builder {
     listen_addr: IpAddr,
     external_addr: SocketAddr,
     leader_eligible: bool,
-    domain_scheduling_config: WorkerSchedulingConfig,
     /// The parsing preset to use for SQL parsing. Public so we can use it when setting up replication
     /// separately in tests.
     pub parsing_preset: ParsingPreset,
@@ -47,7 +43,6 @@ impl Default for Builder {
             memory_limit: None,
             memory_check_frequency: None,
             leader_eligible: true,
-            domain_scheduling_config: Default::default(),
             parsing_preset: ParsingPreset::for_prod(),
             telemetry: TelemetrySender::new_no_op(),
             wait_for_failpoint: false,
@@ -280,22 +275,6 @@ impl Builder {
             .disable_upstream_ssl_verification = value;
     }
 
-    /// Configures this ReadySet server to accept only domains that contain reader nodes.
-    ///
-    /// Overwrites any previous call to [`no_readers`]
-    pub fn as_reader_only(&mut self) {
-        self.domain_scheduling_config.reader_nodes =
-            NodeTypeSchedulingRestriction::OnlyWithNodeType;
-    }
-
-    /// Configures this ReadySet server to never run domains that contain reader nodes
-    ///
-    /// Overwrites any previous call to [`as_reader_only`]
-    pub fn no_readers(&mut self) {
-        self.domain_scheduling_config.reader_nodes =
-            NodeTypeSchedulingRestriction::NeverWithNodeType;
-    }
-
     /// Configures this ReadySet server to be unable to become the leader
     pub fn cannot_become_leader(&mut self) {
         self.leader_eligible = false;
@@ -390,7 +369,6 @@ impl Builder {
             ref config,
             memory_limit,
             memory_check_frequency,
-            domain_scheduling_config,
             parsing_preset,
             leader_eligible,
             telemetry,
@@ -408,7 +386,6 @@ impl Builder {
             config,
             memory_limit,
             memory_check_frequency,
-            domain_scheduling_config,
             parsing_preset,
             leader_eligible,
             telemetry,
@@ -433,7 +410,6 @@ impl Builder {
             ref config,
             memory_limit,
             memory_check_frequency,
-            domain_scheduling_config,
             parsing_preset,
             leader_eligible,
             telemetry,
@@ -452,7 +428,6 @@ impl Builder {
             config,
             memory_limit,
             memory_check_frequency,
-            domain_scheduling_config,
             parsing_preset,
             leader_eligible,
             readers,

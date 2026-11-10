@@ -88,8 +88,7 @@
     :--authority-address (authority-address test)
     :--upstream-db-url (upstream-db-url test)
     :--disable-upstream-ssl-verification
-    :--deployment-mode "embedded-readers"
-    :--reader-replicas (str (nodes/num-adapters test)))))
+    :--deployment-mode "adapter")))
 
 (defn kill-readyset-adapter!
   "Kill the readyset adapter process running on the current node."
@@ -113,9 +112,7 @@
     :--external-address (net/ip (name node))
     :--authority-address (authority-address test)
     :--upstream-db-url (upstream-db-url test)
-    :--disable-upstream-ssl-verification
-    :--no-readers
-    :--reader-replicas (str (nodes/num-adapters test)))))
+    :--disable-upstream-ssl-verification)))
 
 (defn kill-readyset-server!
   "Kill the readyset server process running on the current node."

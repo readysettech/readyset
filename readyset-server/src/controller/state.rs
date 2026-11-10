@@ -1958,7 +1958,7 @@ impl DfState {
         let mut new = HashSet::new();
         {
             for (domain, nodes) in domain_nodes {
-                let worker = schedule_domain(self, &None, domain, &nodes[..])?;
+                let worker = schedule_domain(self, &None, domain)?;
 
                 let already_placed = self.domains.get(&domain).is_some_and(|dh| dh.is_placed());
                 if !already_placed && worker.is_none() {

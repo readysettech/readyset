@@ -107,17 +107,6 @@ struct Options {
     )]
     authority_address: String,
 
-    /// Whether this server should only run reader domains
-    #[arg(long, conflicts_with = "no_readers", env = "READER_ONLY")]
-    reader_only: bool,
-
-    /// If set, this server will never run domains containing reader nodes
-    ///
-    /// Pass this flag to the server instance when running a ReadySet deployment in embedded
-    /// readers mode (eg for high availability)
-    #[arg(long, conflicts_with = "reader_only", env = "NO_READERS")]
-    no_readers: bool,
-
     /// Prevent this instance from ever being elected as the leader
     #[arg(long)]
     cannot_become_leader: bool,
@@ -239,13 +228,6 @@ fn main() -> anyhow::Result<()> {
 
     if opts.cannot_become_leader {
         builder.cannot_become_leader();
-    }
-
-    if opts.reader_only {
-        builder.as_reader_only()
-    }
-    if opts.no_readers {
-        builder.no_readers()
     }
 
     let deployment = opts.deployment;

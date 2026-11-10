@@ -1162,7 +1162,7 @@ fn plan_add_nodes(
             // uninformed_domain_nodes is built from changed_domains
             #[allow(clippy::unwrap_used)]
             let nodes = uninformed_domain_nodes.remove(&domain).unwrap();
-            let worker_shards = schedule_domain(dataflow_state, worker, domain, &nodes)?;
+            let worker_shards = schedule_domain(dataflow_state, worker, domain)?;
 
             if worker_shards.is_none() {
                 dmp.domain_failed_placement(domain);

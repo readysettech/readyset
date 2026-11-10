@@ -253,14 +253,10 @@ pub struct Options {
     )]
     pub database_type: Option<DatabaseType>,
 
-    /// Run ReadySet in standalone mode (the default), embedded readers mode, or adapter mode.
+    /// Run ReadySet in standalone mode (the default) or adapter mode.
     ///
     /// When running in standalone mode, this process will run an entire deployment of ReadySet
     /// (both adapter and server).
-    ///
-    /// When running in embedded_readers mode, this process will run a ReadySet adapter with reader
-    /// replicas (and only reader replicas) embedded in the adapter.  This mode should be combined
-    /// with `--no-readers`.
     ///
     /// When running in adapter mode, this process will run a ReadySet adapter with no locally
     /// cached data.
@@ -578,8 +574,8 @@ pub struct Options {
     #[arg(long)]
     cleanup: bool,
 
-    /// In [`DeploymentMode::Standalone`] or  [`DeploymentMode::EmbeddedReaders`] mode,
-    /// the address (host:port) on which the internal ReadySet server will listen.
+    /// In [`DeploymentMode::Standalone`] mode, the address (host:port) on which the internal
+    /// ReadySet server will listen.
     /// Example: 0.0.0.0:6033
     #[arg(long, env = "CONTROLLER_ADDRESS", hide = true)]
     controller_address: Option<SocketAddr>,
@@ -2053,7 +2049,7 @@ where
             Duration::from_millis(options.server_worker_options.upquery_timeout_ms);
 
         // Run a readyset-server instance within this adapter.
-        let internal_server_handle = if options.deployment_mode.has_reader_nodes() {
+        let internal_server_handle = if options.deployment_mode.is_standalone() {
             let authority = options.authority.clone();
             let deployment = options.deployment.clone();
 
@@ -2072,11 +2068,6 @@ where
             dataflow_state::clean_working_dir(persistence)?;
 
             let r = readers.clone();
-
-            if options.deployment_mode.is_embedded_readers() {
-                builder.as_reader_only();
-                builder.cannot_become_leader();
-            }
 
             builder.set_replicator_statement_logging(options.tracing.statement_logging);
 
@@ -2551,7 +2542,7 @@ where
                 .shallow_cache_allowlists(shallow_cache_allowlists);
 
             // Initialize the reader layer for the adapter.
-            let r = options.deployment_mode.has_reader_nodes().then(|| {
+            let r = options.deployment_mode.is_standalone().then(|| {
                 let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<(
                     BlockingRead,
                     tokio::sync::oneshot::Sender<Reply>,

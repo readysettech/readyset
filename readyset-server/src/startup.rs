@@ -55,7 +55,7 @@ use failpoint_macros::set_failpoint;
 use futures_util::future::{Either, TryFutureExt};
 use health_reporter::{HealthReporter, State as ServerState};
 use readyset_alloc_metrics::report_allocator_metrics;
-use readyset_client::consensus::{Authority, WorkerSchedulingConfig};
+use readyset_client::consensus::Authority;
 use readyset_client::internal::DomainIndex;
 use readyset_client::{
     ControllerConnectionPool, ControllerDescriptor, ReadySetHandle, TableStatus, WorkerDescriptor,
@@ -162,7 +162,6 @@ fn start_controller(
     channel_coordinator: Arc<ChannelCoordinator>,
     worker_tx: Sender<WorkerRequest>,
     abort_on_task_failure: bool,
-    domain_scheduling_config: WorkerSchedulingConfig,
     parsing_preset: ParsingPreset,
     leader_eligible: bool,
     telemetry_sender: TelemetrySender,
@@ -181,7 +180,6 @@ fn start_controller(
     let worker_descriptor = WorkerDescriptor {
         worker_uri: http_uri,
         reader_addr,
-        domain_scheduling_config,
         leader_eligible,
     };
 
@@ -286,7 +284,6 @@ pub(crate) async fn start_instance_inner(
     config: Config,
     memory_limit: Option<usize>,
     memory_check_frequency: Option<time::Duration>,
-    domain_scheduling_config: WorkerSchedulingConfig,
     parsing_preset: ParsingPreset,
     leader_eligible: bool,
     readers: Readers,
@@ -366,7 +363,6 @@ pub(crate) async fn start_instance_inner(
         channel_coordinator,
         worker_tx,
         abort_on_task_failure,
-        domain_scheduling_config,
         parsing_preset,
         leader_eligible,
         telemetry_sender.clone(),
@@ -398,7 +394,6 @@ pub(super) async fn start_instance(
     config: Config,
     memory_limit: Option<usize>,
     memory_check_frequency: Option<time::Duration>,
-    domain_scheduling_config: WorkerSchedulingConfig,
     parsing_preset: ParsingPreset,
     leader_eligible: bool,
     telemetry_sender: TelemetrySender,
@@ -432,7 +427,6 @@ pub(super) async fn start_instance(
         config,
         memory_limit,
         memory_check_frequency,
-        domain_scheduling_config,
         parsing_preset,
         leader_eligible,
         readers,
