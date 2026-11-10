@@ -27,7 +27,9 @@ use readyset_client::query::QueryId;
 use readyset_client::recipe::changelist::Change;
 use readyset_client::recipe::{ChangeList, ExtendRecipeResult, ExtendRecipeSpec, MigrationStatus};
 use readyset_client::replay_path::ReplayPathInfo;
-use readyset_client::status::{CurrentStatus, ReadySetControllerStatus, ReplicationStatus};
+use readyset_client::status::{
+    CurrentStatus, ReadySetControllerStatus, ReplicationChannelStatus, ReplicationStatus,
+};
 use readyset_client::{GraphvizOptions, TableStatus, ViewCreateRequest, WorkerDescriptor};
 use readyset_errors::{internal_err, ReadySetError, ReadySetResult};
 use readyset_sql::ast::{Relation, SqlIdentifier};
@@ -213,6 +215,46 @@ impl Leader {
         }
     }
 
+    /// Return the status of the replication channel of `catalog`.
+    async fn replication_channel_status(
+        &self,
+        ds: &DfState,
+        catalog: Option<SqlIdentifier>,
+        replication_stopped: bool,
+    ) -> ReadySetResult<ReplicationChannelStatus> {
+        let replication_offsets = if ds.all_domains_placed() {
+            Some(ds.replication_offsets(catalog.as_ref()).await?)
+        } else {
+            None
+        };
+
+        Ok(ReplicationChannelStatus {
+            replication_status: if !self.replicator_config.replication_enabled {
+                ReplicationStatus::Disabled
+            } else if replication_stopped {
+                ReplicationStatus::Stopped
+            } else {
+                ReplicationStatus::Running
+            },
+
+            cdc_server: if self.replicator_config.replication_enabled && !replication_stopped {
+                self.replication_channels
+                    .get(&catalog)
+                    .and_then(ReplicationChannel::active_cdc_server)
+            } else {
+                None
+            },
+
+            max_replication_offset: replication_offsets
+                .as_ref()
+                .and_then(|offs| offs.max_offset().ok().flatten().cloned()),
+            min_replication_offset: replication_offsets
+                .as_ref()
+                .and_then(|offs| offs.min_present_offset().ok().flatten().cloned()),
+            catalog: catalog.map(|catalog| catalog.to_string()),
+        })
+    }
+
     /// Start replication/binlog synchronization in an infinite loop
     /// on any error the task will retry again and again, because in case
     /// a connection to the primary was lost for any reason, all we want is to
@@ -349,12 +391,13 @@ impl Leader {
                             timeout_sec = replicator_restart_timeout.as_secs(),
                             "Could not connect to the CDC server, will retry after timeout"
                         );
-                        let _ = controller_tx.send(ControllerMessage::RecoverableError(
-                            ReadySetError::ReplicationFailed(format!(
+                        let _ = controller_tx.send(ControllerMessage::RecoverableError {
+                            catalog: None,
+                            error: ReadySetError::ReplicationFailed(format!(
                                 "could not connect to CDC server {}: {error}",
                                 server.display()
                             )),
-                        ));
+                        });
                         tokio::time::sleep(replicator_restart_timeout).await;
                         continue;
                     }
@@ -426,7 +469,10 @@ impl Leader {
                             };
                             // Send the error to the controller so that we can update the replicator
                             // status
-                            let _ = controller_tx.send(ControllerMessage::RecoverableError(error));
+                            let _ = controller_tx.send(ControllerMessage::RecoverableError {
+                                catalog: None,
+                                error,
+                            });
                             if !failover {
                                 tokio::time::sleep(replicator_restart_timeout).await;
                             }
@@ -748,8 +794,9 @@ impl Leader {
                 return_serialized!(server);
             }
             (&Method::POST, "/replication_lag_status") => {
-                let status = if let Some(channel) = self.replication_channels.get(&None) {
-                    channel
+                let mut statuses = Vec::new();
+                for (catalog, channel) in &self.replication_channels {
+                    let status = channel
                         .lag_status
                         .read()
                         .map_err(|e| {
@@ -757,11 +804,12 @@ impl Leader {
                                 "Failed to read replication lag status: {e}"
                             ))
                         })?
-                        .clone()
-                } else {
-                    None
-                };
-                return_serialized!(status);
+                        .clone();
+                    if let Some(status) = status {
+                        statuses.push((catalog.clone(), status));
+                    }
+                }
+                return_serialized!(statuses);
             }
             (&Method::POST, "/replication_offsets") => {
                 // During recovery, domains are not yet placed so we can't query replication
@@ -802,50 +850,28 @@ impl Leader {
             }
             (&Method::POST, "/status") => {
                 let ds = self.dataflow_state_handle.read().await;
-                let replication_offsets = if ds.all_domains_placed() {
-                    Some(ds.replication_offsets(None).await?)
+                let mut channels = Vec::new();
+                // Report each replicated catalog, whether or not its channel is running. Only
+                // `None` is replicated for now.
+                for catalog in [None] {
+                    channels.push(
+                        self.replication_channel_status(&ds, catalog, replication_stopped)
+                            .await?,
+                    );
+                }
+
+                // Use whether the leader is ready or not as a proxy for if we have
+                // completed snapshotting.
+                let current_status = if leader_ready {
+                    if maintenance_mode {
+                        CurrentStatus::MaintenanceMode
+                    } else {
+                        CurrentStatus::Online
+                    }
                 } else {
-                    None
+                    CurrentStatus::SnapshotInProgress
                 };
-
-                let status = ReadySetControllerStatus {
-                    // Use whether the leader is ready or not as a proxy for if we have
-                    // completed snapshotting.
-                    current_status: if leader_ready {
-                        if maintenance_mode {
-                            CurrentStatus::MaintenanceMode
-                        } else {
-                            CurrentStatus::Online
-                        }
-                    } else {
-                        CurrentStatus::SnapshotInProgress
-                    },
-                    replication_status: if !self.replicator_config.replication_enabled {
-                        ReplicationStatus::Disabled
-                    } else if replication_stopped {
-                        ReplicationStatus::Stopped
-                    } else {
-                        ReplicationStatus::Running
-                    },
-
-                    cdc_server: if self.replicator_config.replication_enabled
-                        && !replication_stopped
-                    {
-                        self.replication_channels
-                            .get(&None)
-                            .and_then(ReplicationChannel::active_cdc_server)
-                    } else {
-                        None
-                    },
-
-                    max_replication_offset: replication_offsets
-                        .as_ref()
-                        .and_then(|offs| offs.max_offset().ok().flatten().cloned()),
-                    min_replication_offset: replication_offsets
-                        .as_ref()
-                        .and_then(|offs| offs.min_present_offset().ok().flatten().cloned()),
-                };
-                return_serialized!(status);
+                return_serialized!(ReadySetControllerStatus::new(current_status, channels));
             }
             (&Method::POST, "/dry_run") => {
                 let body: ExtendRecipeSpec = bincode::deserialize(&body)?;

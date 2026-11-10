@@ -638,6 +638,7 @@ impl<'a> NoriaAdapter<'a> {
             lag_status,
             poll_interval,
             config.replication_server_uuid,
+            None,
         );
 
         let mut adapter = NoriaAdapter {
@@ -961,6 +962,7 @@ impl<'a> NoriaAdapter<'a> {
             lag_status,
             poll_interval,
             config.replication_server_uuid,
+            pgsql_opts.get_dbname().map(String::from),
         );
 
         let mut adapter = NoriaAdapter {
@@ -1476,7 +1478,9 @@ impl<'a> NoriaAdapter<'a> {
         // catchup) replication loop.
         if until.is_none() {
             // Will not error unless the Controller has dropped the rx half of the channel
-            let _ = controller_tx.send(ControllerMessage::ReplicationStarted);
+            let _ = controller_tx.send(ControllerMessage::ReplicationStarted {
+                catalog: self.catalog.clone(),
+            });
         }
 
         loop {

@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
 use petgraph::graph::NodeIndex;
+use readyset_sql::ast::SqlIdentifier;
 use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 
 use crate::internal::*;
 use crate::MaterializationStatus;
@@ -45,6 +47,7 @@ pub struct NodeStats {
 }
 
 /// Status that we persist in the Authority to make it available across restarts.
+#[serde_as]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PersistentStats {
     /// Time in millis when the controller last started up.
@@ -53,10 +56,32 @@ pub struct PersistentStats {
     pub last_completed_snapshot: Option<u64>,
     /// Time in millis when we last started the main replication loop.
     pub last_started_replication: Option<u64>,
-    /// Last error reported by the replicator that caused it to restart. This message is cleared
-    /// when we enter the main replication loop, because it is primarily intended to help debug
-    /// issues with starting replication and holding onto errors forever can be confusing.
+    /// Last error reported by the replicator of the `None` catalog that caused it to restart. This
+    /// message is cleared when we enter the main replication loop, because it is primarily
+    /// intended to help debug issues with starting replication and holding onto errors forever
+    /// can be confusing.
     pub last_replicator_error: Option<String>,
+    /// Last error of the replicator of each `Some` catalog, kept as `last_replicator_error` is.
+    /// The errors are serialized as a list of pairs because JSON map keys must be strings, and
+    /// [`SqlIdentifier`] serializes as bytes.
+    #[serde_as(as = "Vec<(_, _)>")]
+    #[serde(default)]
+    pub catalog_replicator_errors: HashMap<SqlIdentifier, String>,
+}
+
+impl PersistentStats {
+    /// Set the last error of the replicator of `catalog`, or clear it if `error` is `None`.
+    pub fn set_replicator_error(&mut self, catalog: Option<SqlIdentifier>, error: Option<String>) {
+        match (catalog, error) {
+            (None, error) => self.last_replicator_error = error,
+            (Some(catalog), Some(error)) => {
+                self.catalog_replicator_errors.insert(catalog, error);
+            }
+            (Some(catalog), None) => {
+                self.catalog_replicator_errors.remove(&catalog);
+            }
+        }
+    }
 }
 
 /// Statistics about the dataflow graph.
@@ -70,5 +95,88 @@ impl Deref for GraphStats {
     type Target = DomainMap;
     fn deref(&self) -> &Self::Target {
         &self.domains
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// [`PersistentStats`] as stored before it had `catalog_replicator_errors`.
+    #[derive(Serialize)]
+    struct LegacyPersistentStats {
+        last_controller_startup: Option<u64>,
+        last_completed_snapshot: Option<u64>,
+        last_started_replication: Option<u64>,
+        last_replicator_error: Option<String>,
+    }
+
+    const LEGACY: LegacyPersistentStats = LegacyPersistentStats {
+        last_controller_startup: Some(1),
+        last_completed_snapshot: Some(2),
+        last_started_replication: Some(3),
+        last_replicator_error: None,
+    };
+
+    #[test]
+    fn replicator_errors_are_per_catalog() {
+        let db2 = SqlIdentifier::from("db2");
+        let mut stats = PersistentStats::default();
+        stats.set_replicator_error(None, Some("url".into()));
+        stats.set_replicator_error(Some(db2.clone()), Some("first".into()));
+        stats.set_replicator_error(Some(db2.clone()), Some("second".into()));
+        assert_eq!(stats.last_replicator_error.as_deref(), Some("url"));
+        assert_eq!(
+            stats.catalog_replicator_errors,
+            HashMap::from([(db2.clone(), "second".into())])
+        );
+
+        stats.set_replicator_error(Some(db2.clone()), None);
+        assert_eq!(stats.last_replicator_error.as_deref(), Some("url"));
+        assert!(stats.catalog_replicator_errors.is_empty());
+
+        stats.set_replicator_error(Some(db2.clone()), Some("db2".into()));
+        stats.set_replicator_error(None, None);
+        assert_eq!(stats.last_replicator_error, None);
+        assert_eq!(
+            stats.catalog_replicator_errors,
+            HashMap::from([(db2, "db2".into())])
+        );
+    }
+
+    #[test]
+    fn catalog_replicator_errors_round_trip() {
+        let mut stats = PersistentStats::default();
+        stats.set_replicator_error(Some("db2".into()), Some("error".into()));
+
+        let json = serde_json::to_string(&stats).unwrap();
+        let decoded: PersistentStats = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            decoded.catalog_replicator_errors,
+            stats.catalog_replicator_errors
+        );
+
+        let bytes = rmp_serde::to_vec(&stats).unwrap();
+        let decoded: PersistentStats = rmp_serde::from_slice(&bytes).unwrap();
+        assert_eq!(
+            decoded.catalog_replicator_errors,
+            stats.catalog_replicator_errors
+        );
+    }
+
+    #[test]
+    fn legacy_json_decodes() {
+        let json = serde_json::to_string(&LEGACY).unwrap();
+        let stats: PersistentStats = serde_json::from_str(&json).unwrap();
+        assert_eq!(stats.last_started_replication, Some(3));
+        assert!(stats.catalog_replicator_errors.is_empty());
+    }
+
+    #[test]
+    fn legacy_msgpack_decodes() {
+        let bytes = rmp_serde::to_vec(&LEGACY).unwrap();
+        let stats: PersistentStats = rmp_serde::from_slice(&bytes).unwrap();
+        assert_eq!(stats.last_started_replication, Some(3));
+        assert!(stats.catalog_replicator_errors.is_empty());
     }
 }

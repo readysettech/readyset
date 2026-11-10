@@ -36,13 +36,16 @@ pub enum ControllerMessage {
     SnapshotStarting { catalog: Option<SqlIdentifier> },
     /// The replicator of `catalog` finished an initial base table snapshot
     SnapshotDone { catalog: Option<SqlIdentifier> },
-    /// The replicator finished startup and entered the main replication loop
-    ReplicationStarted,
+    /// The replicator of `catalog` finished startup and entered the main replication loop
+    ReplicationStarted { catalog: Option<SqlIdentifier> },
     /// The replicator encountered an unrecoverable error
     UnrecoverableError(ReadySetError),
-    /// The replicator encountered an error that caused it to restart, but the error could be
-    /// recoverable. The controller is notified so that it can update status for the user.
-    RecoverableError(ReadySetError),
+    /// The replicator of `catalog` encountered an error that caused it to restart, but the error
+    /// could be recoverable. The controller is notified so that it can update status for the user.
+    RecoverableError {
+        catalog: Option<SqlIdentifier>,
+        error: ReadySetError,
+    },
     /// The controller requested that the replicator enter maintenance mode
     EnterMaintenanceMode,
     /// The controller requested that the replicator exit maintenance mode

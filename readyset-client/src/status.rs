@@ -44,6 +44,58 @@ pub struct ReadySetControllerStatus {
     pub max_replication_offset: Option<ReplicationOffset>,
     /// The current minimum replication offset known by the leader.
     pub min_replication_offset: Option<ReplicationOffset>,
+    /// The status of the replication channel of each catalog.
+    #[serde(default)]
+    pub channels: Vec<ReplicationChannelStatus>,
+}
+
+impl ReadySetControllerStatus {
+    /// Build the status of the leader from the status of each replication channel. The
+    /// replication status is the worst over the channels, the CDC server is the `None` catalog's,
+    /// and the offsets are the minimum and maximum over the channels.
+    pub fn new(current_status: CurrentStatus, channels: Vec<ReplicationChannelStatus>) -> Self {
+        let replication_status = channels
+            .iter()
+            .map(|channel| channel.replication_status.clone())
+            .max()
+            .unwrap_or(ReplicationStatus::Disabled);
+        let cdc_server = channels
+            .iter()
+            .find(|channel| channel.catalog.is_none())
+            .and_then(|channel| channel.cdc_server.clone());
+        let max_replication_offset = ReplicationOffset::try_max_all(
+            channels.iter().map(|c| c.max_replication_offset.as_ref()),
+        );
+        let min_replication_offset = ReplicationOffset::try_min_all(
+            channels
+                .iter()
+                .filter_map(|c| c.min_replication_offset.as_ref()),
+        );
+        Self {
+            current_status,
+            replication_status,
+            cdc_server,
+            max_replication_offset: max_replication_offset.ok().flatten().cloned(),
+            min_replication_offset: min_replication_offset.ok().flatten().cloned(),
+            channels,
+        }
+    }
+}
+
+/// The status of the replication channel of one catalog.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+pub struct ReplicationChannelStatus {
+    /// The catalog this channel replicates.
+    pub catalog: Option<String>,
+    /// The status of the channel's replicator.
+    pub replication_status: ReplicationStatus,
+    /// The `host:port` of the CDC server the channel is connected to, or `None` while the
+    /// channel is not running.
+    pub cdc_server: Option<String>,
+    /// The maximum replication offset of the channel's tables, if every table has one.
+    pub max_replication_offset: Option<ReplicationOffset>,
+    /// The minimum replication offset present in the channel's tables.
+    pub min_replication_offset: Option<ReplicationOffset>,
 }
 
 impl From<ReadySetControllerStatus> for Vec<(String, String)> {
@@ -103,8 +155,8 @@ impl Display for CurrentStatus {
     }
 }
 
-/// The status of the replicator.
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
+/// The status of the replicator. The variants are ordered from best to worst.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub enum ReplicationStatus {
     /// Replication is active.
     Running,
@@ -246,5 +298,104 @@ impl CacheProperties {
     /// reached by a read carrying those same literals rather than by producing the cache's form.
     pub fn set_keeps_literals_inline(&mut self, keeps: bool) {
         self.keeps_literals_inline = Some(keeps);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn offset(s: &str) -> Option<ReplicationOffset> {
+        Some(s.parse().unwrap())
+    }
+
+    fn channel(
+        catalog: Option<&str>,
+        replication_status: ReplicationStatus,
+        cdc_server: Option<&str>,
+        min: Option<ReplicationOffset>,
+        max: Option<ReplicationOffset>,
+    ) -> ReplicationChannelStatus {
+        ReplicationChannelStatus {
+            catalog: catalog.map(String::from),
+            replication_status,
+            cdc_server: cdc_server.map(String::from),
+            max_replication_offset: max,
+            min_replication_offset: min,
+        }
+    }
+
+    #[test]
+    fn aggregates_channels() {
+        let status = ReadySetControllerStatus::new(
+            CurrentStatus::Online,
+            vec![
+                channel(
+                    None,
+                    ReplicationStatus::Running,
+                    Some("url:5432"),
+                    offset("0/20"),
+                    offset("0/30"),
+                ),
+                channel(
+                    Some("db2"),
+                    ReplicationStatus::Stopped,
+                    Some("other:5432"),
+                    offset("0/10"),
+                    offset("0/40"),
+                ),
+            ],
+        );
+        assert_eq!(status.replication_status, ReplicationStatus::Stopped);
+        assert_eq!(status.cdc_server.as_deref(), Some("url:5432"));
+        assert_eq!(status.min_replication_offset, offset("0/10"));
+        assert_eq!(status.max_replication_offset, offset("0/40"));
+        assert_eq!(status.channels.len(), 2);
+    }
+
+    #[test]
+    fn max_offset_needs_every_channel() {
+        let status = ReadySetControllerStatus::new(
+            CurrentStatus::Online,
+            vec![
+                channel(
+                    None,
+                    ReplicationStatus::Running,
+                    None,
+                    offset("0/20"),
+                    offset("0/30"),
+                ),
+                channel(Some("db2"), ReplicationStatus::Running, None, None, None),
+            ],
+        );
+        assert_eq!(status.replication_status, ReplicationStatus::Running);
+        assert_eq!(status.cdc_server, None);
+        assert_eq!(status.min_replication_offset, offset("0/20"));
+        assert_eq!(status.max_replication_offset, None);
+    }
+
+    #[test]
+    fn incomparable_offsets() {
+        let status = ReadySetControllerStatus::new(
+            CurrentStatus::Online,
+            vec![
+                channel(
+                    None,
+                    ReplicationStatus::Running,
+                    None,
+                    offset("0/20"),
+                    offset("0/30"),
+                ),
+                channel(
+                    Some("db2"),
+                    ReplicationStatus::Running,
+                    None,
+                    offset("mysql-bin.000003:154"),
+                    offset("mysql-bin.000003:154"),
+                ),
+            ],
+        );
+        assert_eq!(status.min_replication_offset, None);
+        assert_eq!(status.max_replication_offset, None);
     }
 }

@@ -1051,12 +1051,12 @@ impl ReadySetHandle {
     );
 
     simple_request!(
-        /// Returns the current replication lag status, if available.
+        /// Returns the current replication lag status of each catalog's replication channel.
         ///
         /// The lag reporter runs as a background task in the replicator and periodically
-        /// updates the status. Returns `None` if the lag reporter has not yet produced
-        /// a result (e.g. replication hasn't started).
-        replication_lag_status() -> Option<ReplicationLagStatus>
+        /// updates the status. A channel whose lag reporter has not yet produced a result (e.g.
+        /// replication hasn't started) is omitted.
+        replication_lag_status() -> Vec<(Option<SqlIdentifier>, ReplicationLagStatus)>
     );
 
     /// Poll in a loop to wait for all tables to finish compacting

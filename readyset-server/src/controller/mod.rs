@@ -906,19 +906,19 @@ impl Controller {
                                     error!(%error, "Failed to persist stats in the Authority");
                                 }
                             },
-                            ControllerMessage::ReplicationStarted => {
+                            ControllerMessage::ReplicationStarted { catalog } => {
                                 let now = now();
                                 if let Err(error) = self.authority.update_persistent_stats(|stats| {
                                     let mut stats = stats.unwrap_or_default();
                                     stats.last_started_replication = Some(now);
                                     // Clear the last replicator error if we have started the main loop.
-                                    stats.last_replicator_error = None;
+                                    stats.set_replicator_error(catalog.clone(), None);
                                     Ok(stats)
                                 }).await {
                                     error!(%error, "Failed to persist stats in the Authority");
                                 }
                             },
-                            ControllerMessage::RecoverableError(e) => {
+                            ControllerMessage::RecoverableError { catalog, error: e } => {
                                 if let Err(error) = self.authority.update_persistent_stats(|stats| {
                                     let mut stats = stats.unwrap_or_default();
                                     let error = if let ReadySetError::ReplicationFailed(msg) = &e {
@@ -927,7 +927,7 @@ impl Controller {
                                     } else {
                                         e.to_string()
                                     };
-                                    stats.last_replicator_error = Some(error);
+                                    stats.set_replicator_error(catalog.clone(), Some(error));
                                     Ok(stats)
                                 }).await {
                                     error!(%error, "Failed to persist stats in the Authority");

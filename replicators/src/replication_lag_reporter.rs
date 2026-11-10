@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime};
 
-use metrics::{counter, gauge};
+use metrics::{counter, gauge, Label};
 use readyset_client::status::ReplicationLagStatus;
 use readyset_errors::{internal_err, ReadySetResult};
 use replication_offset::mysql::MySqlPosition;
@@ -245,6 +245,8 @@ async fn mysql_connect_bounded(opts: &mysql_async::Opts) -> ReadySetResult<mysql
 struct ReporterConfig {
     poll_interval: Duration,
     instance_id: String,
+    /// The `database` label of the reporter's metrics, if any.
+    database: Option<String>,
 }
 
 /// Groups heartbeat-related parameters for `poll_lag`.
@@ -259,6 +261,7 @@ struct HeartbeatContext<'a> {
 /// `lag_status` is the shared state that the controller reads via RPC.
 /// `server_uuid` is used as the heartbeat instance ID if set (from
 /// `--replication-server-uuid`); otherwise a random UUID is generated.
+/// `database`, if set, is the `database` label of the reporter's metrics.
 /// Returns the shared replicator-progress handle (which the caller passes back to the
 /// adapter so it can publish updates) and the heartbeat instance ID.
 pub fn spawn_lag_reporter(
@@ -267,6 +270,7 @@ pub fn spawn_lag_reporter(
     lag_status: SharedLagStatus,
     poll_interval: Duration,
     server_uuid: Option<Uuid>,
+    database: Option<String>,
 ) -> (SharedReplicatorProgress, String) {
     let progress = SharedReplicatorProgress::default();
     let instance_id = server_uuid.unwrap_or_else(Uuid::new_v4).to_string();
@@ -275,6 +279,7 @@ pub fn spawn_lag_reporter(
     let reporter_config = ReporterConfig {
         poll_interval,
         instance_id: instance_id.clone(),
+        database,
     };
 
     tokio::spawn(async move {
@@ -526,22 +531,27 @@ async fn poll_lag(
     }
 
     // Update Prometheus gauges
-    gauge!(
-        metric::REPLICATOR_REPLICATION_LAG,
-        "mode" => status.mode.clone(),
-        "kind" => "consume",
-    )
-    .set(status.consume_lag as f64);
-
-    gauge!(
-        metric::REPLICATOR_REPLICATION_LAG,
-        "mode" => status.mode.clone(),
-        "kind" => "persist",
-    )
-    .set(status.persist_lag as f64);
+    let database: Vec<Label> = hb
+        .reporter
+        .database
+        .iter()
+        .map(|db| Label::new("database", db.clone()))
+        .collect();
+    let lag_labels = |kind: &'static str| {
+        let mut labels = vec![
+            Label::new("mode", status.mode.clone()),
+            Label::new("kind", kind),
+        ];
+        labels.extend(database.iter().cloned());
+        labels
+    };
+    gauge!(metric::REPLICATOR_REPLICATION_LAG, lag_labels("consume"))
+        .set(status.consume_lag as f64);
+    gauge!(metric::REPLICATOR_REPLICATION_LAG, lag_labels("persist"))
+        .set(status.persist_lag as f64);
 
     if let Some(staleness) = status.staleness_seconds {
-        gauge!(metric::REPLICATOR_REPLICATION_STALENESS).set(staleness);
+        gauge!(metric::REPLICATOR_REPLICATION_STALENESS, database).set(staleness);
     }
 
     debug!(

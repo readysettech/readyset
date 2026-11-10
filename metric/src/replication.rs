@@ -72,6 +72,7 @@ pub const REPLICATOR_GROUP_COMMIT_DURATION: &str = "readyset_replicator.group_co
 /// | --- | ----------- |
 /// | mode | postgres, mysql_file, or mysql_gtid |
 /// | kind | consume (stream position) or persist (min persisted offset) |
+/// | database | The replicated Postgres database. Not set for MySQL. |
 pub const REPLICATOR_REPLICATION_LAG: &str = "readyset_replicator.replication_lag";
 
 /// Counter: Number of failed replication lag poll attempts.
@@ -83,5 +84,6 @@ pub const REPLICATOR_LAG_POLL_FAILURE: &str = "readyset_replicator.lag_poll_fail
 /// | Tag | Description |
 /// | --- | ----------- |
 /// | mode | postgres, mysql_file, or mysql_gtid |
+/// | database | The replicated Postgres database. Not set for MySQL. |
 pub const REPLICATOR_REPLICATION_STALENESS: &str =
     "readyset_replicator.replication_staleness_seconds";

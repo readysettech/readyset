@@ -12,6 +12,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt;
 use std::hash::Hash;
+use std::iter;
 use std::str::FromStr;
 
 use mysql::MySqlPosition;
@@ -257,6 +258,41 @@ impl ReplicationOffset {
             Ordering::Greater => Ok(offset2),
         }
     }
+
+    /// Return the maximum of `offsets`, or `None` if any of them is `None` or there are none.
+    /// Return an error if any two offsets are incomparable.
+    pub fn try_max_all<'a, I>(offsets: I) -> ReadySetResult<Option<&'a Self>>
+    where
+        I: IntoIterator<Item = Option<&'a Self>>,
+    {
+        let mut res: Option<&Self> = None;
+        for offset in offsets {
+            let Some(offset) = offset else {
+                return Ok(None);
+            };
+            match res {
+                Some(max) if offset.try_partial_cmp(max)?.is_le() => {}
+                _ => res = Some(offset),
+            }
+        }
+        Ok(res)
+    }
+
+    /// Return the minimum of `offsets`, or `None` if there are none. Return an error if any two
+    /// offsets are incomparable.
+    pub fn try_min_all<'a, I>(offsets: I) -> ReadySetResult<Option<&'a Self>>
+    where
+        I: IntoIterator<Item = &'a Self>,
+    {
+        let mut res: Option<&Self> = None;
+        for offset in offsets {
+            res = Some(match res {
+                Some(res) => Self::try_min(res, offset)?,
+                None => offset,
+            });
+        }
+        Ok(res)
+    }
 }
 
 /// Set of replication offsets for the entire system
@@ -345,21 +381,9 @@ impl ReplicationOffsets {
     ///
     /// [`replication_log_name`]: ReplicationOffset::replication_log_name
     pub fn max_offset(&self) -> ReadySetResult<Option<&ReplicationOffset>> {
-        let mut res = match &self.schema {
-            Some(schema_offset) => schema_offset,
-            None => return Ok(None),
-        };
-        for offset in self.tables.values() {
-            let offset = match offset {
-                Some(offset) => offset,
-                None => return Ok(None),
-            };
-
-            if offset.try_partial_cmp(res)?.is_gt() {
-                res = offset;
-            }
-        }
-        Ok(Some(res))
+        ReplicationOffset::try_max_all(
+            iter::once(self.schema.as_ref()).chain(self.tables.values().map(Option::as_ref)),
+        )
     }
 
     /// Returns the minimum offset *from those present* within the set of replication offsets.
@@ -372,18 +396,7 @@ impl ReplicationOffsets {
     /// [`max_offset`]: Self::max_offset
     /// [`replication_log_name`]: ReplicationOffset::replication_log_name
     pub fn min_present_offset(&self) -> ReadySetResult<Option<&ReplicationOffset>> {
-        let mut res: Option<&ReplicationOffset> = None;
-        for offset in self.schema.iter().chain(self.tables.values().flatten()) {
-            match (res, offset) {
-                (Some(off1), off2) => {
-                    res = Some(ReplicationOffset::try_min(off1, off2)?);
-                }
-                (None, off) => {
-                    res = Some(off);
-                }
-            }
-        }
-        Ok(res)
+        ReplicationOffset::try_min_all(self.schema.iter().chain(self.tables.values().flatten()))
     }
 
     /// Returns the maximum offset *from those present* within the set of replication offsets.

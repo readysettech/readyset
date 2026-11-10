@@ -16,9 +16,12 @@ const REPLICATION_STATUS_SCHEMA: &[(&str, DfType)] = &[
 fn replication_status_read(ctx: &VrelContext) -> VrelRead {
     let mut controller = ctx.controller.clone();
     Box::pin(async move {
-        let status = controller.replication_lag_status().await.ok().flatten();
-        let rows: VrelRows = match status {
-            Some(s) => Box::new(std::iter::once(vec![
+        let statuses = controller
+            .replication_lag_status()
+            .await
+            .unwrap_or_default();
+        let rows: VrelRows = Box::new(statuses.into_iter().map(|(_, s)| {
+            vec![
                 s.mode.to_string().into(),
                 s.upstream_offset.into(),
                 s.replicator_offset.into(),
@@ -28,9 +31,8 @@ fn replication_status_read(ctx: &VrelContext) -> VrelRead {
                 s.staleness_seconds
                     .map(DfValue::Double)
                     .unwrap_or(DfValue::None),
-            ])),
-            None => Box::new(std::iter::empty()),
-        };
+            ]
+        }));
         Ok(rows)
     })
 }

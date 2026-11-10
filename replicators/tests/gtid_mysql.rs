@@ -92,7 +92,7 @@ impl TestChannel {
             match self.rx.recv().await {
                 Some(SnapshotDone { .. }) => return Ok(()),
                 Some(UnrecoverableError(e)) => return Err(e),
-                Some(RecoverableError(e)) => return Err(e),
+                Some(RecoverableError { error, .. }) => return Err(error),
                 Some(_) => continue,
                 None => return Err(readyset_errors::internal_err!("Channel closed")),
             }

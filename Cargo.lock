@@ -6372,6 +6372,7 @@ dependencies = [
  "schema-catalog",
  "serde",
  "serde_json",
+ "serde_with",
  "sha2 0.11.1",
  "slab",
  "smallvec",
