@@ -700,12 +700,17 @@ where
                     // write-back. Capture per-item deadline to spread rescheduled callbacks
                     // across slightly different instants rather than collapsing
                     // them all to a single point in time.
-                    let period_ms = match entry {
-                        CacheEntry::Present(values) => values.period_ms,
-                        CacheEntry::Loading(..) => refresh_ms,
+                    let (period_ms, metadata) = match entry {
+                        CacheEntry::Present(values) => {
+                            (values.period_ms, cache.entry_metadata(values))
+                        }
+                        CacheEntry::Loading(..) => (refresh_ms, None),
                     };
                     let deadline = period_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
-                    let guard = Self::make_guard(Arc::clone(&cache), key.clone(), None, true);
+                    let mut guard = Self::make_guard(Arc::clone(&cache), key.clone(), None, true);
+                    if let Some(metadata) = metadata {
+                        guard.set_metadata((**metadata).clone());
+                    }
                     callback(guard);
                     if let Some(deadline) = deadline {
                         to_reschedule.push((deadline, key, version, callback));
@@ -968,6 +973,13 @@ where
             .await;
     }
 
+    fn entry_metadata<'a>(&'a self, values: &'a CacheValues<V>) -> Option<&'a Arc<QueryMetadata>> {
+        values
+            .metadata
+            .as_ref()
+            .or_else(|| self.cache_metadata.get())
+    }
+
     fn get_hit(&self, values: &CacheValues<V>) -> (QueryResult<V>, Option<Arc<AtomicBool>>) {
         let now = current_timestamp_ms();
         values.accessed_ms.store(now, Ordering::Relaxed);
@@ -984,10 +996,8 @@ where
             None
         };
 
-        let metadata = values
-            .metadata
-            .as_ref()
-            .or_else(|| self.cache_metadata.get())
+        let metadata = self
+            .entry_metadata(values)
             .expect("No metadata available for cached result");
 
         (

@@ -34,7 +34,7 @@ use readyset_adapter::{UpstreamConfig, UpstreamDatabase, UpstreamPrepare};
 use readyset_adapter_types::{DeallocateId, PreparedStatementType};
 use readyset_data::DfValue;
 use readyset_errors::{ReadySetError, ReadySetResult, internal_err, invariant_eq, unsupported};
-use readyset_shallow::{CacheInsertGuard, ContentHash, QueryMetadata};
+use readyset_shallow::{CacheInsertGuard, ContentHash, PostgreSqlMetadata, QueryMetadata};
 use readyset_sql::ast::{
     CommitStatement, Literal, PostgresParameterValue, PostgresParameterValueInner, Relation,
     RollbackStatement, SessionAuthorizationValue, SetPostgresParameter, SetPostgresParameterValue,
@@ -45,7 +45,7 @@ use readyset_util::SizeOf;
 use readyset_util::hash::hash;
 
 use crate::Error;
-use crate::resultset::{Resultset, copy_simple_query_message};
+use crate::resultset::{Resultset, copy_simple_query_message, postgres_metadata};
 
 /// Indicates the minimum upstream server version that we currently support. Used to error out
 /// during connection phase if the version for the upstream server is too low.
@@ -103,8 +103,21 @@ enum PreparedStatementWrapper {
     // Wraps an actual, live statement that's been prepared on the upstream postgres.
     Named(Statement),
     // Contains the metadata required for executing an unnamed prepared statement
-    // aginst the upstream postgres.
-    Unnamed((String, Vec<Type>)),
+    // against the upstream postgres.
+    Unnamed {
+        query: String,
+        param_types: Vec<Type>,
+        metadata: PostgreSqlMetadata,
+    },
+}
+
+fn statement_metadata(statement: &Statement) -> PostgreSqlMetadata {
+    postgres_metadata(
+        statement
+            .columns()
+            .iter()
+            .map(|c| (c.name(), c.type_(), c.type_modifier())),
+    )
 }
 
 /// A connector to an underlying PostgreSQL database
@@ -128,7 +141,8 @@ pub struct PostgreSqlUpstream {
 }
 
 pub enum QueryResult {
-    EmptyRead,
+    /// A response to an empty query, i.e., a query with no statement.
+    EmptyQueryResponse,
     /// A stream of rows from the upstream database; this is the type returned when executing a
     /// prepared statement.
     Stream {
@@ -141,6 +155,11 @@ pub enum QueryResult {
     },
     Command {
         tag: String,
+    },
+    /// A query that returned no rows.  `metadata` is set for prepared statements.
+    EmptyResultset {
+        tag: String,
+        metadata: Option<PostgreSqlMetadata>,
     },
     SimpleQuery(Vec<SimpleQueryMessage>),
     /// A stream of rows from the upstream database; this is the type returned when executing a
@@ -212,7 +231,7 @@ impl ContentHash for CacheEntry {
 impl Debug for QueryResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::EmptyRead => write!(f, "EmptyRead"),
+            Self::EmptyQueryResponse => write!(f, "EmptyQueryResponse"),
             Self::Stream {
                 first_row,
                 stream: _,
@@ -225,6 +244,11 @@ impl Debug for QueryResult {
                 .field("num_rows_affected", num_rows_affected)
                 .finish(),
             Self::Command { tag } => f.debug_struct("Command").field("tag", tag).finish(),
+            Self::EmptyResultset { tag, metadata } => f
+                .debug_struct("EmptyResultset")
+                .field("tag", tag)
+                .field("metadata", metadata)
+                .finish(),
             Self::SimpleQuery(ms) => f.debug_tuple("SimpleQuery").field(ms).finish(),
             Self::SimpleQueryStream {
                 first_message,
@@ -301,6 +325,12 @@ impl Refresh for QueryResult {
                 }
                 cache.set_metadata(QueryMetadata::PostgreSql(Default::default()));
                 drop(cache.filled());
+                Ok(None)
+            }
+            QueryResult::EmptyResultset { .. } => {
+                if cache.has_metadata() {
+                    drop(cache.filled());
+                }
                 Ok(None)
             }
             x => Err(std::io::Error::new(
@@ -698,10 +728,11 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         };
 
         let pstmt = match statement_type {
-            PreparedStatementType::Unnamed => {
-                let params = statement.params().to_vec();
-                PreparedStatementWrapper::Unnamed((query.to_string(), params))
-            }
+            PreparedStatementType::Unnamed => PreparedStatementWrapper::Unnamed {
+                query: query.to_string(),
+                param_types: statement.params().to_vec(),
+                metadata: statement_metadata(&statement),
+            },
             PreparedStatementType::Named => PreparedStatementWrapper::Named(statement),
         };
 
@@ -728,7 +759,7 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         let mut stream = Box::pin(self.client.simple_query_raw(query).await?);
 
         match stream.next().await {
-            None => Ok(QueryResult::EmptyRead),
+            None => Ok(QueryResult::EmptyQueryResponse),
             Some(Err(e)) => Err(e.into()),
             Some(Ok(first_message)) => Ok(QueryResult::SimpleQueryStream {
                 first_message,
@@ -750,8 +781,17 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         );
 
         match stream.next().await {
-            None => Ok(QueryResult::EmptyRead),
+            None => Ok(QueryResult::EmptyQueryResponse),
             Some(Err(e)) => Err(e.into()),
+            // For SELECT queries returning 0 rows, the extended query protocol RowStream we get
+            // from tokio_postgres only gives us a GenericResult::Command(..) with a tag starting
+            // with "SELECT".
+            Some(Ok(GenericResult::Command(_, tag))) if tag.starts_with("SELECT") => {
+                Ok(QueryResult::EmptyResultset {
+                    tag,
+                    metadata: None,
+                })
+            }
             Some(Ok(GenericResult::Command(_, tag))) => Ok(QueryResult::Command { tag }),
             Some(Ok(GenericResult::Row(first_row))) => {
                 Ok(QueryResult::RowStream { first_row, stream })
@@ -783,7 +823,11 @@ impl UpstreamDatabase for PostgreSqlUpstream {
         }
 
         match &pstmt.unwrap() {
-            Some(PreparedStatementWrapper::Unnamed((query, param_types))) => {
+            Some(PreparedStatementWrapper::Unnamed {
+                query,
+                param_types,
+                metadata,
+            }) => {
                 if params.len() != param_types.len() {
                     // this should have been caught way earlier in the stack.
                     return Err(internal_err!(
@@ -807,8 +851,12 @@ impl UpstreamDatabase for PostgreSqlUpstream {
                         .await?,
                 );
                 match stream.next().await {
-                    None => Ok(QueryResult::EmptyRead),
+                    None => Ok(QueryResult::EmptyQueryResponse),
                     Some(Err(e)) => Err(e.into()),
+                    Some(Ok(GenericResult::Command(_, tag))) if !metadata.schema.is_empty() => {
+                        let metadata = Some(metadata.clone());
+                        Ok(QueryResult::EmptyResultset { tag, metadata })
+                    }
                     Some(Ok(GenericResult::Command(_, tag))) => Ok(QueryResult::Command { tag }),
                     Some(Ok(GenericResult::Row(first_row))) => {
                         Ok(QueryResult::RowStream { first_row, stream })
@@ -827,8 +875,12 @@ impl UpstreamDatabase for PostgreSqlUpstream {
                 );
 
                 match stream.next().await {
-                    None => Ok(QueryResult::EmptyRead),
+                    None => Ok(QueryResult::EmptyQueryResponse),
                     Some(Err(e)) => Err(e.into()),
+                    Some(Ok(GenericResult::Command(_, tag))) if !statement.columns().is_empty() => {
+                        let metadata = Some(statement_metadata(statement));
+                        Ok(QueryResult::EmptyResultset { tag, metadata })
+                    }
                     Some(Ok(GenericResult::Command(_, tag))) => Ok(QueryResult::Command { tag }),
                     Some(Ok(GenericResult::Row(first_row))) => {
                         Ok(QueryResult::Stream { first_row, stream })

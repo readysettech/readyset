@@ -522,7 +522,9 @@ where
         if let Some(refreshing) = refreshing
             && !cache.is_scheduled()
         {
-            CacheResult::HitAndRefresh(res, Self::make_guard(cache, key, Some(refreshing)))
+            let mut guard = Self::make_guard(cache, key, Some(refreshing));
+            guard.set_metadata((*res.metadata).clone());
+            CacheResult::HitAndRefresh(res, guard)
         } else {
             CacheResult::Hit(res)
         }
@@ -651,6 +653,11 @@ where
     /// Set the metadata for this result set.
     pub fn set_metadata(&mut self, metadata: QueryMetadata) {
         self.metadata = Some(metadata);
+    }
+
+    /// Whether the metadata for this result set is set.
+    pub fn has_metadata(&self) -> bool {
+        self.metadata.is_some()
     }
 
     /// Set the warnings the statement raised.

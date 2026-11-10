@@ -255,7 +255,7 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                     })
                 }
             }
-            Upstream(upstream::QueryResult::EmptyRead, cache, _) => {
+            Upstream(upstream::QueryResult::EmptyQueryResponse, cache, _) => {
                 if let Some(mut cache) = cache {
                     let meta = QueryMetadata::PostgreSql(Default::default());
                     cache.set_metadata(meta);
@@ -298,6 +298,13 @@ impl<'a> TryFrom<QueryResponse<'a>> for ps::QueryResponse<Resultset> {
                 Ok(Insert(num_rows_affected))
             }
             Upstream(upstream::QueryResult::Command { tag }, _, _) => Ok(Command(tag)),
+            Upstream(upstream::QueryResult::EmptyResultset { tag, metadata }, cache, _) => {
+                if let (Some(mut cache), Some(metadata)) = (cache, metadata) {
+                    cache.set_metadata(QueryMetadata::PostgreSql(metadata));
+                    drop(cache.filled());
+                }
+                Ok(Command(tag))
+            }
             Upstream(upstream::QueryResult::SimpleQueryStream {
                 first_message,
                 stream,

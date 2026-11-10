@@ -45,6 +45,30 @@ pub(crate) fn copy_simple_query_message(
     }
 }
 
+pub(crate) fn postgres_metadata<'a, I>(columns: I) -> PostgreSqlMetadata
+where
+    I: IntoIterator<Item = (&'a str, &'a Type, i32)>,
+{
+    let (schema, types) = columns
+        .into_iter()
+        .enumerate()
+        .map(|(i, (name, col_type, type_modifier))| {
+            let column = ps::Column::Column {
+                name: name.into(),
+                col_type: col_type.clone(),
+                table_oid: Some(0),
+                attnum: Some(i as i16),
+                type_modifier,
+            };
+            (column, col_type.clone())
+        })
+        .unzip();
+    PostgreSqlMetadata {
+        schema: Arc::new(schema),
+        types: Arc::new(types),
+    }
+}
+
 enum ResultsetInner {
     Empty,
     ReadySet(Box<<ResultIterator as IntoIterator>::IntoIter>),
@@ -93,27 +117,13 @@ pub struct Resultset {
 impl Resultset {
     fn finalize_cache(&mut self) {
         if let Some(cache) = &mut self.cache {
-            let schema = Arc::new(
-                izip!(
-                    &self.project_field_names,
-                    self.project_field_types.iter(),
-                    &self.project_field_modifiers
-                )
-                .enumerate()
-                .map(|(i, (name, col_type, type_modifier))| ps::Column::Column {
-                    name: name.clone().into(),
-                    col_type: col_type.clone(),
-                    table_oid: Some(0),
-                    attnum: Some(i as i16),
-                    type_modifier: *type_modifier,
-                })
-                .collect(),
-            );
-
-            cache.set_metadata(QueryMetadata::PostgreSql(PostgreSqlMetadata {
-                schema,
-                types: Arc::clone(&self.project_field_types),
-            }));
+            let columns = izip!(
+                &self.project_field_names,
+                self.project_field_types.iter(),
+                &self.project_field_modifiers
+            )
+            .map(|(name, col_type, type_modifier)| (name.as_str(), col_type, *type_modifier));
+            cache.set_metadata(QueryMetadata::PostgreSql(postgres_metadata(columns)));
             drop(cache.filled());
         }
     }
