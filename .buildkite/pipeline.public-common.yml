@@ -135,12 +135,14 @@ steps:
           echo "~~~ Show sccache stats"
           sccache --show-stats
         timeout_in_minutes: 60
+        parallelism: 2            # run-tests.sh splits the tests across these jobs
         plugins:
           - docker-compose#${DOCKER_COMPOSE_PLUGIN_VERSION}:
               run: app
               tty: true           # nextest makes colored output if we use tty
               env:
                 - BUILDKITE_PARALLEL_JOB
+                - BUILDKITE_PARALLEL_JOB_COUNT
                 - BUILDKITE_JOB_ID
                 - BUILDKITE_API_TOKEN             # buildkite vars needed to fetch regression artifacts
                 - BUILDKITE_GRAPHQL_API_TOKEN

@@ -73,6 +73,11 @@ if [[ "$TEST_CATEGORY" == "nextest" ]]; then
     if [[ -n "$FILTERSET" ]]; then
         NEXTEST_ARGS+=(--filterset "$FILTERSET")
     fi
+
+    # Split the tests across the step's parallel jobs, if any.
+    if [[ "${BUILDKITE_PARALLEL_JOB_COUNT:-1}" -gt 1 ]]; then
+        NEXTEST_ARGS+=(--partition "count:$((BUILDKITE_PARALLEL_JOB + 1))/${BUILDKITE_PARALLEL_JOB_COUNT}")
+    fi
     set -x
     cargo nextest run --locked "${NEXTEST_ARGS[@]}" || upload_artifacts
     set +x
