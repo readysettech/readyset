@@ -359,3 +359,30 @@ fn compound_select_for_share_unsupported() {
         "Error should mention locking"
     );
 }
+
+/// The column list renames the body's columns, which the converted CTE has no way to carry, so
+/// a CTE with one is refused rather than read under the body's own names.
+#[test]
+fn cte_column_list_unsupported() {
+    let query = "WITH c(y, x) AS (SELECT t.x, t.y FROM t) SELECT c.x FROM c";
+    for dialect in [Dialect::PostgreSQL, Dialect::MySQL] {
+        check_parse_fails!(dialect, query, "CTE column list");
+        for preset in [
+            ParsingPreset::OnlySqlparser,
+            ParsingPreset::BothPreferSqlparser,
+        ] {
+            let err = parse_query_with_config(preset, dialect, query)
+                .expect_err("a CTE column list should be refused");
+            assert!(
+                err.to_string().contains("CTE column list"),
+                "expected the CTE column list rejection, got: {err}"
+            );
+        }
+        parse_query_with_config(
+            ParsingPreset::OnlySqlparser,
+            dialect,
+            "WITH c AS (SELECT t.x, t.y FROM t) SELECT c.x FROM c",
+        )
+        .expect("a CTE without a column list should convert");
+    }
+}

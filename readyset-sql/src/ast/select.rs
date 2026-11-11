@@ -277,6 +277,9 @@ impl TryFromDialect<sqlparser::ast::Cte> for CommonTableExpr {
         value: sqlparser::ast::Cte,
         dialect: Dialect,
     ) -> Result<Self, AstConversionError> {
+        if !value.alias.columns.is_empty() {
+            return unsupported!("CTE column list on {}", value.alias.name);
+        }
         Ok(Self {
             // sqlparser keeps `recursive` on `ast::With` rather than on `ast::Cte`, so it is out
             // of reach here and the `With` conversion stamps it on.

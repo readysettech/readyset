@@ -1,0 +1,20 @@
+# A CTE column list renames the body's columns. The parsed CTE does not carry the list, so a
+# statement with one is refused instead of read under the body's own names.
+
+statement ok
+create table t (x int, y int);
+
+statement ok
+insert into t (x, y) values (1, 10), (2, 20);
+
+query I rowsort
+with c as (select t.x, t.y from t) select c.x from c;
+----
+1
+2
+
+statement error: CTE column list
+with c(y, x) as (select t.x, t.y from t) select c.x from c;
+
+statement error: CTE column list
+with c(y, x) as (select t.x, t.y from t where t.y = 20) select c.x from c;
