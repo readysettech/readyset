@@ -1,8 +1,8 @@
 use std::collections::{hash_map, HashMap, HashSet};
-use std::mem;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
+use std::{iter, mem};
 
 use async_trait::async_trait;
 use deadpool_postgres::{Manager, ManagerConfig, Pool, RecyclingMethod};
@@ -105,45 +105,67 @@ pub(crate) trait Connector {
 }
 
 /// Cleans up replication related assets on the upstream database as supplied by the
-/// UpstreamConfig.
+/// UpstreamConfig, in the URL's database and in each database in `replication_catalogs`.
 pub async fn cleanup(config: UpstreamConfig) -> ReadySetResult<()> {
-    if let DatabaseURL::PostgreSQL(mut options) = config.preferred_cdc_url()? {
-        let repl_slot_name = replication_slot_name(&config, None);
-        let resnapshot_slot_name = resnapshot_slot_name(&repl_slot_name);
-
-        let dbname = options
-            .get_dbname()
-            .ok_or_else(|| {
-                ReadySetError::ReplicationFailed(
-                    "No database specified for replication".to_string(),
-                )
-            })?
-            .to_owned();
-        options.dbname(dbname).set_replication_database();
+    if let DatabaseURL::PostgreSQL(options) = config.preferred_cdc_url()? {
+        if options.get_dbname().is_none() {
+            return Err(ReadySetError::ReplicationFailed(
+                "No database specified for replication".to_string(),
+            ));
+        }
 
         let verification = ServerCertVerification::from(&config).await?;
         let connector = get_tls_connector(&verification)?;
         let tls = MakeTlsConnector::new(connector);
 
-        let (mut client, connection) = options.connect(tls).await?;
-        let _connection_handle = tokio::spawn(connection);
-
-        // Drop primary replication slot
-        drop_replication_slot(&mut client, &repl_slot_name).await?;
-        // Drop resnapshot replication slot (if exists, if does not we output debug message)
-        drop_replication_slot(&mut client, &resnapshot_slot_name).await?;
-        // Other Readyset deployments replicating from this database share the publication.
-        if readyset_replication_slot_exists(&client).await? {
-            info!(
-                publication = PUBLICATION_NAME,
-                "Keeping publication used by other Readyset replication slots"
-            );
-        } else {
-            drop_publication(&mut client, PUBLICATION_NAME).await?;
+        let mut result = Ok(());
+        let catalogs = config.replication_catalogs.iter();
+        for catalog in iter::once(None).chain(catalogs.map(|c| Some(c.as_str().into()))) {
+            let res = cleanup_catalog(&config, options.clone(), catalog.clone(), tls.clone()).await;
+            if let Err(error) = res {
+                error!(%error, ?catalog, "Failed to clean up replication assets");
+                result = result.and(Err(error));
+            }
         }
-        // Drop schema
-        drop_readyset_schema(&mut client).await?;
+        return result;
     }
+
+    Ok(())
+}
+
+/// Drop the replication slots, publication and `readyset` schema of `catalog`.
+async fn cleanup_catalog(
+    config: &UpstreamConfig,
+    mut options: pgsql::Config,
+    catalog: Option<SqlIdentifier>,
+    tls: MakeTlsConnector,
+) -> ReadySetResult<()> {
+    let repl_slot_name = replication_slot_name(config, catalog.as_ref());
+    let resnapshot_slot_name = resnapshot_slot_name(&repl_slot_name);
+
+    if let Some(catalog) = &catalog {
+        options.dbname(catalog.as_str());
+    }
+    options.set_replication_database();
+
+    let (mut client, connection) = options.connect(tls).await?;
+    let _connection_handle = tokio::spawn(connection);
+
+    // Drop primary replication slot
+    drop_replication_slot(&mut client, &repl_slot_name).await?;
+    // Drop resnapshot replication slot (if exists, if does not we output debug message)
+    drop_replication_slot(&mut client, &resnapshot_slot_name).await?;
+    // Other Readyset deployments replicating from this database share the publication.
+    if readyset_replication_slot_exists(&client).await? {
+        info!(
+            publication = PUBLICATION_NAME,
+            "Keeping publication used by other Readyset replication slots"
+        );
+    } else {
+        drop_publication(&mut client, PUBLICATION_NAME).await?;
+    }
+    // Drop schema
+    drop_readyset_schema(&mut client).await?;
 
     Ok(())
 }

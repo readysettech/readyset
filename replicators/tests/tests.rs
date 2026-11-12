@@ -3543,6 +3543,76 @@ async fn postgresql_cleanup_publication_with_server_id() {
     db.stop().await;
 }
 
+/// Return whether the `readyset` schema exists.
+async fn postgresql_readyset_schema_exists(client: &tokio_postgres::Client) -> bool {
+    client
+        .query_one(
+            "SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'readyset')",
+            &[],
+        )
+        .await
+        .unwrap()
+        .get(0)
+}
+
+/// Tests that `cleanup` drops the slots, publication and `readyset` schema of each replicated
+/// database.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pgsql_cleanup_two_catalogs() {
+    readyset_tracing::init_test_logging();
+    let clients = connect_two_catalogs("CREATE TABLE t (a INT PRIMARY KEY)").await;
+    let config = Config {
+        replication_server_id: Some(ReplicationServerId("cleanup".into())),
+        ..Default::default()
+    };
+    let (ctx, shutdown_tx, other) = start_two_catalogs(Some(config.clone())).await;
+
+    let mut upstreams = Vec::new();
+    for url in [pgsql_url(), pgsql_db_url(OTHER_CATALOG)] {
+        let (client, conn) = tokio_postgres::connect(&url, tokio_postgres::NoTls)
+            .await
+            .unwrap();
+        tokio::spawn(conn);
+        upstreams.push(client);
+    }
+    let slots = [
+        replication_slot_name(&config, None),
+        replication_slot_name(&config, Some(&OTHER_CATALOG.into())),
+    ];
+    for (client, slot) in upstreams.iter().zip(&slots) {
+        assert!(postgresql_slot_state(client, slot).await.is_some());
+        assert!(postgresql_publication_exists(client, "readyset").await);
+        assert!(postgresql_readyset_schema_exists(client).await);
+    }
+
+    stop_two_catalogs(clients, ctx, shutdown_tx, other).await;
+    for slot in &slots {
+        eventually! {
+            postgresql_slot_state(&upstreams[0], slot).await == Some(false)
+        }
+    }
+
+    let url = pgsql_url();
+    replicators::cleanup(Config {
+        upstream_db_url: vec![url.parse().unwrap()],
+        cdc_db_url: vec![url.parse().unwrap()],
+        replication_catalogs: vec![OTHER_CATALOG.into()],
+        ..config
+    })
+    .await
+    .unwrap();
+
+    for (client, slot) in upstreams.iter().zip(&slots) {
+        assert_eq!(postgresql_slot_state(client, slot).await, None);
+        let resnapshot_slot = format!("resnapshot_{slot}");
+        assert_eq!(postgresql_slot_state(client, &resnapshot_slot).await, None);
+        assert!(!postgresql_publication_exists(client, "readyset").await);
+        assert!(!postgresql_readyset_schema_exists(client).await);
+    }
+}
+
 /// Given a table, check that it has an associated TOAST table
 async fn postgresql_is_toasty(client: &tokio_postgres::client::Client, table: &str) -> bool {
     let res = client

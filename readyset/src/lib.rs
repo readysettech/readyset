@@ -884,6 +884,20 @@ impl Options {
         }
     }
 
+    /// Return the databases replicated in addition to the URL's database: the list stored in the
+    /// Authority, or `--replication-databases` if none is stored.
+    async fn replication_catalogs(&self) -> anyhow::Result<Vec<String>> {
+        let authority = self
+            .authority
+            .to_authority(&self.authority_address(), &self.deployment)?;
+        let stored = authority
+            .load_replication_catalogs()
+            .await
+            .map_err(|e| anyhow!("Failed to load the replicated databases: {e}"))?;
+        let config = &self.server_worker_options.replicator_config;
+        Ok(stored.unwrap_or_else(|| config.replication_catalogs.clone()))
+    }
+
     /// Seed the Authority with this process's lists if it holds none yet, and adopt the stored
     /// ones. Runs after the preflight, so a failed start leaves the Authority untouched.
     pub async fn persist_upstream_servers(&mut self) -> anyhow::Result<()> {
@@ -1571,7 +1585,13 @@ where
 
         if options.cleanup {
             info!(?options, "Cleaning up deployment");
-            return rt.block_on(async { self.cleanup(upstream_config, deployment_dir).await });
+            return rt.block_on(async {
+                let upstream_config = UpstreamConfig {
+                    replication_catalogs: options.replication_catalogs().await?,
+                    ..upstream_config
+                };
+                self.cleanup(upstream_config, deployment_dir).await
+            });
         }
         info!(version = %VERSION_STR_ONELINE);
 

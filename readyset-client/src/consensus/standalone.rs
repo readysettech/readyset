@@ -632,6 +632,7 @@ mod tests {
             .unwrap(),
         );
 
+        assert_eq!(authority.load_replication_catalogs().await.unwrap(), None);
         let first = vec!["db2".to_owned(), "db3".to_owned()];
         for bootstrap in [first.clone(), vec![]] {
             assert_eq!(
@@ -642,6 +643,10 @@ mod tests {
                 first
             );
         }
+        assert_eq!(
+            authority.load_replication_catalogs().await.unwrap(),
+            Some(first)
+        );
     }
 
     #[tokio::test]

@@ -497,6 +497,12 @@ pub trait AuthorityControl: Send + Sync {
         Ok(())
     }
 
+    /// Return the catalogs replicated in addition to the URL's catalog, or `None` if the key has
+    /// never been written.
+    async fn load_replication_catalogs(&self) -> ReadySetResult<Option<Vec<String>>> {
+        self.try_read(REPLICATION_CATALOGS_PATH).await
+    }
+
     /// Return the catalogs replicated in addition to the URL's catalog, initializing them from
     /// `bootstrap` if the key does not exist yet. Atomic: the first writer wins.
     async fn load_or_init_replication_catalogs(
