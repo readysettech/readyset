@@ -135,7 +135,8 @@ pub struct UpstreamConfig {
     /// For Postgres, this ends up being a suffix of the replication slot or resnapshot replication
     /// slot, which have prefixes of 'readyset_' and 'resnapshot_readyset_', respectively. Since a
     /// replication slot is limited by postgres to a length of 63 bytes, that means this server id
-    /// must be 43 bytes or fewer.
+    /// must be 43 bytes or fewer. With --replication-databases, the slots of those databases also
+    /// end in an underscore and 8 characters, so the server id must be 34 bytes or fewer.
     ///
     /// For MySQL, this must be parseable as a u32 that is unique across the replication topology.
     #[arg(long, env = "REPLICATION_SERVER_ID", value_parser = parse_repl_server_id)]
@@ -269,6 +270,17 @@ pub struct UpstreamConfig {
     #[arg(long, env = "REPLICATION_TABLES_IGNORE")]
     #[serde(default)]
     pub replication_tables_ignore: Option<String>,
+
+    /// Comma-separated list of PostgreSQL databases to replicate in addition to the database in
+    /// --upstream-db-url (or --cdc-db-url). Every database must be on the same server. This
+    /// option applies on the first startup only, and later startups use the stored list.
+    #[arg(
+        long = "replication-databases",
+        env = "REPLICATION_DATABASES",
+        value_delimiter = ','
+    )]
+    #[serde(default)]
+    pub replication_catalogs: Vec<String>,
 
     /// Sets the time (in seconds) between reports of progress snapshotting the database. A value
     /// of 0 disables reporting.
@@ -565,6 +577,7 @@ impl Default for UpstreamConfig {
             upstream_connect_retries: 3,
             replication_tables: Default::default(),
             replication_tables_ignore: Default::default(),
+            replication_catalogs: Default::default(),
             snapshot_report_interval_secs: 30,
             ssl_root_cert: None,
             replication_pool_size: 50,

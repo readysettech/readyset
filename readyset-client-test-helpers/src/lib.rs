@@ -271,6 +271,7 @@ pub struct TestBuilder {
     straddled_joins: bool,
     parsing_preset: ParsingPreset,
     replication_tables: Option<String>,
+    replication_catalogs: Vec<String>,
     require_gtid: bool,
     replication_lag_interval: Option<u16>,
     replication_heartbeat: bool,
@@ -315,6 +316,7 @@ impl TestBuilder {
             straddled_joins: false,
             parsing_preset: ParsingPreset::for_tests(),
             replication_tables: None,
+            replication_catalogs: Vec::new(),
             require_gtid: false,
             replication_lag_interval: None,
             replication_heartbeat: false,
@@ -518,6 +520,12 @@ impl TestBuilder {
         self
     }
 
+    /// Replicate `catalogs` in addition to the URL's catalog.
+    pub fn replication_catalogs(mut self, catalogs: Vec<String>) -> Self {
+        self.replication_catalogs = catalogs;
+        self
+    }
+
     pub fn require_gtid(mut self, require: bool) -> Self {
         self.require_gtid = require;
         self
@@ -696,6 +704,7 @@ impl TestBuilder {
         }
 
         builder.set_replication_tables(self.replication_tables);
+        builder.set_replication_catalogs(self.replication_catalogs);
         builder.set_require_gtid(self.require_gtid);
         if let Some(interval) = self.replication_lag_interval {
             builder.set_replication_lag_interval(interval);
@@ -1170,6 +1179,11 @@ where
 
     pub fn subscribe(&self) -> ShutdownReceiver {
         self.shutdown_tx.subscribe()
+    }
+
+    /// The builder that a restart uses.
+    pub fn builder_mut(&mut self) -> &mut TestBuilder {
+        &mut self.builder
     }
 
     /// Restart using the same storage directory to simulate a restart with recovery.

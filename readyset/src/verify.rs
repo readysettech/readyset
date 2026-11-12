@@ -491,6 +491,10 @@ pub async fn verify(options: &Options) -> Result<()> {
 
     let verification = add_err!(verify_tls(options).await);
     add_err!(verify_database_type(options));
+    let config = &options.server_worker_options.replicator_config;
+    if !config.replication_catalogs.is_empty() {
+        add_err!(options.verify_replication_catalogs());
+    }
     let upstream_servers = add_err!(verify_upstream_servers(options));
     let upstream_url = match (&verification, &upstream_servers) {
         (Some(verification), Some(servers)) => {

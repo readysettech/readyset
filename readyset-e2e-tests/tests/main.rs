@@ -53,6 +53,7 @@ mod online_index_build;
 mod opportunistic_ryw;
 mod oracle;
 mod psql_db_selection;
+mod psql_deep_multi_db;
 mod psql_min_persisted_rpc_nonfatal;
 mod query_stats_vrel;
 mod query_status_cache;

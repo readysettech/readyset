@@ -54,6 +54,7 @@ const SHALLOW_CACHE_SCHEMAS_ALLOWLIST_PATH: &str = "shallow_cache_schemas_allowl
 const PERSISTENT_STATS_PATH: &str = "persistent_stats";
 const SCHEMA_REPLICATION_OFFSET_PATH: &str = "schema_replication_offset";
 const CATALOG_SCHEMA_REPLICATION_OFFSETS_PATH: &str = "catalog_schema_replication_offsets";
+const REPLICATION_CATALOGS_PATH: &str = "replication_catalogs";
 const SCHEMA_CATALOG_PATH: &str = "schema_catalog";
 const CUSTOM_TYPES_PATH: &str = "custom_types";
 const NON_REPLICATED_RELATIONS_PATH: &str = "non_replicated_relations";
@@ -494,6 +495,19 @@ pub trait AuthorityControl: Send + Sync {
         )
         .await??;
         Ok(())
+    }
+
+    /// Return the catalogs replicated in addition to the URL's catalog, initializing them from
+    /// `bootstrap` if the key does not exist yet. Atomic: the first writer wins.
+    async fn load_or_init_replication_catalogs(
+        &self,
+        bootstrap: Vec<String>,
+    ) -> ReadySetResult<Vec<String>> {
+        self.read_modify_write::<_, Vec<String>, ReadySetError>(
+            REPLICATION_CATALOGS_PATH,
+            move |stored| Ok(stored.unwrap_or_else(|| bootstrap.clone())),
+        )
+        .await?
     }
 
     /// Returns the persisted schema catalog: one entry per relation or type Readyset has

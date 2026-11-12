@@ -1,6 +1,7 @@
 use std::collections::{hash_map, HashMap, HashSet};
 use std::mem;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use async_trait::async_trait;
@@ -14,6 +15,7 @@ use postgres_native_tls::MakeTlsConnector;
 use postgres_protocol::escape::escape_literal;
 use sha2::{Digest, Sha256};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::Semaphore;
 use tracing::{debug, error, info, info_span, trace, warn, Instrument};
 use {mysql_async as mysql, tokio_postgres as pgsql};
 
@@ -232,6 +234,7 @@ impl<'a> NoriaAdapter<'a> {
         table_status_tx: UnboundedSender<(Relation, TableStatus)>,
         lag_status: SharedLagStatus,
         stream_started: &AtomicBool,
+        snapshot_permits: &Arc<Semaphore>,
     ) -> ReadySetResult<!> {
         // Resnapshot when restarting the server to apply changes that may have been made to the
         // replication-tables config parameter.
@@ -316,6 +319,7 @@ impl<'a> NoriaAdapter<'a> {
                         parsing_preset,
                         table_status_tx.clone(),
                         lag_status.clone(),
+                        snapshot_permits,
                     )
                     .await
                 }
@@ -721,6 +725,7 @@ impl<'a> NoriaAdapter<'a> {
         parsing_preset: ParsingPreset,
         table_status_tx: UnboundedSender<(Relation, TableStatus)>,
         lag_status: SharedLagStatus,
+        snapshot_permits: &Arc<Semaphore>,
     ) -> ReadySetResult<!> {
         set_failpoint_return_err!(failpoints::START_INNER_POSTGRES);
 
@@ -764,8 +769,6 @@ impl<'a> NoriaAdapter<'a> {
             .map_err(|e| {
                 ReadySetError::Internal(format!("Unable to parse postgres version: {e}"))
             })?;
-
-        let max_parallel_snapshot_tables = config.max_parallel_snapshot_tables();
 
         // Allow the heartbeat table through the table filter so the WAL reader
         // doesn't drop heartbeat events before they reach handle_action.
@@ -891,7 +894,7 @@ impl<'a> NoriaAdapter<'a> {
                     //  tables we do have a replication offset for that happened while we weren't
                     //  running.
                     pos.is_none() || full_resnapshot,
-                    max_parallel_snapshot_tables,
+                    snapshot_permits,
                 )
                 .await;
 

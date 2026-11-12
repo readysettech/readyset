@@ -6,7 +6,7 @@ pub mod verify;
 
 use std::cell::OnceCell;
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::remove_dir_all;
 use std::future::Future;
 use std::io::Read;
@@ -1168,10 +1168,13 @@ impl Options {
 
     /// Check that Postgres URLs specify a database outside shallow cache mode.
     fn verify_db_names(&self) -> anyhow::Result<()> {
+        let config = &self.server_worker_options.replicator_config;
+        if !config.replication_catalogs.is_empty() {
+            self.verify_replication_catalogs()?;
+        }
         if self.cache_mode.is_shallow() {
             return Ok(());
         }
-        let config = &self.server_worker_options.replicator_config;
         for (arg, servers) in [
             ("--upstream-db-url", &config.upstream_db_url),
             ("--cdc-db-url", &config.cdc_db_url),
@@ -1182,6 +1185,43 @@ impl Options {
                     "When not in shallow cache only mode, {arg} must specify a database"
                 );
             }
+        }
+        Ok(())
+    }
+
+    fn verify_replication_catalogs(&self) -> anyhow::Result<()> {
+        let config = &self.server_worker_options.replicator_config;
+        ensure!(
+            !self.cache_mode.is_shallow(),
+            "--replication-databases is not valid in shallow cache only mode"
+        );
+        let servers = config.cdc_servers()?;
+        ensure!(
+            servers.database_type() == DatabaseType::PostgreSQL,
+            "--replication-databases requires a PostgreSQL upstream"
+        );
+        let mut catalogs = HashSet::new();
+        for catalog in &config.replication_catalogs {
+            ensure!(
+                !catalog.is_empty(),
+                "--replication-databases has an empty database"
+            );
+            ensure!(
+                Some(catalog.as_str()) != servers.db_name(),
+                "--replication-databases has the CDC URL's database {catalog}"
+            );
+            ensure!(
+                catalogs.insert(catalog),
+                "--replication-databases has database {catalog} more than once"
+            );
+        }
+        // The slots of these databases end in an underscore and an 8 character hash.
+        if let Some(server_id) = &config.replication_server_id {
+            ensure!(
+                server_id.0.len() <= 34,
+                "--replication-server-id must be 34 characters or fewer with \
+                 --replication-databases"
+            );
         }
         Ok(())
     }
@@ -3080,6 +3120,66 @@ mod tests {
             .verify_db_names()
             .unwrap_err();
         assert!(err.to_string().contains("--upstream-db-url"), "{err}");
+    }
+
+    fn options_with_catalogs(
+        cache_mode: &str,
+        upstream: &str,
+        catalogs: &str,
+        server_id: Option<&str>,
+    ) -> Options {
+        let mut args = vec![
+            "readyset",
+            "--deployment",
+            "test",
+            "--authority-address",
+            ".",
+            "--allow-unauthenticated-connections",
+            "--cache-mode",
+            cache_mode,
+            "--upstream-db-url",
+            upstream,
+            "--replication-databases",
+            catalogs,
+        ];
+        if let Some(server_id) = server_id {
+            args.extend(["--replication-server-id", server_id]);
+        }
+        Options::parse_from(args)
+    }
+
+    #[test]
+    fn replication_catalogs_checks() {
+        let pg = "postgresql://u:p@host:5432/db1"; // trufflehog:ignore
+        let mysql = "mysql://u:p@host:3306/db1"; // trufflehog:ignore
+        let id_34 = "a".repeat(34);
+        let id_35 = "a".repeat(35);
+        for mode in ["deep", "deep-then-shallow"] {
+            options_with_catalogs(mode, pg, "db2,db3", Some(&id_34))
+                .verify_db_names()
+                .unwrap();
+        }
+
+        for (opts, message) in [
+            (options_with_catalogs("shallow", pg, "db2", None), "shallow"),
+            (
+                options_with_catalogs("deep", mysql, "db2", None),
+                "PostgreSQL",
+            ),
+            (options_with_catalogs("deep", pg, "db2,", None), "empty"),
+            (options_with_catalogs("deep", pg, "db1", None), "db1"),
+            (
+                options_with_catalogs("deep", pg, "db2,db2", None),
+                "more than once",
+            ),
+            (
+                options_with_catalogs("deep", pg, "db2", Some(&id_35)),
+                "--replication-server-id",
+            ),
+        ] {
+            let err = opts.verify_db_names().unwrap_err();
+            assert!(err.to_string().contains(message), "{err}");
+        }
     }
 
     #[test]

@@ -24,7 +24,10 @@ use readyset_data::{Collation, DfValue, Dialect, TimestampTz, TinyText};
 use readyset_errors::{internal, internal_err, ReadySetError, ReadySetResult};
 use readyset_server::Builder;
 use readyset_server::NodeIndex;
-use readyset_sql::ast::{ColumnConstraint, NonReplicatedRelation, NotReplicatedReason, Relation};
+use readyset_sql::ast::{
+    ColumnConstraint, NonReplicatedRelation, NotReplicatedReason, Relation, SqlIdentifier,
+    TableExprInner,
+};
 use readyset_sql_parsing::{parse_select, ParsingPreset};
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetrySender};
 #[cfg(feature = "failure_injection")]
@@ -33,10 +36,12 @@ use readyset_util::shutdown::ShutdownSender;
 use readyset_util::{eventually, retry_with_exponential_backoff};
 use replicators::table_filter::TableFilter;
 use replicators::{
-    ControllerMessage, ControllerMessageDiscriminants, NoriaAdapter, ReplicatorMessage,
+    replication_slot_name, ControllerMessage, ControllerMessageDiscriminants, NoriaAdapter,
+    ReplicatorMessage,
 };
 use test_utils::{tags, upstream};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use tokio_postgres::error::SqlState;
 #[cfg(feature = "failure_injection")]
@@ -210,6 +215,21 @@ struct TestHandle {
 impl Drop for TestHandle {
     fn drop(&mut self) {
         if let Some(rt) = self.replication_rt.take() {
+            rt.shutdown_background();
+        }
+    }
+}
+
+/// A replicator of a catalog other than the URL's, which stops when dropped.
+struct CatalogReplicator {
+    rt: Option<tokio::runtime::Runtime>,
+    controller_rx: TestChannel,
+    _replicator_tx: UnboundedSender<ReplicatorMessage>,
+}
+
+impl Drop for CatalogReplicator {
+    fn drop(&mut self) {
+        if let Some(rt) = self.rt.take() {
             rt.shutdown_background();
         }
     }
@@ -420,6 +440,63 @@ impl TestHandle {
         server_startup: bool,
         parsing_preset: ParsingPreset,
     ) -> ReadySetResult<tokio::sync::mpsc::UnboundedSender<ReplicatorMessage>> {
+        let url = self.url.clone();
+        let (runtime, controller_rx, replicator_tx) = self
+            .spawn_repl(
+                &url,
+                None,
+                config,
+                telemetry_sender,
+                server_startup,
+                parsing_preset,
+            )
+            .await?;
+        self.controller_rx = Some(controller_rx);
+        if let Some(rt) = self.replication_rt.replace(runtime) {
+            rt.shutdown_background();
+        }
+        Ok(replicator_tx)
+    }
+
+    /// Start a replicator from `url` that puts relations in `catalog`.
+    async fn start_catalog_repl(
+        &self,
+        url: &str,
+        catalog: &str,
+        config: Option<Config>,
+        server_startup: bool,
+    ) -> ReadySetResult<CatalogReplicator> {
+        let (runtime, controller_rx, replicator_tx) = self
+            .spawn_repl(
+                url,
+                Some(catalog.into()),
+                config,
+                TelemetrySender::new_no_op(),
+                server_startup,
+                ParsingPreset::for_tests(),
+            )
+            .await?;
+        Ok(CatalogReplicator {
+            rt: Some(runtime),
+            controller_rx,
+            _replicator_tx: replicator_tx,
+        })
+    }
+
+    /// Start a replicator from `url` that puts relations in `catalog`, on a new runtime.
+    async fn spawn_repl(
+        &self,
+        url: &str,
+        catalog: Option<SqlIdentifier>,
+        config: Option<Config>,
+        telemetry_sender: TelemetrySender,
+        server_startup: bool,
+        parsing_preset: ParsingPreset,
+    ) -> ReadySetResult<(
+        tokio::runtime::Runtime,
+        TestChannel,
+        UnboundedSender<ReplicatorMessage>,
+    )> {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let controller = ReadySetHandle::new(Arc::clone(&self.authority)).await;
 
@@ -428,7 +505,6 @@ impl TestHandle {
             UnboundedSender<ReplicatorMessage>,
             UnboundedReceiver<ReplicatorMessage>,
         ) = tokio::sync::mpsc::unbounded_channel();
-        self.controller_rx = Some(controller_rx);
         let (replication_tables, replication_tables_ignore) = if let Some(config) = &config {
             (
                 config.replication_tables.as_deref(),
@@ -437,7 +513,9 @@ impl TestHandle {
         } else {
             (None, None)
         };
-        let url: DatabaseURL = self.url.parse().unwrap();
+        let upstream_db_url = vec![url.parse().unwrap()];
+        let cdc_db_url = vec![url.parse().unwrap()];
+        let url: DatabaseURL = url.parse().unwrap();
         let mut table_filter = TableFilter::try_new(
             url.dialect(),
             replication_tables,
@@ -447,18 +525,18 @@ impl TestHandle {
                 readyset_sql::Dialect::PostgreSQL => None,
             },
         )?;
-        let upstream_db_url = vec![self.url.parse().unwrap()];
-        let cdc_db_url = vec![self.url.parse().unwrap()];
+        let config = Config {
+            upstream_db_url,
+            cdc_db_url,
+            ..config.unwrap_or_default()
+        };
+        let snapshot_permits = Arc::new(Semaphore::new(config.max_parallel_snapshot_tables()));
         runtime.spawn(async move {
             let Err(error) = NoriaAdapter::start(
                 controller,
-                &Config {
-                    upstream_db_url,
-                    cdc_db_url,
-                    ..config.unwrap_or_default()
-                },
+                &config,
                 &url,
-                None,
+                catalog,
                 &mut table_filter,
                 controller_tx,
                 &mut replicator_rx,
@@ -469,6 +547,7 @@ impl TestHandle {
                 tokio::sync::mpsc::unbounded_channel().0, // sink; we don't care
                 Arc::new(RwLock::new(None)),
                 &std::sync::atomic::AtomicBool::new(false),
+                &snapshot_permits,
             )
             .await;
             error!(%error, "Error in replicator");
@@ -486,11 +565,7 @@ impl TestHandle {
             }
         });
 
-        if let Some(rt) = self.replication_rt.replace(runtime) {
-            rt.shutdown_background();
-        }
-
-        Ok(replicator_tx)
+        Ok((runtime, controller_rx, replicator_tx))
     }
 
     async fn get_results(
@@ -498,11 +573,22 @@ impl TestHandle {
         view_name: &str,
         expected_results: &[&[DfValue]],
     ) -> ReadySetResult<Vec<Vec<DfValue>>> {
+        self.get_catalog_results(None, view_name, expected_results)
+            .await
+    }
+
+    /// Wait for the rows of `public.<view_name>` in `catalog` to be `expected_results`.
+    async fn get_catalog_results(
+        &mut self,
+        catalog: Option<&str>,
+        view_name: &str,
+        expected_results: &[&[DfValue]],
+    ) -> ReadySetResult<Vec<Vec<DfValue>>> {
         eventually! {
             attempts: 40,
             sleep: Duration::from_millis(500),
             run_test: {
-                self.get_results_inner(view_name).await
+                self.get_results_inner(catalog, view_name).await
             },
             then_assert: |res| {
                 let res = res.unwrap();
@@ -512,9 +598,20 @@ impl TestHandle {
         }
     }
 
-    async fn get_results_inner(&mut self, view_name: &str) -> ReadySetResult<Vec<Vec<DfValue>>> {
-        let query_name = format!("q_{view_name}");
+    async fn get_results_inner(
+        &mut self,
+        catalog: Option<&str>,
+        view_name: &str,
+    ) -> ReadySetResult<Vec<Vec<DfValue>>> {
+        let query_name = match catalog {
+            Some(catalog) => format!("q_{catalog}_{view_name}"),
+            None => format!("q_{view_name}"),
+        };
         let select_stmt = format!("SELECT * FROM public.{view_name}");
+        let mut statement = parse_select(readyset_sql::Dialect::MySQL, select_stmt).unwrap();
+        if let TableExprInner::Table(table) = &mut statement.tables[0].inner {
+            table.catalog = catalog.map(Into::into);
+        }
         self.controller()
             .await
             .extend_recipe(ChangeList::from_changes(
@@ -528,10 +625,7 @@ impl TestHandle {
                             Some("public".into()),
                             query_name.clone().into(),
                         )),
-                        statement: Box::new(
-                            parse_select(readyset_sql::Dialect::MySQL, select_stmt.clone())
-                                .unwrap(),
-                        ),
+                        statement: Box::new(statement),
                         trx_cache_policy: readyset_sql::ast::TrxCachePolicy::Never,
                         schema_generation_used: None,
                         topk_buffer_multiplier: None,
@@ -672,8 +766,15 @@ async fn replication_test_inner(url: &str) {
 }
 
 fn pgsql_url() -> String {
+    pgsql_db_url("noria")
+}
+
+/// The catalog that multi-catalog tests replicate in addition to [`pgsql_url`]'s.
+const OTHER_CATALOG: &str = "noria_other";
+
+fn pgsql_db_url(db: &str) -> String {
     format!(
-        "postgresql://postgres:noria@{}:{}/noria",
+        "postgresql://postgres:noria@{}:{}/{db}",
         env::var("PGHOST").unwrap_or_else(|_| "127.0.0.1".into()),
         env::var("PGPORT").unwrap_or_else(|_| "5432".into()),
     )
@@ -692,6 +793,296 @@ fn mysql_url() -> String {
 #[upstream(postgres)]
 async fn pgsql_replication() {
     replication_test_inner(&pgsql_url()).await
+}
+
+/// Connect to the URL's database and to [`OTHER_CATALOG`], recreating both, and run `ddl` in each.
+async fn connect_two_catalogs(ddl: &str) -> (DbConnection, DbConnection) {
+    let mut client = DbConnection::connect(&pgsql_url()).await.unwrap();
+    let mut other_client = DbConnection::connect(&pgsql_db_url(OTHER_CATALOG))
+        .await
+        .unwrap();
+    client.query(ddl).await.unwrap();
+    other_client.query(ddl).await.unwrap();
+    (client, other_client)
+}
+
+/// Start replicating the URL's database and [`OTHER_CATALOG`], and wait for both snapshots.
+async fn start_two_catalogs(
+    config: Option<Config>,
+) -> (TestHandle, ShutdownSender, CatalogReplicator) {
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(pgsql_url(), config.clone())
+        .await
+        .unwrap();
+    let other = start_other_catalog(&ctx, config, true).await;
+    let controller_rx = ctx.controller_rx.as_mut().unwrap();
+    controller_rx.snapshot_completed().await.unwrap();
+    (ctx, shutdown_tx, other)
+}
+
+/// Start replicating [`OTHER_CATALOG`] and wait for its snapshot.
+async fn start_other_catalog(
+    ctx: &TestHandle,
+    config: Option<Config>,
+    server_startup: bool,
+) -> CatalogReplicator {
+    let url = pgsql_db_url(OTHER_CATALOG);
+    let mut other = ctx
+        .start_catalog_repl(&url, OTHER_CATALOG, config, server_startup)
+        .await
+        .unwrap();
+    other.controller_rx.snapshot_completed().await.unwrap();
+    other
+}
+
+/// Restart the replicator of the URL's database and wait for its snapshot.
+async fn restart_url_catalog(ctx: &mut TestHandle, server_startup: bool) {
+    ctx.stop_repl().await;
+    let telemetry_sender = TelemetrySender::new_no_op();
+    let parsing_preset = ParsingPreset::for_tests();
+    let replicator_tx = ctx
+        .start_repl(None, telemetry_sender, server_startup, parsing_preset)
+        .await
+        .unwrap();
+    ctx.replicator_tx = Some(replicator_tx);
+    let controller_rx = ctx.controller_rx.as_mut().unwrap();
+    controller_rx.snapshot_completed().await.unwrap();
+}
+
+async fn stop_two_catalogs(
+    clients: (DbConnection, DbConnection),
+    ctx: TestHandle,
+    shutdown_tx: ShutdownSender,
+    other: CatalogReplicator,
+) {
+    drop(other);
+    clients.0.stop().await;
+    clients.1.stop().await;
+    ctx.stop().await;
+    shutdown_tx.shutdown().await;
+}
+
+/// Same-named tables in two databases replicate into separate catalogs.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pgsql_replication_two_catalogs() {
+    readyset_tracing::init_test_logging();
+    let (mut client, mut other_client) =
+        connect_two_catalogs("CREATE TABLE t (a INT PRIMARY KEY)").await;
+    client.query("INSERT INTO t VALUES (1)").await.unwrap();
+    other_client
+        .query("INSERT INTO t VALUES (2)")
+        .await
+        .unwrap();
+
+    let (mut ctx, shutdown_tx, other) = start_two_catalogs(None).await;
+    ctx.get_results("t", &[&[DfValue::Int(1)]]).await.unwrap();
+    ctx.get_catalog_results(Some(OTHER_CATALOG), "t", &[&[DfValue::Int(2)]])
+        .await
+        .unwrap();
+
+    client.query("INSERT INTO t VALUES (10)").await.unwrap();
+    other_client
+        .query("INSERT INTO t VALUES (20)")
+        .await
+        .unwrap();
+    ctx.get_results("t", &[&[DfValue::Int(1)], &[DfValue::Int(10)]])
+        .await
+        .unwrap();
+    ctx.get_catalog_results(
+        Some(OTHER_CATALOG),
+        "t",
+        &[&[DfValue::Int(2)], &[DfValue::Int(20)]],
+    )
+    .await
+    .unwrap();
+
+    stop_two_catalogs((client, other_client), ctx, shutdown_tx, other).await;
+}
+
+/// DDL at a lower LSN than another catalog's schema replication offset applies.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pgsql_replication_two_catalogs_interleaved_ddl() {
+    readyset_tracing::init_test_logging();
+    let (mut client, mut other_client) =
+        connect_two_catalogs("CREATE TABLE t (a INT PRIMARY KEY)").await;
+    let (mut ctx, shutdown_tx, other) = start_two_catalogs(None).await;
+
+    drop(other);
+    let ddl = "CREATE TABLE t2 (a INT PRIMARY KEY); INSERT INTO t2 VALUES";
+    other_client.query(&format!("{ddl} (2)")).await.unwrap();
+    client.query(&format!("{ddl} (1)")).await.unwrap();
+    ctx.get_results("t2", &[&[DfValue::Int(1)]]).await.unwrap();
+
+    let other = start_other_catalog(&ctx, None, false).await;
+    ctx.get_catalog_results(Some(OTHER_CATALOG), "t2", &[&[DfValue::Int(2)]])
+        .await
+        .unwrap();
+
+    stop_two_catalogs((client, other_client), ctx, shutdown_tx, other).await;
+}
+
+/// Restarting without a resnapshot resumes each catalog from its own offsets.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pgsql_replication_two_catalogs_restart() {
+    readyset_tracing::init_test_logging();
+    let (mut client, mut other_client) =
+        connect_two_catalogs("CREATE TABLE t (a INT PRIMARY KEY)").await;
+    client.query("INSERT INTO t VALUES (1)").await.unwrap();
+    other_client
+        .query("INSERT INTO t VALUES (2)")
+        .await
+        .unwrap();
+    let (mut ctx, shutdown_tx, other) = start_two_catalogs(None).await;
+    ctx.get_results("t", &[&[DfValue::Int(1)]]).await.unwrap();
+    ctx.get_catalog_results(Some(OTHER_CATALOG), "t", &[&[DfValue::Int(2)]])
+        .await
+        .unwrap();
+
+    ctx.stop_repl().await;
+    drop(other);
+    client.query("INSERT INTO t VALUES (10)").await.unwrap();
+    other_client
+        .query("INSERT INTO t VALUES (20)")
+        .await
+        .unwrap();
+    restart_url_catalog(&mut ctx, false).await;
+    let other = start_other_catalog(&ctx, None, false).await;
+
+    ctx.get_results("t", &[&[DfValue::Int(1)], &[DfValue::Int(10)]])
+        .await
+        .unwrap();
+    ctx.get_catalog_results(
+        Some(OTHER_CATALOG),
+        "t",
+        &[&[DfValue::Int(2)], &[DfValue::Int(20)]],
+    )
+    .await
+    .unwrap();
+
+    stop_two_catalogs((client, other_client), ctx, shutdown_tx, other).await;
+}
+
+/// A snapshot drops leftover tables in its own catalog only.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pgsql_replication_two_catalogs_leftover_tables() {
+    readyset_tracing::init_test_logging();
+    let (mut client, mut other_client) = connect_two_catalogs("").await;
+    let ddl = "CREATE TABLE t (a INT PRIMARY KEY); INSERT INTO t VALUES";
+    client.query(&format!("{ddl} (1)")).await.unwrap();
+    let ddl = "CREATE TABLE t2 (a INT PRIMARY KEY); INSERT INTO t2 VALUES";
+    other_client.query(&format!("{ddl} (2)")).await.unwrap();
+    let (mut ctx, shutdown_tx, other) = start_two_catalogs(None).await;
+
+    drop(other);
+    let other = start_other_catalog(&ctx, None, true).await;
+    ctx.get_results("t", &[&[DfValue::Int(1)]]).await.unwrap();
+
+    restart_url_catalog(&mut ctx, true).await;
+    ctx.get_catalog_results(Some(OTHER_CATALOG), "t2", &[&[DfValue::Int(2)]])
+        .await
+        .unwrap();
+
+    stop_two_catalogs((client, other_client), ctx, shutdown_tx, other).await;
+}
+
+/// `ALTER TYPE` changes the type in its own catalog only.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pgsql_replication_two_catalogs_alter_type() {
+    readyset_tracing::init_test_logging();
+    let (mut client, mut other_client) = connect_two_catalogs(
+        "CREATE TYPE e AS ENUM ('a', 'b');
+         CREATE TABLE t (k INT PRIMARY KEY, x e);
+         INSERT INTO t VALUES (1, 'b')",
+    )
+    .await;
+    let (mut ctx, shutdown_tx, other) = start_two_catalogs(None).await;
+    let b = &[DfValue::Int(1), DfValue::from(2)];
+    ctx.get_results("t", &[b]).await.unwrap();
+    ctx.get_catalog_results(Some(OTHER_CATALOG), "t", &[b])
+        .await
+        .unwrap();
+
+    // Adding a value before 'b' moves 'b' to the third position.
+    other_client
+        .query("ALTER TYPE e ADD VALUE 'c' BEFORE 'a'")
+        .await
+        .unwrap();
+    other_client
+        .query("INSERT INTO t VALUES (2, 'c')")
+        .await
+        .unwrap();
+    client.query("INSERT INTO t VALUES (2, 'a')").await.unwrap();
+    ctx.get_catalog_results(
+        Some(OTHER_CATALOG),
+        "t",
+        &[
+            &[DfValue::Int(1), DfValue::from(3)],
+            &[DfValue::Int(2), DfValue::from(1)],
+        ],
+    )
+    .await
+    .unwrap();
+    ctx.get_results("t", &[b, &[DfValue::Int(2), DfValue::from(1)]])
+        .await
+        .unwrap();
+
+    stop_two_catalogs((client, other_client), ctx, shutdown_tx, other).await;
+}
+
+/// With heartbeats, the slot of a database without writes advances while another database has
+/// writes.
+#[tokio::test(flavor = "multi_thread")]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn pgsql_replication_two_catalogs_idle_slot_advances() {
+    readyset_tracing::init_test_logging();
+    let (mut client, other_client) =
+        connect_two_catalogs("CREATE TABLE t (a INT PRIMARY KEY)").await;
+    let config = Config {
+        status_update_interval_secs: 1,
+        replication_heartbeat: true,
+        ..Default::default()
+    };
+    let (ctx, shutdown_tx, other) = start_two_catalogs(Some(config.clone())).await;
+
+    let (upstream, connection) = tokio_postgres::connect(&pgsql_url(), tokio_postgres::NoTls)
+        .await
+        .unwrap();
+    tokio::spawn(connection);
+    let slot = replication_slot_name(&config, Some(&OTHER_CATALOG.into()));
+    let flushed_lsn = "SELECT confirmed_flush_lsn::text FROM pg_replication_slots \
+                       WHERE slot_name = $1";
+    let start: String = upstream
+        .query_one(flushed_lsn, &[&slot])
+        .await
+        .unwrap()
+        .get(0);
+    let advanced = "SELECT confirmed_flush_lsn > $2::text::pg_lsn FROM pg_replication_slots \
+                    WHERE slot_name = $1";
+    let mut row = 0;
+    eventually!(attempts: 40, sleep: Duration::from_millis(500), {
+        row += 1;
+        client
+            .query(&format!("INSERT INTO t VALUES ({row})"))
+            .await
+            .unwrap();
+        upstream
+            .query_one(advanced, &[&slot, &start])
+            .await
+            .unwrap()
+            .get::<_, bool>(0)
+    });
+
+    stop_two_catalogs((client, other_client), ctx, shutdown_tx, other).await;
 }
 
 /// Tests multiple readyset instances pointed at the same postgres upstream to verify that multiple
@@ -5836,7 +6227,7 @@ async fn mysql_compressed_transaction_flushes_group_commit() {
     // Data should NOT be visible yet — the group has 2 transactions,
     // below the max_trx threshold of 3.
     sleep(Duration::from_secs(2)).await;
-    let result = ctx.get_results_inner("gc_compress_test").await;
+    let result = ctx.get_results_inner(None, "gc_compress_test").await;
     assert!(
         result.is_err() || result.unwrap().is_empty(),
         "expected no rows before group commit flush"
@@ -6226,7 +6617,7 @@ async fn pgsql_group_commit_coalesces_transactions() {
     // timeout cannot fire and confound the test.
     let poll_deadline = Instant::now() + Duration::from_secs(3);
     while Instant::now() < poll_deadline {
-        if let Ok(rows) = ctx.get_results_inner("gc_coal_test").await {
+        if let Ok(rows) = ctx.get_results_inner(None, "gc_coal_test").await {
             assert_eq!(
                 rows.len(),
                 1,

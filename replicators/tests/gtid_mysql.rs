@@ -50,6 +50,7 @@ use replicators::table_filter::TableFilter;
 use replicators::{ControllerMessage, NoriaAdapter, ReplicatorMessage};
 use test_utils::{tags, upstream};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::Semaphore;
 use tracing::error;
 
 /// The database name used for GTID tests
@@ -284,6 +285,7 @@ impl TestHandle {
                 tokio::sync::mpsc::unbounded_channel().0, // table_status_tx sink
                 Arc::new(RwLock::new(None)),
                 &std::sync::atomic::AtomicBool::new(false),
+                &Arc::new(Semaphore::new(config.max_parallel_snapshot_tables())),
             )
             .await;
             error!(%error, "Error in replicator");

@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
 use std::future;
+use std::sync::Arc;
 use std::time::Instant;
 
 use failpoint_macros::set_failpoint;
@@ -27,6 +28,7 @@ use readyset_util::failpoints;
 use replication_offset::postgres::PostgresPosition;
 use replication_offset::ReplicationOffset;
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::Semaphore;
 use tokio_postgres as pgsql;
 use tracing::{debug, info, info_span, trace, warn, Instrument};
 
@@ -872,7 +874,7 @@ impl<'a> PostgresReplicator<'a> {
         create_schema: &mut CreateSchema,
         snapshot_report_interval_secs: u16,
         full_snapshot: bool,
-        max_parallel_snapshot_tables: usize,
+        snapshot_permits: &Arc<Semaphore>,
     ) -> ReadySetResult<()> {
         let wal_position = PostgresPosition::commit_end(replication_slot.consistent_point).into();
         self.set_snapshot(&replication_slot.snapshot_name).await?;
@@ -1127,7 +1129,7 @@ impl<'a> PostgresReplicator<'a> {
         // transaction holds onto locks for tables which we now need to load data from.
         self.transaction.take().unwrap().commit().await?;
         // Finally copy each table into noria
-        info!(tables=%tables.len(), %max_parallel_snapshot_tables, "Snapshotting tables");
+        info!(tables = %tables.len(), "Snapshotting tables");
         let mut snapshotting_tables = FuturesUnordered::new();
         for table in &tables.clone() {
             set_failpoint!(failpoints::POSTGRES_SNAPSHOT_TABLE);
@@ -1148,14 +1150,22 @@ impl<'a> PostgresReplicator<'a> {
             let snapshot_name = replication_slot.snapshot_name.clone();
             let table = table.clone();
             let table_status_tx = self.table_status_tx.clone();
-            if snapshotting_tables.len() >= max_parallel_snapshot_tables {
-                // If we're already at the max number of parallel snapshots, wait for one to finish
-                // before adding another.
-                if let Some(Err(error)) = snapshotting_tables.next().await {
-                    self.handle_table_snapshot_error(error, &mut tables).await?;
+            // Keep polling the running snapshots while waiting, since they hold the permits this
+            // replicator has taken.
+            let acquire = snapshot_permits.clone().acquire_owned();
+            tokio::pin!(acquire);
+            let permit = loop {
+                tokio::select! {
+                    permit = &mut acquire => break permit,
+                    Some(res) = snapshotting_tables.next() => {
+                        if let Err(error) = res {
+                            self.handle_table_snapshot_error(error, &mut tables).await?;
+                        }
+                    }
                 }
-            }
-            snapshotting_tables.push(Self::snapshot_table(
+            };
+            let permit = permit.map_err(|e| internal_err!("Snapshot permits closed: {e}"))?;
+            let snapshot = Self::snapshot_table(
                 pool,
                 span,
                 table,
@@ -1164,7 +1174,11 @@ impl<'a> PostgresReplicator<'a> {
                 snapshot_name,
                 &wal_position,
                 table_status_tx,
-            ))
+            );
+            snapshotting_tables.push(async move {
+                let _permit = permit;
+                snapshot.await
+            });
         }
 
         // Wait for all tables to finish snapshotting

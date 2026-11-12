@@ -258,6 +258,11 @@ impl Builder {
         self.config.replicator_config.replication_tables = tables;
     }
 
+    /// Set the catalogs to replicate in addition to the URL's catalog.
+    pub fn set_replication_catalogs(&mut self, catalogs: Vec<String>) {
+        self.config.replicator_config.replication_catalogs = catalogs;
+    }
+
     /// Require GTID-based replication for MySQL.
     pub fn set_require_gtid(&mut self, require: bool) {
         self.config.replicator_config.require_gtid = require;

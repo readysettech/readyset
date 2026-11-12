@@ -318,6 +318,8 @@ pub(crate) struct LeaderElectionResults {
     /// If we were unable to deserialize the caches from the previous controller state, we need to
     /// remake the caches for it, which will be contained in this Vec.
     cache_ddl: Option<Vec<CacheDDLRequest>>,
+    /// The catalogs replicated in addition to the URL's catalog.
+    replication_catalogs: Vec<String>,
 }
 
 /// An update on the leader election and failure detection.
@@ -643,6 +645,7 @@ impl Controller {
             AuthorityUpdate::WonLeaderElection(LeaderElectionResults {
                 controller_state: mut state,
                 cache_ddl,
+                replication_catalogs,
             }) => {
                 info!("won leader election, creating Leader");
                 gauge!(metric::CONTROLLER_IS_LEADER).set(1f64);
@@ -695,13 +698,17 @@ impl Controller {
                     .dataflow_state
                     .recipe
                     .schema_catalog(state.dataflow_state.schema_generation());
+                let replicator_config = UpstreamConfig {
+                    replication_catalogs,
+                    ..self.config.replicator_config.clone()
+                };
                 let mut leader = Leader::new(
                     state,
                     self.our_descriptor.controller_uri.clone(),
                     self.authority.clone(),
                     background_task_failed_tx,
                     self.config.replicator_statement_logging,
-                    self.config.replicator_config.clone(),
+                    replicator_config,
                     self.worker_tx.clone(),
                     self.config.background_recovery_interval,
                     self.parsing_preset,
@@ -711,7 +718,7 @@ impl Controller {
                     self.events_handle.clone(),
                 );
                 self.leader_ready.store(false, Ordering::Release);
-                self.snapshots_pending = BTreeSet::from([None]);
+                self.snapshots_pending = leader.replicated_catalogs().collect();
 
                 leader
                     .start(
@@ -1152,20 +1159,23 @@ impl Controller {
 
         let mut guard = inner.write().await;
         if let Some(ref mut leader) = *guard {
-            let Some(channel) = leader
-                .spawn_replicator(
-                    controller_tx,
-                    telemetry_sender,
-                    shutdown_rx,
-                    false, // not server_startup: skip resnapshot, resume from current position
-                )
-                .await
-            else {
-                return Err(ReadySetError::Internal(
-                    "replication could not be started; check server configuration".into(),
-                ));
-            };
-            leader.replication_channels.insert(None, channel);
+            for catalog in leader.replicated_catalogs().collect::<Vec<_>>() {
+                let Some(channel) = leader
+                    .spawn_replicator(
+                        catalog.clone(),
+                        controller_tx.clone(),
+                        telemetry_sender.clone(),
+                        shutdown_rx.clone(),
+                        false, // not server_startup: skip resnapshot, resume from current position
+                    )
+                    .await
+                else {
+                    return Err(ReadySetError::Internal(
+                        "replication could not be started; check server configuration".into(),
+                    ));
+                };
+                leader.replication_channels.insert(catalog, channel);
+            }
 
             replication_stopped.store(false, Ordering::Release);
             info!("Replication started");
@@ -1733,6 +1743,28 @@ impl AuthorityLeaderElectionState {
         Ok(())
     }
 
+    /// Return the stored catalogs replicated in addition to the URL's catalog, storing
+    /// `--replication-databases` if none are stored yet. Without replication, return none and
+    /// leave the stored value alone.
+    async fn replication_catalogs(&self) -> ReadySetResult<Vec<String>> {
+        let config = &self.config.replicator_config;
+        if !config.replication_enabled {
+            return Ok(Vec::new());
+        }
+        let stored = self
+            .authority
+            .load_or_init_replication_catalogs(config.replication_catalogs.clone())
+            .await?;
+        if BTreeSet::from_iter(&stored) != BTreeSet::from_iter(&config.replication_catalogs) {
+            warn!(
+                ?stored,
+                "Using the replicated databases stored in the Authority; \
+                 --replication-databases is ignored after the first start"
+            );
+        }
+        Ok(stored)
+    }
+
     async fn update_leader_state(&mut self) -> ReadySetResult<()> {
         let mut should_attempt_leader_election = false;
         match self.authority.try_get_leader().await? {
@@ -1801,12 +1833,14 @@ impl AuthorityLeaderElectionState {
                 res if res.is_empty() => None,
                 res => Some(res),
             };
+            let replication_catalogs = self.replication_catalogs().await?;
 
             // Notify our worker that we have won the leader election.
             self.event_tx
                 .send(AuthorityUpdate::WonLeaderElection(LeaderElectionResults {
                     controller_state: state,
                     cache_ddl,
+                    replication_catalogs,
                 }))
                 .await
                 .map_err(|_| internal_err!("failed to announce who won leader election"))?;

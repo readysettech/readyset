@@ -7,6 +7,7 @@
 )]
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::iter;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -50,10 +51,10 @@ use reqwest::Url;
 use slotmap::{DefaultKey, Key, KeyData, SlotMap};
 use tokio::select;
 use tokio::sync::mpsc::{self, UnboundedSender};
-use tokio::sync::{watch, Mutex};
+use tokio::sync::{watch, Mutex, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
-use tracing::{debug, error, info, info_span, warn};
+use tracing::{debug, error, info, info_span, warn, Instrument};
 
 use crate::controller::events::EventsHandle;
 use crate::controller::state::{DfState, DfStateHandle};
@@ -122,6 +123,8 @@ pub struct Leader {
     /// The CDC server list the replication task walks. Replaced in place by CHANGE CDC so a
     /// running task sees the new failover candidates.
     pub(super) cdc_server_list: Arc<RwLock<Option<UpstreamServers>>>,
+    /// The permits to snapshot a table, which all replication tasks share.
+    snapshot_permits: Arc<Semaphore>,
 }
 
 /// A running replication task and the state it shares with the leader.
@@ -202,17 +205,26 @@ impl Leader {
 
         // When the controller becomes the leader, we need to read updates
         // from the binlog.
-        if let Some(channel) = self
-            .spawn_replicator(
-                controller_tx,
-                telemetry_sender,
-                shutdown_rx,
-                true, // server_startup: resnapshot to capture config changes
-            )
-            .await
-        {
-            self.replication_channels.insert(None, channel);
+        for catalog in self.replicated_catalogs().collect::<Vec<_>>() {
+            if let Some(channel) = self
+                .spawn_replicator(
+                    catalog.clone(),
+                    controller_tx.clone(),
+                    telemetry_sender.clone(),
+                    shutdown_rx.clone(),
+                    true, // server_startup: resnapshot to capture config changes
+                )
+                .await
+            {
+                self.replication_channels.insert(catalog, channel);
+            }
         }
+    }
+
+    /// Return the replicated catalogs: `None` for the URL's catalog, then the others.
+    pub(super) fn replicated_catalogs(&self) -> impl Iterator<Item = Option<SqlIdentifier>> + '_ {
+        let others = self.replicator_config.replication_catalogs.iter();
+        iter::once(None).chain(others.map(|catalog| Some(catalog.as_str().into())))
     }
 
     /// Return the status of the replication channel of `catalog`.
@@ -261,17 +273,18 @@ impl Leader {
     /// connect again, and catch up from the binlog
     ///
     /// TODO: how to handle the case where we need a full new replica
-    /// Return the spawned replication task, or `None` if replication was skipped due to
-    /// configuration (disabled, no URL, etc.).
+    /// Return the spawned replication task of `catalog`, or `None` if replication was skipped
+    /// due to configuration (disabled, no URL, etc.).
     pub(super) async fn spawn_replicator(
         &self,
+        catalog: Option<SqlIdentifier>,
         controller_tx: UnboundedSender<ControllerMessage>,
         telemetry_sender: TelemetrySender,
         mut shutdown_rx: ShutdownReceiver,
         server_startup: bool,
     ) -> Option<ReplicationChannel> {
         if !self.replicator_config.replication_enabled {
-            let _ = controller_tx.send(ControllerMessage::SnapshotDone { catalog: None });
+            let _ = controller_tx.send(ControllerMessage::SnapshotDone { catalog });
             info!("Replication disabled; skipping snapshotting and replication");
             return None;
         }
@@ -284,7 +297,7 @@ impl Leader {
             // upstream.
             // Ignore the result since we will not error unless we have somehow dropped the rx half
             // of the channel
-            let _ = controller_tx.send(ControllerMessage::SnapshotDone { catalog: None });
+            let _ = controller_tx.send(ControllerMessage::SnapshotDone { catalog });
             info!("No primary instance specified");
             return None;
         }
@@ -324,6 +337,7 @@ impl Leader {
         let replicator_statement_logging = self.replicator_statement_logging;
         let parsing_preset = self.parsing_preset;
         let table_status_tx = self.table_status_tx.clone();
+        let snapshot_permits = self.snapshot_permits.clone();
         let lag_status = SharedLagStatus::default();
         let replication_lag_status = lag_status.clone();
         *self
@@ -333,6 +347,8 @@ impl Leader {
         let cdc_server_list = self.cdc_server_list.clone();
         let active_cdc_server = Arc::new(RwLock::new(None));
         let task_active_cdc_server = active_cdc_server.clone();
+
+        let span = info_span!("replicator", catalog = catalog.as_ref().map(|c| c.as_str()));
 
         let (tx, mut replicator_rx) = mpsc::unbounded_channel();
         let (stop_tx, mut stop_rx) = watch::channel(false);
@@ -367,9 +383,12 @@ impl Leader {
                     };
                     let server = selector.current(&servers).clone();
                     *active_cdc_server.write().unwrap_or_else(|e| e.into_inner()) = None;
+                    let mut url = server.url().clone();
+                    if let Some(catalog) = &catalog {
+                        url.set_db_name(catalog.to_string());
+                    }
 
-                    if let Err(error) = server
-                        .url()
+                    if let Err(error) = url
                         .connect_bounded(&verification, config.upstream_connect_timeout)
                         .await
                     {
@@ -392,7 +411,7 @@ impl Leader {
                             "Could not connect to the CDC server, will retry after timeout"
                         );
                         let _ = controller_tx.send(ControllerMessage::RecoverableError {
-                            catalog: None,
+                            catalog: catalog.clone(),
                             error: ReadySetError::ReplicationFailed(format!(
                                 "could not connect to CDC server {}: {error}",
                                 server.display()
@@ -408,7 +427,6 @@ impl Leader {
                         server = %server.display(),
                         "Connecting the replicator to the CDC server"
                     );
-                    let url = server.url().clone();
                     // The list this iteration selected from, including edits made while running.
                     let config = UpstreamConfig {
                         cdc_db_url: servers.clone().into_vec(),
@@ -427,7 +445,7 @@ impl Leader {
                         noria,
                         &config,
                         &url,
-                        None,
+                        catalog.clone(),
                         &mut table_filter,
                         &controller_tx,
                         &mut replicator_rx,
@@ -438,6 +456,7 @@ impl Leader {
                         table_status_tx.clone(),
                         replication_lag_status.clone(),
                         &stream_started,
+                        &snapshot_permits,
                     )
                     .await
                     {
@@ -470,7 +489,7 @@ impl Leader {
                             // Send the error to the controller so that we can update the replicator
                             // status
                             let _ = controller_tx.send(ControllerMessage::RecoverableError {
-                                catalog: None,
+                                catalog: catalog.clone(),
                                 error,
                             });
                             if !failover {
@@ -490,7 +509,8 @@ impl Leader {
             *stopped_cdc_server
                 .write()
                 .unwrap_or_else(|e| e.into_inner()) = None;
-        }));
+        }
+        .instrument(span)));
 
         Some(ReplicationChannel {
             tx,
@@ -851,9 +871,8 @@ impl Leader {
             (&Method::POST, "/status") => {
                 let ds = self.dataflow_state_handle.read().await;
                 let mut channels = Vec::new();
-                // Report each replicated catalog, whether or not its channel is running. Only
-                // `None` is replicated for now.
-                for catalog in [None] {
+                // Report each replicated catalog, whether or not its channel is running.
+                for catalog in self.replicated_catalogs() {
                     channels.push(
                         self.replication_channel_status(&ds, catalog, replication_stopped)
                             .await?,
@@ -1368,6 +1387,7 @@ impl Leader {
             state.dataflow_state,
             Some(events_handle),
         ));
+        let max_parallel_snapshot_tables = replicator_config.max_parallel_snapshot_tables().max(1);
 
         Leader {
             dataflow_state_handle,
@@ -1387,6 +1407,7 @@ impl Leader {
             table_status_tx,
             replication_channels: BTreeMap::new(),
             cdc_server_list: Arc::new(RwLock::new(None)),
+            snapshot_permits: Arc::new(Semaphore::new(max_parallel_snapshot_tables)),
         }
     }
 }

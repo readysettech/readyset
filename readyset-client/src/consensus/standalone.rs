@@ -622,6 +622,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn replication_catalogs_first_write_wins() {
+        let dir = tempdir().unwrap();
+        let authority = Arc::new(
+            StandaloneAuthority::new(
+                dir.path().to_str().unwrap(),
+                "replication_catalogs_first_write_wins",
+            )
+            .unwrap(),
+        );
+
+        let first = vec!["db2".to_owned(), "db3".to_owned()];
+        for bootstrap in [first.clone(), vec![]] {
+            assert_eq!(
+                authority
+                    .load_or_init_replication_catalogs(bootstrap)
+                    .await
+                    .unwrap(),
+                first
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn schema_replication_offset_round_trip() {
         let dir = tempdir().unwrap();
         let authority = Arc::new(
