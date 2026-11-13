@@ -1,6 +1,7 @@
 use std::env::current_dir;
 use std::fmt::{Display, Formatter};
 use std::fs::read_dir;
+use std::iter;
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, ensure, Error, Result};
@@ -14,8 +15,10 @@ use database_utils::{
     validate_servers, DatabaseConnection, DatabaseError, DatabaseType, DatabaseURL,
     QueryableConnection, UpstreamServers,
 };
+use readyset_client::consensus::StandaloneAuthority;
+use readyset_sql::ast::SqlIdentifier;
 use readyset_sql::Dialect;
-use replicators::{replication_slot_name, MYSQL_INTERNAL_DBS};
+use replicators::{replication_slot_name, resnapshot_slot_name, MYSQL_INTERNAL_DBS};
 
 use crate::Options;
 
@@ -318,13 +321,20 @@ async fn verify_replication(conn: &mut DatabaseConnection) -> Result<()> {
 /// are unique across the whole cluster. If a slot with the name Readyset would use already exists
 /// for a different database, Readyset cannot use it and the replicator would otherwise crash-loop
 /// on `START_REPLICATION`. Fail fast here with an actionable message instead.
-async fn verify_replication_slot(conn: &mut DatabaseConnection, options: &Options) -> Result<()> {
+///
+/// `conn` must be connected to `catalog`.
+async fn verify_replication_slot(
+    conn: &mut DatabaseConnection,
+    options: &Options,
+    catalog: Option<&SqlIdentifier>,
+) -> Result<()> {
     match conn.dialect() {
         Dialect::PostgreSQL => {}
         Dialect::MySQL => return Ok(()),
     }
 
-    let slot_name = replication_slot_name(&options.server_worker_options.replicator_config, None);
+    let config = &options.server_worker_options.replicator_config;
+    let slot_name = replication_slot_name(config, catalog);
     let row = conn
         .query(&format!(
             "SELECT database, current_database() FROM pg_replication_slots \
@@ -346,7 +356,66 @@ async fn verify_replication_slot(conn: &mut DatabaseConnection, options: &Option
         );
     }
 
-    info!("Verified replication slot");
+    info!(slot = slot_name, "Verified replication slot");
+    Ok(())
+}
+
+/// Check that the upstream has enough replication slots and wal senders for the URL's database and
+/// each of `catalogs`. Each database uses one wal sender and up to two slots, for replication and
+/// resnapshot. Slots and active wal senders that belong to anyone else count against the limits.
+async fn verify_replication_limits(
+    conn: &mut DatabaseConnection,
+    options: &Options,
+    catalogs: &[String],
+) -> Result<()> {
+    match conn.dialect() {
+        Dialect::PostgreSQL => {}
+        Dialect::MySQL => return Ok(()),
+    }
+
+    let config = &options.server_worker_options.replicator_config;
+    let catalogs: Vec<SqlIdentifier> = catalogs.iter().map(|c| c.as_str().into()).collect();
+    let own_slots = iter::once(None)
+        .chain(catalogs.iter().map(Some))
+        .flat_map(|catalog| {
+            let slot = replication_slot_name(config, catalog);
+            [resnapshot_slot_name(&slot), slot]
+        })
+        .map(|slot| format!("'{slot}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let row = conn
+        .query(&format!(
+            "SELECT current_setting('max_replication_slots')::int, \
+             current_setting('max_wal_senders')::int, \
+             (SELECT count(*)::int FROM pg_replication_slots WHERE slot_name NOT IN ({own_slots})), \
+             (SELECT count(*)::int FROM pg_stat_replication r WHERE NOT EXISTS \
+              (SELECT 1 FROM pg_replication_slots s \
+               WHERE s.active_pid = r.pid AND s.slot_name IN ({own_slots})))"
+        ))
+        .await
+        .and_then(|rows| rows.into_iter().get_single_row())
+        .map_err(|e| anyhow!("Failed to query replication limits: {e}"))?;
+    let max_slots: i32 = row.get(0)?;
+    let max_senders: i32 = row.get(1)?;
+    let other_slots: i32 = row.get(2)?;
+    let other_senders: i32 = row.get(3)?;
+
+    // The URL's database is not in `catalogs`.
+    let databases = catalogs.len() as i32 + 1;
+    let needed = 2 * databases;
+    ensure!(
+        max_slots - other_slots >= needed,
+        "Upstream max_replication_slots is {max_slots} with {other_slots} slots used by others, \
+         but Readyset needs {needed}"
+    );
+    ensure!(
+        max_senders - other_senders >= databases,
+        "Upstream max_wal_senders is {max_senders} with {other_senders} used by others, but \
+         Readyset needs {databases}"
+    );
+
+    info!("Verified replication limits");
     Ok(())
 }
 
@@ -393,7 +462,9 @@ async fn verify_permissions(conn: &mut DatabaseConnection, options: &Options) ->
     Ok(())
 }
 
-async fn verify_disk_space(conn: &mut DatabaseConnection, options: &Options) -> Result<()> {
+/// Check that the storage directory has room to snapshot the databases of `conns`. The first
+/// connection is to the URL's database.
+async fn verify_disk_space(conns: &mut [DatabaseConnection], options: &Options) -> Result<()> {
     let config = &options.server_worker_options.replicator_config;
     if config.replication_tables.is_some() || config.replication_tables_ignore.is_some() {
         // Don't try to figure out required space if specific tables are asked for.
@@ -403,7 +474,11 @@ async fn verify_disk_space(conn: &mut DatabaseConnection, options: &Options) -> 
     let deployment_dir = options
         .server_worker_options
         .storage_dir(&options.deployment);
-    if read_dir(&deployment_dir).is_ok_and(|mut files| files.next().is_some()) {
+    // The standalone Authority opens its store in the deployment directory before verification.
+    let authority = StandaloneAuthority::db_path(&deployment_dir, &options.deployment);
+    if read_dir(&deployment_dir)
+        .is_ok_and(|mut files| files.any(|f| !f.is_ok_and(|f| f.path() == authority)))
+    {
         info!("Verified disk space for snapshot (files already exist)");
         return Ok(());
     }
@@ -437,22 +512,26 @@ async fn verify_disk_space(conn: &mut DatabaseConnection, options: &Options) -> 
             anyhow!("Could not find mountpoint containing storage directory {display}")
         })?;
 
-    let query = match conn.dialect() {
-        Dialect::MySQL => &format!(
-            "SELECT COALESCE(SUM(data_length), 0) FROM information_schema.tables \
-               WHERE table_schema NOT IN ({})",
-            MYSQL_INTERNAL_DBS
-                .iter()
-                .map(|db| format!("'{db}'"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        Dialect::PostgreSQL => "SELECT pg_database_size(current_database())",
-    };
-    let estimated_bytes: i64 = query_one_value(conn, query)
-        .await
-        .map_err(|e| anyhow!("Failed to query estimated snapshot size: {e}"))?;
-    let estimated_bytes = estimated_bytes as u64 * DISK_SPACE_REQUIREMENT_FACTOR;
+    let mut estimated_bytes = 0;
+    for conn in conns.iter_mut() {
+        let query = match conn.dialect() {
+            Dialect::MySQL => &format!(
+                "SELECT COALESCE(SUM(data_length), 0) FROM information_schema.tables \
+                   WHERE table_schema NOT IN ({})",
+                MYSQL_INTERNAL_DBS
+                    .iter()
+                    .map(|db| format!("'{db}'"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            Dialect::PostgreSQL => "SELECT pg_database_size(current_database())",
+        };
+        let bytes: i64 = query_one_value(conn, query)
+            .await
+            .map_err(|e| anyhow!("Failed to query estimated snapshot size: {e}"))?;
+        estimated_bytes += bytes as u64;
+    }
+    let estimated_bytes = estimated_bytes * DISK_SPACE_REQUIREMENT_FACTOR;
     let free_bytes = disk.available_space();
     ensure!(
         free_bytes > estimated_bytes,
@@ -524,12 +603,27 @@ pub async fn verify(options: &Options) -> Result<()> {
         } else {
             None
         };
-        if let Some(mut conn) = conn {
+        let catalogs = add_err!(options.replication_catalogs().await).unwrap_or_default();
+        if let (Some(verification), Some(cdc_url), Some(mut conn)) = (&verification, &cdc_url, conn)
+        {
             add_err!(verify_version(&mut conn).await);
             add_err!(verify_replication(&mut conn).await);
-            add_err!(verify_replication_slot(&mut conn, options).await);
+            add_err!(verify_replication_slot(&mut conn, options, None).await);
             add_err!(verify_permissions(&mut conn, options).await);
-            add_err!(verify_disk_space(&mut conn, options).await);
+            add_err!(verify_replication_limits(&mut conn, options, &catalogs).await);
+            let mut conns = vec![conn];
+            for catalog in &catalogs {
+                let mut url = cdc_url.clone();
+                url.set_db_name(catalog.clone());
+                let name = format!("CDC (database {catalog})");
+                let conn = add_err!(verify_connection(&url, verification, Some(&name)).await);
+                if let Some(mut conn) = conn {
+                    let catalog = SqlIdentifier::from(catalog.as_str());
+                    add_err!(verify_replication_slot(&mut conn, options, Some(&catalog)).await);
+                    conns.push(conn);
+                }
+            }
+            add_err!(verify_disk_space(&mut conns, options).await);
         }
     }
 
@@ -537,5 +631,158 @@ pub async fn verify(options: &Options) -> Result<()> {
         Ok(())
     } else {
         Err(Errors(errors).into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::env;
+
+    use clap::Parser;
+    use temp_dir::TempDir;
+    use test_utils::{tags, upstream};
+    use tokio_postgres::NoTls;
+
+    use super::*;
+
+    /// The database replicated in addition to the URL's database.
+    const OTHER_DB: &str = "noria_other";
+
+    fn pgsql_url(db: &str) -> String {
+        format!(
+            "postgresql://postgres:noria@{}:{}/{db}",
+            env::var("PGHOST").unwrap_or_else(|_| "127.0.0.1".into()),
+            env::var("PGPORT").unwrap_or_else(|_| "5432".into()),
+        )
+    }
+
+    /// Connect to the URL's database, and create [`OTHER_DB`] if it is missing.
+    async fn connect_creating_other_db() -> tokio_postgres::Client {
+        let (client, conn) = tokio_postgres::connect(&pgsql_url("noria"), NoTls)
+            .await
+            .unwrap();
+        tokio::spawn(conn);
+        let exists: bool = client
+            .query_one(
+                "SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)",
+                &[&OTHER_DB],
+            )
+            .await
+            .unwrap()
+            .get(0);
+        if !exists {
+            client
+                .simple_query(&format!("CREATE DATABASE {OTHER_DB}"))
+                .await
+                .unwrap();
+        }
+        client
+    }
+
+    /// Options that replicate the URL's database and `databases`. `server_id` must be unique to
+    /// the test.
+    fn options(dir: &TempDir, server_id: &str, databases: &str) -> Options {
+        Options::try_parse_from([
+            "readyset",
+            "--deployment",
+            server_id,
+            "--authority",
+            "standalone",
+            "--storage-dir",
+            dir.path().to_str().unwrap(),
+            "--upstream-db-url",
+            &pgsql_url("noria"),
+            "--allow-unauthenticated-connections",
+            "--cache-mode",
+            "deep",
+            "--replication-server-id",
+            server_id,
+            "--replication-databases",
+            databases,
+        ])
+        .unwrap()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[tags(serial)]
+    #[upstream(postgres)]
+    async fn verify_two_databases() {
+        connect_creating_other_db().await;
+        let dir = TempDir::new().unwrap();
+        verify(&options(&dir, "verify_two", OTHER_DB))
+            .await
+            .unwrap();
+    }
+
+    /// A slot with the other database's slot name that belongs to the URL's database fails.
+    #[tokio::test(flavor = "multi_thread")]
+    #[tags(serial)]
+    #[upstream(postgres)]
+    async fn verify_other_database_slot_in_wrong_database() {
+        let client = connect_creating_other_db().await;
+        let dir = TempDir::new().unwrap();
+        let options = options(&dir, "verify_wrong_db", OTHER_DB);
+        let config = &options.server_worker_options.replicator_config;
+        let slot = replication_slot_name(config, Some(&OTHER_DB.into()));
+        client
+            .execute(
+                "SELECT pg_create_logical_replication_slot($1, 'pgoutput')",
+                &[&slot],
+            )
+            .await
+            .unwrap();
+
+        let result = verify(&options).await;
+        client
+            .execute("SELECT pg_drop_replication_slot($1)", &[&slot])
+            .await
+            .unwrap();
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains(&format!("Replication slot \"{slot}\"")),
+            "{err}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[tags(serial)]
+    #[upstream(postgres)]
+    async fn verify_missing_database() {
+        connect_creating_other_db().await;
+        let dir = TempDir::new().unwrap();
+        let options = options(&dir, "verify_missing", "noria_verify_missing");
+        let err = verify(&options).await.unwrap_err().to_string();
+        assert!(
+            err.contains("Failed to establish CDC (database noria_verify_missing) connection"),
+            "{err}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[tags(serial)]
+    #[upstream(postgres)]
+    async fn verify_limits() {
+        let client = connect_creating_other_db().await;
+        let max_slots: String = client
+            .query_one("SHOW max_replication_slots", &[])
+            .await
+            .unwrap()
+            .get(0);
+        let max_slots: usize = max_slots.parse().unwrap();
+        let dir = TempDir::new().unwrap();
+        let options = options(&dir, "verify_limits", OTHER_DB);
+        let verification = verify_tls(&options).await.unwrap();
+        let url: DatabaseURL = pgsql_url("noria").parse().unwrap();
+        let mut conn = url.connect(&verification).await.unwrap();
+
+        verify_replication_limits(&mut conn, &options, &[OTHER_DB.into()])
+            .await
+            .unwrap();
+        let catalogs: Vec<String> = (0..max_slots).map(|i| format!("db{i}")).collect();
+        let err = verify_replication_limits(&mut conn, &options, &catalogs)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("max_replication_slots"), "{err}");
     }
 }

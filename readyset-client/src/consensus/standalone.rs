@@ -11,7 +11,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -62,6 +62,14 @@ pub struct StandaloneAuthority {
 }
 
 impl StandaloneAuthority {
+    /// Return the path of the database that [`StandaloneAuthority::new`] opens for `deployment` in
+    /// the directory `path`.
+    pub fn db_path(path: &Path, deployment: &str) -> PathBuf {
+        let mut path = path.join(deployment);
+        path.set_extension("auth");
+        path
+    }
+
     pub fn new(path: &str, deployment: &str) -> Result<Self, Error> {
         let mut db_store = SHARED_STORE.get_or_init(Default::default).lock();
         // Open or create a database at path, with the name ${deployment}.auth. This will ensure
@@ -70,12 +78,11 @@ impl StandaloneAuthority {
         let state = match db_store.entry(deployment.to_string()) {
             Entry::Occupied(e) => e.get().clone(),
             Entry::Vacant(e) => {
-                let mut path: PathBuf = path.into();
+                let path: PathBuf = path.into();
                 if !path.is_dir() {
                     std::fs::create_dir_all(&path)?;
                 }
-                path.push(deployment);
-                path.set_extension("auth");
+                let path = Self::db_path(&path, deployment);
 
                 let mut options = rocksdb::Options::default();
                 options.create_if_missing(true);
