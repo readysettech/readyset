@@ -164,6 +164,15 @@ pub const ESTIMATED_BASE_TABLE_SIZE_BYTES: &str = "readyset_base_tables_estimate
 /// | cache_name | The name of the cache associated with this replay.
 pub const BASE_TABLE_LOOKUP_REQUESTS: &str = "readyset_base_table.lookup_requests";
 
+/// Counter: The number of index lookups a base table's replays make with a filter node's constants
+/// in front of the requested keys.
+///
+/// | Tag | Description |
+/// | --- | ----------- |
+/// | table_name | The name of the base table. |
+/// | cache_name | The name of the cache associated with this replay.
+pub const BASE_TABLE_CONSTANT_LOOKUPS: &str = "readyset_base_table.constant_lookups";
+
 /// Counter: The number of packets dropped by an egress node.
 pub const EGRESS_NODE_DROPPED_PACKETS: &str = "readyset_egress.dropped_packets";
 

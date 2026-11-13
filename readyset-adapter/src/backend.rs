@@ -980,7 +980,8 @@ where
             "path",
             "trigger_type",
             "trigger_index",
-            "trigger_source_options"
+            "trigger_source_options",
+            "constants"
         );
 
         // Convert each ReplayPathInfo into a row
@@ -1000,6 +1001,7 @@ where
                     info.trigger_type.into(),
                     info.trigger_index.unwrap_or_default().into(),
                     info.trigger_source_options.into(),
+                    info.constants.unwrap_or_default().into(),
                 ]
             })
             .collect();

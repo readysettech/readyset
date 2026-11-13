@@ -26,4 +26,7 @@ pub struct ReplayPathInfo {
     pub trigger_index: Option<String>,
     /// Trigger source/options (e.g., "AllShards(2), options: [Domain 1]")
     pub trigger_source_options: String,
+    /// The index the source reads and the filter constants it puts in front of each key (e.g.,
+    /// "HashMap[2, 1] by (2), (3)")
+    pub constants: Option<String>,
 }

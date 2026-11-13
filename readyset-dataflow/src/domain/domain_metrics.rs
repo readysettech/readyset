@@ -175,6 +175,22 @@ impl DomainMetrics {
             .increment(1);
         }
     }
+
+    pub(super) fn inc_base_table_constant_lookups(
+        &mut self,
+        cache_name: &Relation,
+        table_name: &Relation,
+        lookups: usize,
+    ) {
+        if self.verbose {
+            counter!(
+                metric::BASE_TABLE_CONSTANT_LOOKUPS,
+                "cache_name" => cache_name_to_string(cache_name),
+                "table_name" => cache_name_to_string(table_name)
+            )
+            .increment(lookups as u64);
+        }
+    }
 }
 
 /// Converts the given cache_name to a string by invoking `display_unquoted()`. This method should

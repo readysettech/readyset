@@ -581,6 +581,7 @@ impl<'a> Plan<'a> {
                     path: locals,
                     notify_done: false,
                     trigger: TriggerEndpoint::None,
+                    constants: None,
                 };
 
                 // the first domain also gets to know source node

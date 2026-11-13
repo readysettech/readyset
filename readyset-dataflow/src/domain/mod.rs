@@ -1,6 +1,7 @@
 pub(crate) mod channel;
 mod domain_metrics;
 mod remapped_keys;
+mod replay_constants;
 pub mod replay_paths;
 
 use remapped_keys::RemappedKeys;
@@ -60,6 +61,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{Instrument, debug, error, info, info_span, trace, warn};
 use vec1::Vec1;
 
+pub use self::replay_constants::ReplayConstants;
 use self::replay_paths::{Destination, ReplayPathSpec, ReplayPaths, Target};
 pub use self::replay_paths::{ReplayPath, ReplayPathWithContext};
 use crate::domain::NodeOperator::Join;
@@ -2142,6 +2144,7 @@ impl Domain {
         path: Vec1<ReplayPathSegment>,
         notify_done: bool,
         trigger: crate::payload::TriggerEndpoint,
+        constants: Option<ReplayConstants>,
     ) -> ReadySetResult<Option<Vec<u8>>> {
         if notify_done {
             debug!(
@@ -2149,6 +2152,7 @@ impl Domain {
                 ?source,
                 ?source_index,
                 path = %PrettyReplayPath(&path),
+                ?constants,
                 "told about terminating replay path",
             );
             // NOTE: we set self.replaying_to when we first receive a replay with
@@ -2159,6 +2163,7 @@ impl Domain {
                 ?source,
                 ?source_index,
                 path = %PrettyReplayPath(&path),
+                ?constants,
                 "told about replay path"
             );
         }
@@ -2181,6 +2186,7 @@ impl Domain {
             path,
             notify_done,
             trigger,
+            constants,
         })?;
         Ok(None)
     }
@@ -2734,9 +2740,16 @@ impl Domain {
                 path,
                 notify_done,
                 trigger,
-            } => {
-                self.handle_setup_replay_path(tag, source, source_index, path, notify_done, trigger)
-            }
+                constants,
+            } => self.handle_setup_replay_path(
+                tag,
+                source,
+                source_index,
+                path,
+                notify_done,
+                trigger,
+                constants,
+            ),
             DomainRequest::StartReplay {
                 tag,
                 from,
@@ -2771,6 +2784,7 @@ impl Domain {
                                 path: path.path.clone(),
                                 notify_done: path.notify_done,
                                 trigger: path.trigger.clone(),
+                                constants: path.constants.clone(),
                             },
                         )
                     })
@@ -2882,7 +2896,7 @@ impl Domain {
         tag: Tag,
         keys: Vec<KeyComparison>,
     ) -> ReadySetResult<()> {
-        let (src, index, dst) = self.lookup_replay(tag)?;
+        let (src, index, dst, _) = Self::lookup_replay(&self.replay_paths, tag)?;
         let Some(node) = Self::get_node(&self.nodes, src)? else {
             return Ok(());
         };
@@ -3303,21 +3317,30 @@ impl Domain {
         Ok((seeded, found_keys, replay_keys))
     }
 
-    // returns (src, index, dst)
-    fn lookup_replay(&self, tag: Tag) -> ReadySetResult<(LocalNodeIndex, Index, LocalNodeIndex)> {
-        match &self.replay_paths[tag] {
+    // returns (src, index, dst, constants)
+    fn lookup_replay(
+        paths: &ReplayPaths,
+        tag: Tag,
+    ) -> ReadySetResult<(
+        LocalNodeIndex,
+        Index,
+        LocalNodeIndex,
+        Option<&ReplayConstants>,
+    )> {
+        match &paths[tag] {
             ReplayPath {
                 source: Some(src),
                 trigger: TriggerEndpoint::Start(index) | TriggerEndpoint::Local(index),
                 path,
+                constants,
                 ..
-            } => Ok((*src, index.clone(), path[0].node)),
+            } => Ok((*src, index.clone(), path[0].node, constants.as_ref())),
             _ => internal!(),
         }
     }
 
     fn seed_all(&mut self, ex: &mut dyn Executor, pkt: RequestPartialReplay) -> ReadySetResult<()> {
-        let (src, index, dst) = self.lookup_replay(pkt.tag)?;
+        let (src, index, dst, constants) = Self::lookup_replay(&self.replay_paths, pkt.tag)?;
         let Some(node) = Self::get_node(&self.nodes, src)? else {
             return Ok(());
         };
@@ -3332,11 +3355,26 @@ impl Domain {
         if node.is_base() {
             self.metrics
                 .inc_base_table_lookups(&pkt.cache_name, node.name());
+            if let Some(constants) = constants {
+                let lookups = constants.lookups_per_key() * pkt.keys.len();
+                self.metrics
+                    .inc_base_table_constant_lookups(&pkt.cache_name, node.name(), lookups);
+            }
         }
         drop(node);
 
         let keys = pkt.keys.into_iter().collect();
-        let (records, found_keys, replay_keys) = self.do_lookup(state, src, &index, keys)?;
+        let (records, found_keys, replay_keys) = match constants {
+            // Look up each key once per combination of the constants
+            Some(constants) => {
+                let prefixed = constants.prefixed_keys(&keys);
+                let (records, ..) = self.do_lookup(state, src, constants.index(), prefixed)?;
+                // Only a base table gets constants, and a base table has all its rows, so nothing
+                // misses and all requested keys count as found
+                (records, keys, HashSet::new())
+            }
+            None => self.do_lookup(state, src, &index, keys)?,
+        };
 
         if !replay_keys.is_empty() {
             trace!(%pkt.tag, ?replay_keys, "replay request miss");

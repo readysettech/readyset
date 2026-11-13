@@ -9,7 +9,7 @@ use readyset_client::internal::LocalNodeIndex;
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;
 
-use super::{RemappedKeys, TriggerEndpoint};
+use super::{RemappedKeys, ReplayConstants, TriggerEndpoint};
 use crate::NodeMap;
 use crate::prelude::*;
 
@@ -31,19 +31,23 @@ pub struct ReplayPath {
     pub(super) path: Vec1<ReplayPathSegment>,
     pub(super) notify_done: bool,
     pub(super) trigger: TriggerEndpoint,
+    /// The constants the source puts in front of each key, if it is a base table followed by a
+    /// filter node with constants
+    pub(super) constants: Option<ReplayConstants>,
 }
 
 impl fmt::Display for ReplayPath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "ReplayPath {{ source: {:?}, destination_index: {:?}, target_index: {:?}, path: {:?}, notify_done: {:?}, trigger: {:?} }}",
+            "ReplayPath {{ source: {:?}, destination_index: {:?}, target_index: {:?}, path: {:?}, notify_done: {:?}, trigger: {:?}, constants: {:?} }}",
             self.source,
             self.destination_index,
             self.target_index,
             self.path,
             self.notify_done,
-            self.trigger
+            self.trigger,
+            self.constants.as_ref().map(ToString::to_string)
         )
     }
 }
@@ -88,6 +92,7 @@ impl From<ReplayPathWithContext> for readyset_client::replay_path::ReplayPathInf
             trigger_type: ctx.path.trigger.to_string(),
             trigger_index: ctx.path.trigger.trigger_index(),
             trigger_source_options: ctx.path.trigger.trigger_source_options(),
+            constants: ctx.path.constants.as_ref().map(ToString::to_string),
         }
     }
 }
@@ -119,6 +124,7 @@ pub(super) struct ReplayPathSpec {
     pub(super) path: Vec1<ReplayPathSegment>,
     pub(super) notify_done: bool,
     pub(super) trigger: TriggerEndpoint,
+    pub(super) constants: Option<ReplayConstants>,
 }
 
 /// Information about the source of some generated columns in a node
@@ -375,6 +381,7 @@ impl ReplayPaths {
             path,
             notify_done,
             trigger,
+            constants,
         } = path;
 
         let target_index = if let TriggerEndpoint::End { .. } | TriggerEndpoint::Local(..) = trigger
@@ -423,6 +430,7 @@ impl ReplayPaths {
                 path,
                 notify_done,
                 trigger,
+                constants,
             },
         );
 
@@ -486,6 +494,7 @@ mod tests {
                 }],
                 notify_done: false,
                 trigger: TriggerEndpoint::Local(Index::hash_map(vec![0])),
+                constants: None,
             })
             .unwrap();
 
@@ -514,6 +523,7 @@ mod tests {
                 }],
                 notify_done: false,
                 trigger: TriggerEndpoint::Local(Index::hash_map(vec![0])),
+                constants: None,
             })
             .unwrap();
 

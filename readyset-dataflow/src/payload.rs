@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use strum::{EnumCount, EnumDiscriminants, EnumIter, IntoStaticStr};
 use vec1::Vec1;
 
+use crate::domain::ReplayConstants;
 use crate::node::Column;
 use crate::prelude::*;
 
@@ -340,6 +341,9 @@ pub enum DomainRequest {
         path: Vec1<ReplayPathSegment>,
         notify_done: bool,
         trigger: TriggerEndpoint,
+        /// The constants the source puts in front of each key, if it is a base table followed by
+        /// a filter node with constants
+        constants: Option<ReplayConstants>,
     },
 
     /// Instruct domain to replay the state of a particular node along an existing replay path,
