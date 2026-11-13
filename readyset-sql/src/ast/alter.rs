@@ -535,6 +535,8 @@ pub struct ChangeUpstreamStatement {
 pub struct SetReplicationPositionStatement {
     /// The replication position string (e.g. "mysql-bin.000003:154" or "0/16B3748").
     pub position: String,
+    /// The replication channel the statement applies to.
+    pub channel: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
@@ -626,6 +628,14 @@ pub struct DropUserStatement {
     pub user: SqlIdentifier,
 }
 
+/// Display a ` FOR CHANNEL '<name>'` clause, or nothing when `channel` is `None`.
+fn for_channel(channel: &Option<String>) -> impl fmt::Display + '_ {
+    fmt_with(move |f| match channel {
+        Some(channel) => write!(f, " FOR CHANNEL '{}'", channel.replace('\'', "''")),
+        None => Ok(()),
+    })
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Arbitrary)]
 pub enum AlterReadysetStatement {
     ResnapshotTable(ResnapshotTableStatement),
@@ -636,8 +646,14 @@ pub enum AlterReadysetStatement {
     SetLogLevel(String),
     SetEviction(SetEviction),
     ChangeUpstream(ChangeUpstreamStatement),
-    StopReplication,
-    StartReplication,
+    StopReplication {
+        /// The replication channel the statement applies to.
+        channel: Option<String>,
+    },
+    StartReplication {
+        /// The replication channel the statement applies to.
+        channel: Option<String>,
+    },
     SetReplicationPosition(SetReplicationPositionStatement),
     ChangeCdc(ChangeCdcStatement),
     ShallowCacheAllowlistChange(ShallowCacheAllowlistChange),
@@ -689,14 +705,19 @@ impl DialectDisplay for AlterReadysetStatement {
             Self::ChangeUpstream(stmt) => {
                 write!(f, "CHANGE UPSTREAM TO '{}'", stmt.url)
             }
-            Self::StopReplication => {
-                write!(f, "STOP REPLICATION")
+            Self::StopReplication { channel } => {
+                write!(f, "STOP REPLICATION{}", for_channel(channel))
             }
-            Self::StartReplication => {
-                write!(f, "START REPLICATION")
+            Self::StartReplication { channel } => {
+                write!(f, "START REPLICATION{}", for_channel(channel))
             }
             Self::SetReplicationPosition(stmt) => {
-                write!(f, "SET REPLICATION POSITION '{}'", stmt.position)
+                write!(
+                    f,
+                    "SET REPLICATION POSITION '{}'{}",
+                    stmt.position,
+                    for_channel(&stmt.channel)
+                )
             }
             Self::ChangeCdc(stmt) => {
                 write!(f, "CHANGE CDC TO '{}'", stmt.url)

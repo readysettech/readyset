@@ -481,8 +481,9 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
                 ReadysetKeyword::Standard(Keyword::REPLICATION),
             ],
         ) {
+            let channel = parse_for_channel(parser)?;
             Ok(SqlQuery::AlterReadySet(
-                AlterReadysetStatement::StopReplication,
+                AlterReadysetStatement::StopReplication { channel },
             ))
         } else if parse_readyset_keywords(
             parser,
@@ -491,8 +492,9 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
                 ReadysetKeyword::Standard(Keyword::REPLICATION),
             ],
         ) {
+            let channel = parse_for_channel(parser)?;
             Ok(SqlQuery::AlterReadySet(
-                AlterReadysetStatement::StartReplication,
+                AlterReadysetStatement::StartReplication { channel },
             ))
         } else if parse_readyset_keywords(
             parser,
@@ -503,9 +505,11 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
         ) {
             parser.expect_keyword(Keyword::POSITION)?;
             let position = parser.parse_literal_string()?;
+            let channel = parse_for_channel(parser)?;
             Ok(SqlQuery::AlterReadySet(
                 AlterReadysetStatement::SetReplicationPosition(SetReplicationPositionStatement {
                     position,
+                    channel,
                 }),
             ))
         } else if parse_readyset_keywords(
@@ -602,6 +606,15 @@ fn parse_alter(parser: &mut Parser, dialect: Dialect) -> Result<SqlQuery, Readys
         parse_alter_mcp_token_body(parser)
     } else {
         Ok(parser.parse_alter()?.try_into_dialect(dialect)?)
+    }
+}
+
+/// Parse an optional `FOR CHANNEL '<name>'` clause.
+fn parse_for_channel(parser: &mut Parser) -> Result<Option<String>, ReadysetParsingError> {
+    if parser.parse_keywords(&[Keyword::FOR, Keyword::CHANNEL]) {
+        Ok(Some(parser.parse_literal_string()?))
+    } else {
+        Ok(None)
     }
 }
 

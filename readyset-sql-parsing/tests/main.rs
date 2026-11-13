@@ -16,6 +16,7 @@ mod hint_parsing;
 mod mcp_token;
 mod nom_regressions;
 mod parity;
+mod replication_channel;
 mod roundtrip;
 mod shallow_allowlist;
 mod unsigned_numeric;

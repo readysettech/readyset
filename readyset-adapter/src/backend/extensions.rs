@@ -39,8 +39,8 @@ use readyset_sql::ast::{
     CreateMcpTokenStatement, DropAllCachesStatement, DropMcpTokenStatement, DropUserStatement,
     ExplainStatement, FlushCacheStatement, McpTokenExpiresChange,
     McpTokenScope as ParserMcpTokenScope, ModifyUserAction, ModifyUserStatement,
-    ProxiedQueriesOptions, Relation, ShallowCacheAllowlistChange, ShallowCacheAllowlistKind,
-    ShowStatement, SqlIdentifier, SqlQuery, TrxCachePolicy,
+    ProxiedQueriesOptions, Relation, SetReplicationPositionStatement, ShallowCacheAllowlistChange,
+    ShallowCacheAllowlistKind, ShowStatement, SqlIdentifier, SqlQuery, TrxCachePolicy,
 };
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_passes::DetectBucketFunctions;
@@ -2102,10 +2102,18 @@ where
             SqlQuery::AlterReadySet(AlterReadysetStatement::ChangeUpstream(
                 ChangeUpstreamStatement { url },
             )) => Self::change_upstream(settings, state, &mut connectors.noria, url).await,
-            SqlQuery::AlterReadySet(AlterReadysetStatement::StopReplication) => {
+            SqlQuery::AlterReadySet(
+                AlterReadysetStatement::StopReplication { channel: Some(_) }
+                | AlterReadysetStatement::StartReplication { channel: Some(_) }
+                | AlterReadysetStatement::SetReplicationPosition(SetReplicationPositionStatement {
+                    channel: Some(_),
+                    ..
+                }),
+            ) => unsupported!("FOR CHANNEL is not supported"),
+            SqlQuery::AlterReadySet(AlterReadysetStatement::StopReplication { channel: None }) => {
                 connectors.noria.stop_replication().await
             }
-            SqlQuery::AlterReadySet(AlterReadysetStatement::StartReplication) => {
+            SqlQuery::AlterReadySet(AlterReadysetStatement::StartReplication { channel: None }) => {
                 connectors.noria.start_replication().await
             }
             SqlQuery::AlterReadySet(AlterReadysetStatement::SetReplicationPosition(stmt)) => {

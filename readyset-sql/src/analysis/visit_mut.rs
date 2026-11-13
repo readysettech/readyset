@@ -1289,8 +1289,8 @@ pub fn walk_alter_readyset_statement<'a, V: VisitorMut<'a>>(
         | AlterReadysetStatement::SetLogLevel(_)
         | AlterReadysetStatement::SetEviction(_)
         | AlterReadysetStatement::ChangeUpstream(_)
-        | AlterReadysetStatement::StopReplication
-        | AlterReadysetStatement::StartReplication
+        | AlterReadysetStatement::StopReplication { .. }
+        | AlterReadysetStatement::StartReplication { .. }
         | AlterReadysetStatement::SetReplicationPosition(_)
         | AlterReadysetStatement::ChangeCdc(_)
         | AlterReadysetStatement::AddUser(_)

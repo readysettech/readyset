@@ -513,7 +513,7 @@ pub fn stop_replication_statement(
         let (i, _) = tag_no_case("replication")(i)?;
         let (i, _) = statement_terminator(i)?;
 
-        Ok((i, AlterReadysetStatement::StopReplication))
+        Ok((i, AlterReadysetStatement::StopReplication { channel: None }))
     }
 }
 
@@ -525,7 +525,10 @@ pub fn start_replication_statement(
         let (i, _) = tag_no_case("replication")(i)?;
         let (i, _) = statement_terminator(i)?;
 
-        Ok((i, AlterReadysetStatement::StartReplication))
+        Ok((
+            i,
+            AlterReadysetStatement::StartReplication { channel: None },
+        ))
     }
 }
 
@@ -546,6 +549,7 @@ pub fn set_replication_position_statement(
             i,
             AlterReadysetStatement::SetReplicationPosition(SetReplicationPositionStatement {
                 position,
+                channel: None,
             }),
         ))
     }
@@ -1859,14 +1863,20 @@ mod tests {
         fn alter_readyset_stop_replication() {
             let qstring = b"ALTER READYSET STOP REPLICATION;";
             let res = test_parse!(alter_readyset_statement(Dialect::PostgreSQL), qstring);
-            assert_eq!(res, AlterReadysetStatement::StopReplication);
+            assert_eq!(
+                res,
+                AlterReadysetStatement::StopReplication { channel: None }
+            );
         }
 
         #[test]
         fn alter_readyset_start_replication() {
             let qstring = b"ALTER READYSET START REPLICATION;";
             let res = test_parse!(alter_readyset_statement(Dialect::PostgreSQL), qstring);
-            assert_eq!(res, AlterReadysetStatement::StartReplication);
+            assert_eq!(
+                res,
+                AlterReadysetStatement::StartReplication { channel: None }
+            );
         }
 
         #[test]
@@ -1877,6 +1887,7 @@ mod tests {
                 res,
                 AlterReadysetStatement::SetReplicationPosition(SetReplicationPositionStatement {
                     position: "mysql-bin.000003:154".to_string(),
+                    channel: None,
                 })
             );
 
@@ -1886,6 +1897,7 @@ mod tests {
                 res,
                 AlterReadysetStatement::SetReplicationPosition(SetReplicationPositionStatement {
                     position: "0/16B3748".to_string(),
+                    channel: None,
                 })
             );
         }
