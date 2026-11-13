@@ -206,6 +206,8 @@ impl SqlIncorporator {
     ///
     /// Can optionally provide a mutable reference to a list of names of non-existent tables which,
     /// if created, should invalidate the query
+    ///
+    /// Tables and custom types resolve in the catalog of `query_name`.
     // TODO(aspen): This should really be happening as part of the `add_<whatever>` methods (it was,
     // before this was made pub(crate)) but since the recipe expression registry stores expressions
     // we need it happening earlier. We should move it back to its rightful place once we can get
@@ -213,7 +215,7 @@ impl SqlIncorporator {
     pub(crate) fn rewrite<S>(
         &self,
         mut stmt: S,
-        query_name: Option<&str>,
+        query_name: Option<&Relation>,
         search_path: &[SqlIdentifier],
         dialect: Dialect,
         invalidating_tables: Option<&RefCell<Vec<Relation>>>,
@@ -222,6 +224,7 @@ impl SqlIncorporator {
     where
         S: Rewrite,
     {
+        let catalog = query_name.and_then(|name| name.catalog.as_ref());
         stmt.rewrite(&SqlIncorporatorRewriteContext {
             this: self,
             base_schemas: self
@@ -238,16 +241,18 @@ impl SqlIncorporator {
             custom_types: self
                 .custom_types
                 .keys()
+                .filter(|t| t.catalog.as_ref() == catalog)
                 .filter_map(|t| Some((t.schema.as_ref()?, &t.name)))
                 .fold(HashMap::new(), |mut acc, (schema, name)| {
                     acc.entry(schema).or_default().insert(name);
                     acc
                 }),
             search_path,
+            catalog,
             dialect,
             invalidating_tables,
             table_alias_rewrites,
-            query_name,
+            query_name: query_name.map(|name| name.name.as_str()),
         })?;
         Ok(stmt)
     }
@@ -635,7 +640,7 @@ impl SqlIncorporator {
 
         let rewritten_definition = self.rewrite(
             definition.clone(),
-            Some(&name.name),
+            Some(&name),
             &schema_search_path,
             self.dialect,
             None,
@@ -742,7 +747,7 @@ impl SqlIncorporator {
                 invalidating_tables.borrow_mut().clear();
                 let rewritten_stmt = next.rewrite(
                     stmt.clone(),
-                    Some(&name.name),
+                    Some(&name),
                     schema_search_path,
                     mig.dialect,
                     Some(&invalidating_tables),
@@ -1375,7 +1380,10 @@ impl SqlIncorporator {
                 Err(e) => {
                     if let Some(view) = e
                         .table_not_found_cause()
-                        .map(|(name, schema)| Relation::new(schema.map(Into::into), name.into()))
+                        .map(|(name, schema)| {
+                            Relation::new(schema.map(Into::into), name.into())
+                                .with_catalog(query_name.catalog.clone())
+                        })
                         .and_then(|rel| self.views.get(&rel))
                         .filter(|view| !view.compiled)
                         .cloned()
@@ -1415,7 +1423,7 @@ impl SqlIncorporator {
         let table_alias_rewrites = RefCell::new(Vec::new());
         *stmt = self.rewrite(
             stmt.clone(),
-            Some(&query_name.name),
+            Some(query_name),
             search_path,
             mig.dialect,
             invalidating_tables,
@@ -1772,6 +1780,7 @@ struct SqlIncorporatorRewriteContext<'a> {
     uncompiled_views: Vec<&'a Relation>,
     custom_types: HashMap<&'a SqlIdentifier, HashSet<&'a SqlIdentifier>>,
     search_path: &'a [SqlIdentifier],
+    catalog: Option<&'a SqlIdentifier>,
     dialect: Dialect,
     invalidating_tables: Option<&'a RefCell<Vec<Relation>>>,
     table_alias_rewrites: Option<&'a RefCell<Vec<TableAliasRewrite>>>,
@@ -1824,7 +1833,8 @@ impl ResolveSchemasContext for SqlIncorporatorRewriteContext<'_> {
     }
 
     fn can_query_table(&self, schema: &SqlIdentifier, table: &SqlIdentifier) -> Option<CanQuery> {
-        let relation = Relation::new(Some(schema.clone()), table.clone());
+        let relation =
+            Relation::new(Some(schema.clone()), table.clone()).with_catalog(self.catalog.cloned());
 
         if self.view_schemas().contains_key(&relation)
             || self.base_schema(&relation).is_some()
@@ -1853,6 +1863,10 @@ impl ResolveSchemasContext for SqlIncorporatorRewriteContext<'_> {
         self.custom_types
             .get(schema)
             .is_some_and(|tys| tys.contains(custom_type))
+    }
+
+    fn catalog(&self) -> Option<&SqlIdentifier> {
+        self.catalog
     }
 }
 

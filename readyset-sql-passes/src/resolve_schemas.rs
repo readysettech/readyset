@@ -37,6 +37,11 @@ pub trait ResolveSchemasContext {
         schema: &SqlIdentifier,
         custom_type: &SqlIdentifier,
     ) -> bool;
+
+    /// Return the catalog in which to resolve tables and custom types.
+    fn catalog(&self) -> Option<&SqlIdentifier> {
+        None
+    }
 }
 
 impl<R: ResolveSchemasContext> ResolveSchemasContext for &R {
@@ -58,6 +63,10 @@ impl<R: ResolveSchemasContext> ResolveSchemasContext for &R {
         custom_type: &SqlIdentifier,
     ) -> bool {
         (*self).schema_contains_custom_type(schema, custom_type)
+    }
+
+    fn catalog(&self) -> Option<&SqlIdentifier> {
+        (*self).catalog()
     }
 }
 
@@ -146,10 +155,10 @@ where
                     });
                 }
                 None => {
-                    self.context.add_invalidating_table(Relation::new(
-                        Some(schema.clone()),
-                        table.name.clone(),
-                    ));
+                    self.context.add_invalidating_table(
+                        Relation::new(Some(schema.clone()), table.name.clone())
+                            .with_catalog(self.context.catalog().cloned()),
+                    );
                 }
             };
         }
@@ -191,15 +200,19 @@ impl<'ast, R: ResolveSchemasContext> VisitorMut<'ast> for ResolveSchemaVisitor<R
     type Error = ReadySetError;
 
     fn visit_sql_type(&mut self, sql_type: &'ast mut SqlType) -> Result<(), Self::Error> {
-        if let SqlType::Other(ty) = sql_type
-            && ty.schema.is_none()
-            && let Some(schema) = self
-                .context
-                .search_path()
-                .iter()
-                .find(|schema| self.context.schema_contains_custom_type(schema, &ty.name))
-        {
-            ty.schema = Some(schema.clone());
+        if let SqlType::Other(ty) = sql_type {
+            if ty.schema.is_none()
+                && let Some(schema) = self
+                    .context
+                    .search_path()
+                    .iter()
+                    .find(|schema| self.context.schema_contains_custom_type(schema, &ty.name))
+            {
+                ty.schema = Some(schema.clone());
+            }
+            if ty.schema.is_some() && ty.catalog.is_none() {
+                ty.catalog = self.context.catalog().cloned();
+            }
         }
 
         visit_mut::walk_sql_type(self, sql_type)
@@ -344,15 +357,13 @@ impl<'ast, R: ResolveSchemasContext> VisitorMut<'ast> for ResolveSchemaVisitor<R
     }
 
     fn visit_table(&mut self, table: &'ast mut Relation) -> Result<(), Self::Error> {
-        if table.schema.is_some() {
-            return Ok(());
+        if table.schema.is_none() && !self.table_is_aliased(table) {
+            self.resolve_schema(table)?;
         }
-
-        if self.table_is_aliased(table) {
-            return Ok(());
+        if table.schema.is_some() && table.catalog.is_none() {
+            table.catalog = self.context.catalog().cloned();
         }
-
-        self.resolve_schema(table)
+        Ok(())
     }
 }
 
@@ -373,6 +384,7 @@ pub trait ResolveSchemas: Sized {
     ///   exist).
     /// * Any unqualified references to aliases for tables (including CTEs) will not be rewritten,
     ///   as they should take precedence over tables in the database
+    /// * Tables and custom types with a schema and no catalog get the context's catalog
     fn resolve_schemas<R: ResolveSchemasContext>(
         &mut self,
         context: R,
@@ -415,10 +427,12 @@ mod tests {
     use pretty_assertions::assert_eq;
     use std::{cell::RefCell, collections::HashMap, fmt::Debug};
 
+    use readyset_sql::analysis::visit::{self, Visitor};
     use readyset_sql::{Dialect, DialectDisplay};
     use readyset_sql_parsing::parse_create_table;
 
     use super::*;
+    use crate::SetCatalog;
     use crate::util::parse_select_statement;
 
     struct TestRewriteContext {
@@ -426,6 +440,7 @@ mod tests {
         search_path: Vec<SqlIdentifier>,
         custom_types: HashMap<SqlIdentifier, HashSet<SqlIdentifier>>,
         invalidating_tables: RefCell<Vec<Relation>>,
+        catalog: Option<SqlIdentifier>,
     }
 
     impl TestRewriteContext {
@@ -439,6 +454,7 @@ mod tests {
                 search_path,
                 custom_types,
                 invalidating_tables: RefCell::new(Vec::new()),
+                catalog: None,
             }
         }
     }
@@ -470,6 +486,32 @@ mod tests {
             self.custom_types
                 .get(schema)
                 .is_some_and(|tys| tys.contains(custom_type))
+        }
+
+        fn catalog(&self) -> Option<&SqlIdentifier> {
+            self.catalog.as_ref()
+        }
+    }
+
+    /// Collects each table reference and custom type in a statement with its catalog.
+    #[derive(Default)]
+    struct CatalogCollector(Vec<(String, Option<SqlIdentifier>)>);
+
+    impl<'ast> Visitor<'ast> for CatalogCollector {
+        type Error = std::convert::Infallible;
+
+        fn visit_table(&mut self, table: &'ast Relation) -> Result<(), Self::Error> {
+            self.0
+                .push((table.display_unquoted().to_string(), table.catalog.clone()));
+            Ok(())
+        }
+
+        fn visit_sql_type(&mut self, sql_type: &'ast SqlType) -> Result<(), Self::Error> {
+            if let SqlType::Other(ty) = sql_type {
+                self.0
+                    .push((ty.display_unquoted().to_string(), ty.catalog.clone()));
+            }
+            visit::walk_sql_type(self, sql_type)
         }
     }
 
@@ -780,5 +822,67 @@ mod tests {
             "select d.id from s2.t1 d left join s2.t2 ON d.id = t2.d_id",
             "select d.id from s2.t1 d left join s2.t2 ON d.id = s2.t2.d_id",
         );
+    }
+
+    #[test]
+    fn resolves_in_context_catalog() {
+        let mut q = readyset_sql_parsing::parse_select(
+            Dialect::PostgreSQL,
+            "select t1.x, a.y, cast(t1.z as abc) from t1, s2.t3 as a, t4",
+        )
+        .unwrap();
+        let mut context = TestRewriteContext::new(
+            HashMap::from([
+                ("s1".into(), HashMap::from([("t1".into(), CanQuery::Yes)])),
+                ("s2".into(), HashMap::from([("t3".into(), CanQuery::Yes)])),
+            ]),
+            vec!["s1".into(), "s2".into()],
+            HashMap::from([("s2".into(), HashSet::from(["abc".into()]))]),
+        );
+        context.catalog = Some("db2".into());
+        q.resolve_schemas(&context).unwrap();
+
+        let db2 = Some(SqlIdentifier::from("db2"));
+        let mut collector = CatalogCollector::default();
+        let Ok(()) = collector.visit_select_statement(&q);
+        let mut actual = collector.0;
+        actual.sort();
+        let mut expected = vec![
+            ("a".to_string(), None),
+            ("s1.t1".to_string(), db2.clone()),
+            ("s1.t1".to_string(), db2.clone()),
+            ("s1.t1".to_string(), db2.clone()),
+            ("s2.abc".to_string(), db2.clone()),
+            ("s2.t3".to_string(), db2.clone()),
+            ("t4".to_string(), None),
+        ];
+        expected.sort();
+        assert_eq!(actual, expected);
+
+        assert_eq!(
+            context.invalidating_tables.into_inner(),
+            vec![
+                Relation::new(Some("s1".into()), "t4".into()).with_catalog(db2.clone()),
+                Relation::new(Some("s2".into()), "t4".into()).with_catalog(db2),
+            ]
+        );
+    }
+
+    #[test]
+    fn keeps_existing_catalog() {
+        let mut stmt = parse_create_table(
+            Dialect::PostgreSQL,
+            "create table s1.t (x s2.abc, y int, foreign key (y) references s1.u (id))",
+        )
+        .unwrap();
+        stmt.set_catalog(&"db2".into());
+        let expected = stmt.clone();
+        stmt.resolve_schemas(TestRewriteContext::new(
+            HashMap::new(),
+            vec!["s1".into()],
+            HashMap::new(),
+        ))
+        .unwrap();
+        assert_eq!(stmt, expected);
     }
 }

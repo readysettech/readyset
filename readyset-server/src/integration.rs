@@ -9999,6 +9999,74 @@ async fn views_out_of_order() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn view_resolves_in_its_catalog() {
+    let (mut g, shutdown_tx) = start_simple_unsharded("view_resolves_in_its_catalog").await;
+    let db2 = Some(ast::SqlIdentifier::from("db2"));
+    let table = Relation::new(Some("public".into()), "t".into());
+
+    let url_t =
+        parse_create_table(SqlDialect::PostgreSQL, "CREATE TABLE public.t (x int)").unwrap();
+    let mut db2_t = url_t.clone();
+    db2_t.table.catalog = db2.clone();
+    // `v2` reads `v1`, so compiling `v2` also compiles `v1` in db2.
+    let mut v1 = parse_create_view(
+        SqlDialect::PostgreSQL,
+        "CREATE VIEW public.v1 AS SELECT x FROM t",
+    )
+    .unwrap();
+    v1.name.catalog = db2.clone();
+    let mut v2 = parse_create_view(
+        SqlDialect::PostgreSQL,
+        "CREATE VIEW public.v2 AS SELECT x FROM v1",
+    )
+    .unwrap();
+    v2.name.catalog = db2.clone();
+    let q = Relation::from("q").with_catalog(db2.clone());
+    let changes = vec![
+        Change::CreateTable {
+            statement: url_t,
+            pg_meta: None,
+        },
+        Change::CreateTable {
+            statement: db2_t,
+            pg_meta: None,
+        },
+        Change::CreateView(v1),
+        Change::CreateView(v2),
+        Change::create_cache(
+            q.clone(),
+            parse_select(SqlDialect::PostgreSQL, "SELECT x FROM v2").unwrap(),
+            ast::TrxCachePolicy::Never,
+            None,
+            None,
+        ),
+    ];
+    eventually! {
+        g.extend_recipe(
+            ChangeList::from_changes(changes.clone(), Dialect::DEFAULT_POSTGRESQL)
+                .with_schema_search_path(vec!["public".into()]),
+        )
+        .await
+        .is_ok()
+    }
+
+    let mut url_t = g.table(table.clone()).await.unwrap();
+    url_t.insert(vec![DfValue::from(1)]).await.unwrap();
+    let mut db2_t = g.table(table.with_catalog(db2)).await.unwrap();
+    db2_t.insert(vec![DfValue::from(2)]).await.unwrap();
+
+    let mut q = g.view(q).await.unwrap().into_reader_handle().unwrap();
+    let res = q
+        .lookup(&[0.into()], Dialect::DEFAULT_POSTGRESQL)
+        .await
+        .unwrap()
+        .into_vec();
+    assert_eq!(res, vec![vec![DfValue::from(2)]]);
+
+    shutdown_tx.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn evict_single() {
     readyset_tracing::init_test_logging();
     let (mut g, shutdown_tx) = start_simple_unsharded("evict_single").await;
