@@ -461,8 +461,6 @@ pub struct Controller {
     parsing_preset: ParsingPreset,
     /// Whether we are in maintenance mode
     maintenance_mode: Arc<AtomicBool>,
-    /// Whether replication has been explicitly stopped
-    replication_stopped: Arc<AtomicBool>,
     /// Serializes failover operations (stop/start replication, set position, change CDC URL)
     /// so that only one runs at a time, preventing race conditions between them.
     failover_mutex: Arc<tokio::sync::Mutex<()>>,
@@ -558,7 +556,6 @@ impl Controller {
             leader_ready: Arc::new(AtomicBool::new(false)),
             snapshots_pending: BTreeSet::new(),
             maintenance_mode: Arc::new(AtomicBool::new(false)),
-            replication_stopped: Arc::new(AtomicBool::new(false)),
             failover_mutex: Arc::new(tokio::sync::Mutex::new(())),
             cache_ddl: None,
             controller_http,
@@ -729,7 +726,6 @@ impl Controller {
                     .await;
 
                 self.inner.replace(leader).await;
-                self.replication_stopped.store(false, Ordering::Release);
                 self.controller_http
                     .set(
                         self.our_descriptor.controller_uri.clone(),
@@ -792,7 +788,6 @@ impl Controller {
 
         let leader_ready = self.leader_ready.clone();
         let maintenance_mode = self.maintenance_mode.clone();
-        let replication_stopped = self.replication_stopped.clone();
         loop {
             // There is either...
             let running_recovery = self
@@ -838,7 +833,6 @@ impl Controller {
                     if let Some(req) = req {
                         let leader_ready = leader_ready.load(Ordering::Acquire);
                         let maintenance_mode = maintenance_mode.load(Ordering::Acquire);
-                        let replication_stopped = replication_stopped.load(Ordering::Acquire);
                         tokio::spawn(handle_controller_request(
                             req,
                             self.authority.clone(),
@@ -846,7 +840,6 @@ impl Controller {
                             self.adapter_controller_channel.sender(),
                             leader_ready,
                             maintenance_mode,
-                            replication_stopped,
                         ));
                     }
                     else {
@@ -961,12 +954,11 @@ impl Controller {
                         // requests (avoids deadlock). The failover_mutex
                         // serializes them to prevent race conditions.
                         let inner = self.inner.clone();
-                        let stopped = self.replication_stopped.clone();
                         let mutex = self.failover_mutex.clone();
                         match cmd {
                             AdminCommand::StopReplication(response_tx) => {
                                 Self::spawn_failover_handler(mutex, response_tx, async move {
-                                    Self::handle_stop_replication(inner, stopped).await
+                                    Self::handle_stop_replication(inner).await
                                 });
                             },
                             AdminCommand::StartReplication(response_tx) => {
@@ -976,7 +968,6 @@ impl Controller {
                                 Self::spawn_failover_handler(mutex, response_tx, async move {
                                     Self::handle_start_replication(
                                         inner,
-                                        stopped,
                                         controller_tx,
                                         telemetry_sender,
                                         shutdown_rx,
@@ -987,10 +978,8 @@ impl Controller {
                             AdminCommand::SetReplicationPosition { position, response } => {
                                 let authority = self.authority.clone();
                                 Self::spawn_failover_handler(mutex, response, async move {
-                                    Self::handle_set_replication_position(
-                                        inner, stopped, authority, position,
-                                    )
-                                    .await
+                                    Self::handle_set_replication_position(inner, authority, position)
+                                        .await
                                 });
                             },
                             AdminCommand::ChangeCdcUrl { url, response } => {
@@ -1000,7 +989,6 @@ impl Controller {
                                 Self::spawn_failover_handler(mutex, response, async move {
                                     Self::handle_change_cdc_url(
                                         inner,
-                                        stopped,
                                         url,
                                         controller_tx,
                                         telemetry_sender,
@@ -1016,7 +1004,6 @@ impl Controller {
                                 Self::spawn_failover_handler(mutex, response, async move {
                                     Self::handle_reload_upstream_servers(
                                         inner,
-                                        stopped,
                                         controller_tx,
                                         telemetry_sender,
                                         shutdown_rx,
@@ -1084,16 +1071,7 @@ impl Controller {
     /// The write lock on LeaderHandle is held only briefly to extract the stop channel
     /// and task handle. The actual await on the JoinHandle happens without any lock held
     /// to avoid blocking all controller HTTP operations.
-    async fn handle_stop_replication(
-        inner: Arc<LeaderHandle>,
-        replication_stopped: Arc<AtomicBool>,
-    ) -> ReadySetResult<()> {
-        if replication_stopped.load(Ordering::Acquire) {
-            return Err(ReadySetError::Internal(
-                "replication is already stopped".into(),
-            ));
-        }
-
+    async fn handle_stop_replication(inner: Arc<LeaderHandle>) -> ReadySetResult<()> {
         // Take the replication channels under a short write lock, then drop the lock before
         // awaiting their tasks.
         let channels = {
@@ -1105,9 +1083,7 @@ impl Controller {
             }
         };
         if channels.is_empty() {
-            return Err(ReadySetError::Internal(
-                "no replicator task is running".into(),
-            ));
+            internal!("replication is already stopped");
         }
 
         // Stop the replicator tasks (no lock held)
@@ -1117,7 +1093,6 @@ impl Controller {
                 .map(|channel| channel.stop(REPLICATOR_STOP_TIMEOUT)),
         )
         .await;
-        replication_stopped.store(true, Ordering::Release);
         results.into_iter().collect::<ReadySetResult<()>>()?;
 
         // Log the position (re-acquire read lock briefly)
@@ -1148,18 +1123,20 @@ impl Controller {
     /// Spawned as a separate tokio task to avoid blocking the controller event loop.
     async fn handle_start_replication(
         inner: Arc<LeaderHandle>,
-        replication_stopped: Arc<AtomicBool>,
         controller_tx: UnboundedSender<ControllerMessage>,
         telemetry_sender: TelemetrySender,
         shutdown_rx: ShutdownReceiver,
     ) -> ReadySetResult<()> {
-        if !replication_stopped.load(Ordering::Acquire) {
-            return Err(ReadySetError::Internal("replication is not stopped".into()));
-        }
-
         let mut guard = inner.write().await;
         if let Some(ref mut leader) = *guard {
-            for catalog in leader.replicated_catalogs().collect::<Vec<_>>() {
+            let catalogs: Vec<_> = leader
+                .replicated_catalogs()
+                .filter(|catalog| leader.channel_stopped(catalog))
+                .collect();
+            if catalogs.is_empty() {
+                internal!("replication is not stopped");
+            }
+            for catalog in catalogs {
                 let Some(channel) = leader
                     .spawn_replicator(
                         catalog.clone(),
@@ -1177,7 +1154,6 @@ impl Controller {
                 leader.replication_channels.insert(catalog, channel);
             }
 
-            replication_stopped.store(false, Ordering::Release);
             info!("Replication started");
             Ok(())
         } else {
@@ -1192,19 +1168,15 @@ impl Controller {
     /// select loop would deadlock since the loop couldn't process those RPCs.
     async fn handle_set_replication_position(
         inner: Arc<LeaderHandle>,
-        replication_stopped: Arc<AtomicBool>,
         authority: Arc<Authority>,
         position: String,
     ) -> ReadySetResult<()> {
-        if !replication_stopped.load(Ordering::Acquire) {
-            return Err(ReadySetError::Internal(
-                "replication must be stopped before setting position".into(),
-            ));
-        }
-
         let (tables, offset) = {
             let guard = inner.read().await;
             if let Some(ref leader) = *guard {
+                if !leader.channel_stopped(&None) {
+                    internal!("replication must be stopped before setting position");
+                }
                 let ds = leader.dataflow_state_handle.read().await;
                 let offset: ReplicationOffset = position.parse()?;
 
@@ -1308,7 +1280,6 @@ impl Controller {
     /// while waiting on the LeaderHandle write lock.
     async fn handle_change_cdc_url(
         inner: Arc<LeaderHandle>,
-        replication_stopped: Arc<AtomicBool>,
         url: String,
         controller_tx: UnboundedSender<ControllerMessage>,
         telemetry_sender: TelemetrySender,
@@ -1373,7 +1344,6 @@ impl Controller {
 
         Self::apply_cdc_servers(
             inner,
-            replication_stopped,
             |config| config.cdc_db_url = servers.into_vec(),
             controller_tx,
             telemetry_sender,
@@ -1386,7 +1356,6 @@ impl Controller {
     /// already validated and stored them. With `--cdc-db-url` unset, this changes the CDC list.
     async fn handle_reload_upstream_servers(
         inner: Arc<LeaderHandle>,
-        replication_stopped: Arc<AtomicBool>,
         controller_tx: UnboundedSender<ControllerMessage>,
         telemetry_sender: TelemetrySender,
         shutdown_rx: ShutdownReceiver,
@@ -1415,7 +1384,6 @@ impl Controller {
 
         Self::apply_cdc_servers(
             inner,
-            replication_stopped,
             |config| {
                 config.upstream_db_url = upstream;
                 config.cdc_db_url = cdc;
@@ -1431,7 +1399,6 @@ impl Controller {
     /// CDC list. Replication restarts only if its current server left the list.
     async fn apply_cdc_servers(
         inner: Arc<LeaderHandle>,
-        replication_stopped: Arc<AtomicBool>,
         update: impl FnOnce(&mut UpstreamConfig),
         controller_tx: UnboundedSender<ControllerMessage>,
         telemetry_sender: TelemetrySender,
@@ -1449,13 +1416,11 @@ impl Controller {
                 return Ok(());
             };
             info!(servers = %servers.displays().join(", "), "CDC server list changed");
-            let running = !replication_stopped.load(Ordering::Acquire);
-            let restart = running
-                && leader
-                    .replication_channels
-                    .values()
-                    .filter_map(ReplicationChannel::active_cdc_server)
-                    .any(|active| servers.position(&active).is_none());
+            let restart = leader
+                .replication_channels
+                .values()
+                .filter_map(ReplicationChannel::active_cdc_server)
+                .any(|active| servers.position(&active).is_none());
             *leader
                 .cdc_server_list
                 .write()
@@ -1465,16 +1430,9 @@ impl Controller {
 
         if restart {
             info!("The active CDC server left the list; restarting replication on the new list");
-            Self::handle_stop_replication(Arc::clone(&inner), Arc::clone(&replication_stopped))
+            Self::handle_stop_replication(Arc::clone(&inner)).await?;
+            Self::handle_start_replication(inner, controller_tx, telemetry_sender, shutdown_rx)
                 .await?;
-            Self::handle_start_replication(
-                inner,
-                replication_stopped,
-                controller_tx,
-                telemetry_sender,
-                shutdown_rx,
-            )
-            .await?;
         }
         Ok(())
     }
@@ -2162,7 +2120,6 @@ async fn handle_controller_request(
     command_tx: UnboundedSender<AdminCommand>,
     leader_ready: bool,
     maintenance_mode: bool,
-    replication_stopped: bool,
 ) {
     let ControllerRequest {
         method,
@@ -2193,7 +2150,6 @@ async fn handle_controller_request(
                         &authority,
                         leader_ready,
                         maintenance_mode,
-                        replication_stopped,
                     )
                     .await)
             } else {

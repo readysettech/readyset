@@ -227,12 +227,17 @@ impl Leader {
         iter::once(None).chain(others.map(|catalog| Some(catalog.as_str().into())))
     }
 
+    /// Return whether replication is enabled and `catalog` has no running replication channel.
+    pub(super) fn channel_stopped(&self, catalog: &Option<SqlIdentifier>) -> bool {
+        self.replicator_config.replication_enabled
+            && !self.replication_channels.contains_key(catalog)
+    }
+
     /// Return the status of the replication channel of `catalog`.
     async fn replication_channel_status(
         &self,
         ds: &DfState,
         catalog: Option<SqlIdentifier>,
-        replication_stopped: bool,
     ) -> ReadySetResult<ReplicationChannelStatus> {
         let replication_offsets = if ds.all_domains_placed() {
             Some(ds.replication_offsets(catalog.as_ref()).await?)
@@ -243,19 +248,16 @@ impl Leader {
         Ok(ReplicationChannelStatus {
             replication_status: if !self.replicator_config.replication_enabled {
                 ReplicationStatus::Disabled
-            } else if replication_stopped {
+            } else if self.channel_stopped(&catalog) {
                 ReplicationStatus::Stopped
             } else {
                 ReplicationStatus::Running
             },
 
-            cdc_server: if self.replicator_config.replication_enabled && !replication_stopped {
-                self.replication_channels
-                    .get(&catalog)
-                    .and_then(ReplicationChannel::active_cdc_server)
-            } else {
-                None
-            },
+            cdc_server: self
+                .replication_channels
+                .get(&catalog)
+                .and_then(ReplicationChannel::active_cdc_server),
 
             max_replication_offset: replication_offsets
                 .as_ref()
@@ -546,7 +548,6 @@ impl Leader {
         authority: &Arc<Authority>,
         leader_ready: bool,
         maintenance_mode: bool,
-        replication_stopped: bool,
     ) -> ReadySetResult<Vec<u8>> {
         macro_rules! return_serialized {
             ($expr:expr) => {{
@@ -873,10 +874,7 @@ impl Leader {
                 let mut channels = Vec::new();
                 // Report each replicated catalog, whether or not its channel is running.
                 for catalog in self.replicated_catalogs() {
-                    channels.push(
-                        self.replication_channel_status(&ds, catalog, replication_stopped)
-                            .await?,
-                    );
+                    channels.push(self.replication_channel_status(&ds, catalog).await?);
                 }
 
                 // Use whether the leader is ready or not as a proxy for if we have
