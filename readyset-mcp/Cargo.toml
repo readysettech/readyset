@@ -26,7 +26,6 @@ vendored-openssl = ["native-tls/vendored"]
 anyhow = { workspace = true }
 mysql_async = { workspace = true }
 native-tls = { workspace = true }
-openssl = { version = "0.10" }
 pem = { workspace = true }
 postgres-native-tls = { workspace = true }
 

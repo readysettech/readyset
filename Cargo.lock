@@ -6736,7 +6736,6 @@ dependencies = [
  "anyhow",
  "mysql_async",
  "native-tls",
- "openssl",
  "pem",
  "postgres-native-tls",
  "rmcp",
