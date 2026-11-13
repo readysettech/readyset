@@ -227,6 +227,37 @@ impl Leader {
         iter::once(None).chain(others.map(|catalog| Some(catalog.as_str().into())))
     }
 
+    /// Return the catalog of the replication channel `channel`. The URL's catalog is channel
+    /// `''`, and its name also refers to it.
+    pub(super) fn channel_catalog(&self, channel: &str) -> ReadySetResult<Option<SqlIdentifier>> {
+        if channel.is_empty() || self.replicator_config.cdc_servers()?.db_name() == Some(channel) {
+            return Ok(None);
+        }
+        if self
+            .replicator_config
+            .replication_catalogs
+            .iter()
+            .any(|c| c == channel)
+        {
+            return Ok(Some(channel.into()));
+        }
+        Err(ReadySetError::BadRequest(format!(
+            "unknown replication channel '{channel}'"
+        )))
+    }
+
+    /// Return the catalog of the replication channel `channel`, or all replicated catalogs if
+    /// `channel` is `None`.
+    pub(super) fn channel_catalogs(
+        &self,
+        channel: Option<&str>,
+    ) -> ReadySetResult<Vec<Option<SqlIdentifier>>> {
+        match channel {
+            Some(channel) => Ok(vec![self.channel_catalog(channel)?]),
+            None => Ok(self.replicated_catalogs().collect()),
+        }
+    }
+
     /// Return whether replication is enabled and `catalog` has no running replication channel.
     pub(super) fn channel_stopped(&self, catalog: &Option<SqlIdentifier>) -> bool {
         self.replicator_config.replication_enabled

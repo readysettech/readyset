@@ -364,6 +364,9 @@ async fn psql_replication_status_vrel() {
         "staleness should be NULL without heartbeat, got: {staleness:?}"
     );
 
+    // Column index 7 = channel. The URL database's channel is ''.
+    assert_eq!(row.get(7), Some(""));
+
     // Prove publish_persisted_offset() runs on the hot path: a write upstream should
     // advance the persisted_offset column.
     let initial_persisted = persisted_offset.to_string();

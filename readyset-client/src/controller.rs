@@ -595,18 +595,19 @@ impl ReadySetHandle {
     );
 
     simple_request!(
-        /// Stop replication
-        stop_replication() -> ()
+        /// Stop replication on `channel`, or on all channels if `channel` is `None`
+        stop_replication(channel: Option<String>) -> ()
     );
 
     simple_request!(
-        /// Start replication
-        start_replication() -> ()
+        /// Start replication on `channel`, or on all channels if `channel` is `None`
+        start_replication(channel: Option<String>) -> ()
     );
 
     simple_request!(
-        /// Set the replication position for all tables
-        set_replication_position(position: String) -> ()
+        /// Set the replication position for the tables of `channel`, or of the only channel if
+        /// `channel` is `None`
+        set_replication_position(position: String, channel: Option<String>,) -> ()
     );
 
     simple_request!(

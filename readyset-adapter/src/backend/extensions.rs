@@ -2102,24 +2102,18 @@ where
             SqlQuery::AlterReadySet(AlterReadysetStatement::ChangeUpstream(
                 ChangeUpstreamStatement { url },
             )) => Self::change_upstream(settings, state, &mut connectors.noria, url).await,
-            SqlQuery::AlterReadySet(
-                AlterReadysetStatement::StopReplication { channel: Some(_) }
-                | AlterReadysetStatement::StartReplication { channel: Some(_) }
-                | AlterReadysetStatement::SetReplicationPosition(SetReplicationPositionStatement {
-                    channel: Some(_),
-                    ..
-                }),
-            ) => unsupported!("FOR CHANNEL is not supported"),
-            SqlQuery::AlterReadySet(AlterReadysetStatement::StopReplication { channel: None }) => {
-                connectors.noria.stop_replication().await
+            SqlQuery::AlterReadySet(AlterReadysetStatement::StopReplication { channel }) => {
+                connectors.noria.stop_replication(channel.clone()).await
             }
-            SqlQuery::AlterReadySet(AlterReadysetStatement::StartReplication { channel: None }) => {
-                connectors.noria.start_replication().await
+            SqlQuery::AlterReadySet(AlterReadysetStatement::StartReplication { channel }) => {
+                connectors.noria.start_replication(channel.clone()).await
             }
-            SqlQuery::AlterReadySet(AlterReadysetStatement::SetReplicationPosition(stmt)) => {
+            SqlQuery::AlterReadySet(AlterReadysetStatement::SetReplicationPosition(
+                SetReplicationPositionStatement { position, channel },
+            )) => {
                 connectors
                     .noria
-                    .set_replication_position(&stmt.position)
+                    .set_replication_position(position, channel.clone())
                     .await
             }
             SqlQuery::AlterReadySet(AlterReadysetStatement::ChangeCdc(ChangeCdcStatement {

@@ -45,7 +45,7 @@ use url::Url;
 use vec1::Vec1;
 
 use crate::controller::events::EventsHandle;
-use crate::controller::inner::{Leader, ReplicationChannel};
+use crate::controller::inner::Leader;
 use crate::controller::migrate::Migration;
 use crate::controller::sql::Recipe;
 use crate::controller::state::DfState;
@@ -280,10 +280,17 @@ impl ControllerChannel {
 /// commands that carry a oneshot channel for the caller to await the result.
 #[derive(Debug)]
 pub(crate) enum AdminCommand {
-    StopReplication(tokio::sync::oneshot::Sender<ReadySetResult<()>>),
-    StartReplication(tokio::sync::oneshot::Sender<ReadySetResult<()>>),
+    StopReplication {
+        channel: Option<String>,
+        response: tokio::sync::oneshot::Sender<ReadySetResult<()>>,
+    },
+    StartReplication {
+        channel: Option<String>,
+        response: tokio::sync::oneshot::Sender<ReadySetResult<()>>,
+    },
     SetReplicationPosition {
         position: String,
+        channel: Option<String>,
         response: tokio::sync::oneshot::Sender<ReadySetResult<()>>,
     },
     ChangeCdcUrl {
@@ -956,18 +963,19 @@ impl Controller {
                         let inner = self.inner.clone();
                         let mutex = self.failover_mutex.clone();
                         match cmd {
-                            AdminCommand::StopReplication(response_tx) => {
-                                Self::spawn_failover_handler(mutex, response_tx, async move {
-                                    Self::handle_stop_replication(inner).await
+                            AdminCommand::StopReplication { channel, response } => {
+                                Self::spawn_failover_handler(mutex, response, async move {
+                                    Self::handle_stop_replication(inner, channel).await
                                 });
                             },
-                            AdminCommand::StartReplication(response_tx) => {
+                            AdminCommand::StartReplication { channel, response } => {
                                 let controller_tx = self.controller_channel.sender();
                                 let telemetry_sender = self.telemetry_sender.clone();
                                 let shutdown_rx = self.shutdown_rx.clone();
-                                Self::spawn_failover_handler(mutex, response_tx, async move {
+                                Self::spawn_failover_handler(mutex, response, async move {
                                     Self::handle_start_replication(
                                         inner,
+                                        channel,
                                         controller_tx,
                                         telemetry_sender,
                                         shutdown_rx,
@@ -975,11 +983,13 @@ impl Controller {
                                     .await
                                 });
                             },
-                            AdminCommand::SetReplicationPosition { position, response } => {
+                            AdminCommand::SetReplicationPosition { position, channel, response } => {
                                 let authority = self.authority.clone();
                                 Self::spawn_failover_handler(mutex, response, async move {
-                                    Self::handle_set_replication_position(inner, authority, position)
-                                        .await
+                                    Self::handle_set_replication_position(
+                                        inner, authority, position, channel,
+                                    )
+                                    .await
                                 });
                             },
                             AdminCommand::ChangeCdcUrl { url, response } => {
@@ -1063,105 +1073,159 @@ impl Controller {
         });
     }
 
-    /// Handle STOP REPLICATION: signal the replicator task to stop and await its completion.
+    /// Handle STOP REPLICATION: stop the replication channel `channel`, or all running channels
+    /// if `channel` is `None`.
     ///
     /// This is a standalone associated function (not `&mut self`) so it can be spawned as a
     /// separate tokio task from the controller event loop without blocking it.
-    ///
-    /// The write lock on LeaderHandle is held only briefly to extract the stop channel
-    /// and task handle. The actual await on the JoinHandle happens without any lock held
-    /// to avoid blocking all controller HTTP operations.
-    async fn handle_stop_replication(inner: Arc<LeaderHandle>) -> ReadySetResult<()> {
-        // Take the replication channels under a short write lock, then drop the lock before
-        // awaiting their tasks.
-        let channels = {
-            let mut guard = inner.write().await;
-            if let Some(ref mut leader) = *guard {
-                std::mem::take(&mut leader.replication_channels)
-            } else {
+    async fn handle_stop_replication(
+        inner: Arc<LeaderHandle>,
+        channel: Option<String>,
+    ) -> ReadySetResult<()> {
+        let catalogs: Vec<_> = {
+            let guard = inner.read().await;
+            let Some(leader) = guard.as_ref() else {
                 return Err(ReadySetError::NotLeader);
-            }
+            };
+            leader
+                .channel_catalogs(channel.as_deref())?
+                .into_iter()
+                .filter(|catalog| leader.replication_channels.contains_key(catalog))
+                .collect()
         };
-        if channels.is_empty() {
-            internal!("replication is already stopped");
+        if catalogs.is_empty() {
+            match channel {
+                Some(channel) => internal!("replication channel '{channel}' is already stopped"),
+                None => internal!("replication is already stopped"),
+            }
         }
+        Self::stop_channels(inner, catalogs).await
+    }
 
-        // Stop the replicator tasks (no lock held)
+    /// Stop the running replication channels of `catalogs` and await their tasks.
+    ///
+    /// The write lock on LeaderHandle is held only briefly to take the channels. The tasks are
+    /// awaited without any lock held to avoid blocking all controller HTTP operations.
+    async fn stop_channels(
+        inner: Arc<LeaderHandle>,
+        catalogs: Vec<Option<SqlIdentifier>>,
+    ) -> ReadySetResult<()> {
+        let (catalogs, channels): (Vec<_>, Vec<_>) = {
+            let mut guard = inner.write().await;
+            let Some(leader) = guard.as_mut() else {
+                return Err(ReadySetError::NotLeader);
+            };
+            catalogs
+                .into_iter()
+                .filter_map(|catalog| {
+                    let channel = leader.replication_channels.remove(&catalog)?;
+                    Some((catalog, channel))
+                })
+                .unzip()
+        };
+
         let results = join_all(
             channels
-                .into_values()
+                .into_iter()
                 .map(|channel| channel.stop(REPLICATOR_STOP_TIMEOUT)),
         )
         .await;
         results.into_iter().collect::<ReadySetResult<()>>()?;
 
-        // Log the position (re-acquire read lock briefly)
-        let position = {
-            let guard = inner.read().await;
-            if let Some(ref leader) = *guard {
-                leader
-                    .dataflow_state_handle
-                    .read()
-                    .await
-                    .replication_offsets(None)
+        // Log the positions (re-acquire read lock briefly)
+        let guard = inner.read().await;
+        if let Some(ref leader) = *guard {
+            let ds = leader.dataflow_state_handle.read().await;
+            for catalog in &catalogs {
+                let position = ds
+                    .replication_offsets(catalog.as_ref())
                     .await
                     .ok()
-                    .and_then(|offsets| offsets.min_present_offset().ok().flatten().cloned())
-            } else {
-                None
+                    .and_then(|offsets| offsets.min_present_offset().ok().flatten().cloned());
+                let catalog = catalog.as_ref().map(|c| c.as_str());
+                match position {
+                    Some(pos) => info!(%pos, catalog, "Replication stopped"),
+                    None => info!(catalog, "Replication stopped"),
+                }
             }
-        };
-        match position {
-            Some(pos) => info!(%pos, "Replication stopped"),
-            None => info!("Replication stopped"),
         }
         Ok(())
     }
 
-    /// Handle START REPLICATION: respawn the replicator task with current config.
+    /// Handle START REPLICATION: start the replication channel `channel`, or all stopped channels
+    /// if `channel` is `None`.
     ///
     /// Spawned as a separate tokio task to avoid blocking the controller event loop.
     async fn handle_start_replication(
         inner: Arc<LeaderHandle>,
+        channel: Option<String>,
+        controller_tx: UnboundedSender<ControllerMessage>,
+        telemetry_sender: TelemetrySender,
+        shutdown_rx: ShutdownReceiver,
+    ) -> ReadySetResult<()> {
+        let catalogs: Vec<_> = {
+            let guard = inner.read().await;
+            let Some(leader) = guard.as_ref() else {
+                return Err(ReadySetError::NotLeader);
+            };
+            leader
+                .channel_catalogs(channel.as_deref())?
+                .into_iter()
+                .filter(|catalog| leader.channel_stopped(catalog))
+                .collect()
+        };
+        if catalogs.is_empty() {
+            match channel {
+                Some(channel) => internal!("replication channel '{channel}' is not stopped"),
+                None => internal!("replication is not stopped"),
+            }
+        }
+        Self::start_channels(
+            inner,
+            catalogs,
+            controller_tx,
+            telemetry_sender,
+            shutdown_rx,
+        )
+        .await
+    }
+
+    /// Spawn the replication channels of `catalogs` with the current config.
+    async fn start_channels(
+        inner: Arc<LeaderHandle>,
+        catalogs: Vec<Option<SqlIdentifier>>,
         controller_tx: UnboundedSender<ControllerMessage>,
         telemetry_sender: TelemetrySender,
         shutdown_rx: ShutdownReceiver,
     ) -> ReadySetResult<()> {
         let mut guard = inner.write().await;
-        if let Some(ref mut leader) = *guard {
-            let catalogs: Vec<_> = leader
-                .replicated_catalogs()
-                .filter(|catalog| leader.channel_stopped(catalog))
-                .collect();
-            if catalogs.is_empty() {
-                internal!("replication is not stopped");
-            }
-            for catalog in catalogs {
-                let Some(channel) = leader
-                    .spawn_replicator(
-                        catalog.clone(),
-                        controller_tx.clone(),
-                        telemetry_sender.clone(),
-                        shutdown_rx.clone(),
-                        false, // not server_startup: skip resnapshot, resume from current position
-                    )
-                    .await
-                else {
-                    return Err(ReadySetError::Internal(
-                        "replication could not be started; check server configuration".into(),
-                    ));
-                };
-                leader.replication_channels.insert(catalog, channel);
-            }
-
-            info!("Replication started");
-            Ok(())
-        } else {
-            Err(ReadySetError::NotLeader)
+        let Some(leader) = guard.as_mut() else {
+            return Err(ReadySetError::NotLeader);
+        };
+        for catalog in catalogs {
+            let Some(channel) = leader
+                .spawn_replicator(
+                    catalog.clone(),
+                    controller_tx.clone(),
+                    telemetry_sender.clone(),
+                    shutdown_rx.clone(),
+                    false, // not server_startup: skip resnapshot, resume from current position
+                )
+                .await
+            else {
+                internal!("replication could not be started; check server configuration");
+            };
+            info!(
+                catalog = catalog.as_ref().map(|c| c.as_str()),
+                "Replication started"
+            );
+            leader.replication_channels.insert(catalog, channel);
         }
+        Ok(())
     }
 
-    /// Handle SET REPLICATION POSITION: update replication offsets for all tables.
+    /// Handle SET REPLICATION POSITION: update the replication offsets of the tables of the
+    /// replication channel `channel`. Without a channel, there must be a single channel.
     ///
     /// Spawned as a separate tokio task because it makes RPC calls (via ReadySetHandle)
     /// that route back through the controller's HTTP handler. Running this inline in the
@@ -1170,32 +1234,47 @@ impl Controller {
         inner: Arc<LeaderHandle>,
         authority: Arc<Authority>,
         position: String,
+        channel: Option<String>,
     ) -> ReadySetResult<()> {
-        let (tables, offset) = {
+        let channel = channel.as_deref();
+        let (catalog, tables, offset) = {
             let guard = inner.read().await;
             if let Some(ref leader) = *guard {
-                if !leader.channel_stopped(&None) {
-                    internal!("replication must be stopped before setting position");
+                let catalog = match leader.channel_catalogs(channel)?.as_slice() {
+                    [catalog] => catalog.clone(),
+                    _ => {
+                        return Err(ReadySetError::BadRequest(
+                            "SET REPLICATION POSITION requires FOR CHANNEL with multiple \
+                             replication channels"
+                                .into(),
+                        ));
+                    }
+                };
+                let channel = channel.unwrap_or_default();
+                if !leader.channel_stopped(&catalog) {
+                    internal!(
+                        "replication channel '{channel}' must be stopped before setting position"
+                    );
                 }
                 let ds = leader.dataflow_state_handle.read().await;
                 let offset: ReplicationOffset = position.parse()?;
 
-                let replication_offsets = ds.replication_offsets(None).await?;
+                let replication_offsets = ds.replication_offsets(catalog.as_ref()).await?;
 
                 // Block cross-dialect position changes (e.g. MySQL -> PostgreSQL)
                 // but allow switching between MySQL offset types (file+pos <-> GTID).
                 if let Some(current) = replication_offsets.max_offset()? {
                     if current.dialect() != offset.dialect() {
-                        return Err(ReadySetError::Internal(format!(
+                        internal!(
                             "cannot change replication position from {} to {}",
                             current.dialect(),
                             offset.dialect(),
-                        )));
+                        );
                     }
                 }
 
                 let tables: Vec<Relation> = replication_offsets.tables.keys().cloned().collect();
-                (tables, offset)
+                (catalog, tables, offset)
             } else {
                 return Err(ReadySetError::NotLeader);
             }
@@ -1210,10 +1289,10 @@ impl Controller {
         }
 
         noria
-            .set_schema_replication_offset(None, Some(&offset))
+            .set_schema_replication_offset(catalog, Some(&offset))
             .await?;
 
-        info!(%position, "Replication position updated");
+        info!(%position, ?channel, "Replication position updated");
         Ok(())
     }
 
@@ -1286,9 +1365,8 @@ impl Controller {
         shutdown_rx: ShutdownReceiver,
     ) -> ReadySetResult<()> {
         // Avoid including the parse error in the message as it may contain credentials.
-        let servers: database_utils::UpstreamServers = url
-            .parse()
-            .map_err(|_| ReadySetError::Internal("invalid CDC URL".into()))?;
+        let servers: database_utils::UpstreamServers =
+            url.parse().map_err(|_| internal_err!("invalid CDC URL"))?;
 
         let (config, current, authority) = {
             let guard = inner.read().await;
@@ -1299,9 +1377,9 @@ impl Controller {
             let expected_dialect: readyset_sql::Dialect = ds.recipe.dialect().into();
             let dialect = readyset_sql::Dialect::from(servers.database_type());
             if dialect != expected_dialect {
-                return Err(ReadySetError::Internal(format!(
+                internal!(
                     "CDC URL dialect mismatch: expected {expected_dialect:?}, got {dialect:?}"
-                )));
+                );
             }
             drop(ds);
             let current = leader
@@ -1396,7 +1474,7 @@ impl Controller {
     }
 
     /// Apply `update` to the leader's replicator config and point replication at the resulting
-    /// CDC list. Replication restarts only if its current server left the list.
+    /// CDC list. A replication channel restarts only if its current server left the list.
     async fn apply_cdc_servers(
         inner: Arc<LeaderHandle>,
         update: impl FnOnce(&mut UpstreamConfig),
@@ -1404,8 +1482,8 @@ impl Controller {
         telemetry_sender: TelemetrySender,
         shutdown_rx: ShutdownReceiver,
     ) -> ReadySetResult<()> {
-        // Re-read the active server under the lock, in case a failover ran meanwhile.
-        let restart = {
+        // Re-read the active servers under the lock, in case a failover ran meanwhile.
+        let restart: Vec<_> = {
             let mut guard = inner.write().await;
             let Some(leader) = guard.as_mut() else {
                 return Err(ReadySetError::NotLeader);
@@ -1418,9 +1496,14 @@ impl Controller {
             info!(servers = %servers.displays().join(", "), "CDC server list changed");
             let restart = leader
                 .replication_channels
-                .values()
-                .filter_map(ReplicationChannel::active_cdc_server)
-                .any(|active| servers.position(&active).is_none());
+                .iter()
+                .filter(|(_, channel)| {
+                    channel
+                        .active_cdc_server()
+                        .is_some_and(|active| servers.position(&active).is_none())
+                })
+                .map(|(catalog, _)| catalog.clone())
+                .collect();
             *leader
                 .cdc_server_list
                 .write()
@@ -1428,10 +1511,10 @@ impl Controller {
             restart
         };
 
-        if restart {
+        if !restart.is_empty() {
             info!("The active CDC server left the list; restarting replication on the new list");
-            Self::handle_stop_replication(Arc::clone(&inner)).await?;
-            Self::handle_start_replication(inner, controller_tx, telemetry_sender, shutdown_rx)
+            Self::stop_channels(Arc::clone(&inner), restart.clone()).await?;
+            Self::start_channels(inner, restart, controller_tx, telemetry_sender, shutdown_rx)
                 .await?;
         }
         Ok(())
@@ -2026,91 +2109,49 @@ async fn handle_failover_request(
     body: &Bytes,
     command_tx: &UnboundedSender<AdminCommand>,
 ) -> Option<ReadySetResult<Vec<u8>>> {
-    let await_response = |rx: tokio::sync::oneshot::Receiver<ReadySetResult<()>>| async move {
-        let result = tokio::time::timeout(FAILOVER_RESPONSE_TIMEOUT, rx)
-            .await
-            .map_err(|_| ReadySetError::Internal("failover command timed out".into()))?
-            .map_err(|_| ReadySetError::Internal("controller dropped".into()))?;
-        result?;
-        Ok(bincode::serialize(&())?)
+    if *method != Method::POST {
+        return None;
+    }
+    let (response, rx) = tokio::sync::oneshot::channel();
+    let command = match path {
+        "/stop_replication" => bincode::deserialize(body)
+            .map(|channel| AdminCommand::StopReplication { channel, response }),
+        "/start_replication" => bincode::deserialize(body)
+            .map(|channel| AdminCommand::StartReplication { channel, response }),
+        "/set_replication_position" => bincode::deserialize(body).map(|(position, channel)| {
+            AdminCommand::SetReplicationPosition {
+                position,
+                channel,
+                response,
+            }
+        }),
+        "/reload_upstream_servers" => Ok(AdminCommand::ReloadUpstreamServers(response)),
+        "/change_cdc_url" => {
+            bincode::deserialize(body).map(|url| AdminCommand::ChangeCdcUrl { url, response })
+        }
+        _ => return None,
     };
 
-    match (method, path) {
-        (&Method::POST, "/stop_replication") => {
-            let (tx, rx) = tokio::sync::oneshot::channel();
-            if command_tx.send(AdminCommand::StopReplication(tx)).is_err() {
-                return Some(Err(ReadySetError::Internal(
-                    "controller channel closed".into(),
-                )));
-            }
-            Some(await_response(rx).await)
-        }
-        (&Method::POST, "/start_replication") => {
-            let (tx, rx) = tokio::sync::oneshot::channel();
-            if command_tx.send(AdminCommand::StartReplication(tx)).is_err() {
-                return Some(Err(ReadySetError::Internal(
-                    "controller channel closed".into(),
-                )));
-            }
-            Some(await_response(rx).await)
-        }
-        (&Method::POST, "/set_replication_position") => {
-            let position: String = match bincode::deserialize(body) {
-                Ok(p) => p,
-                Err(e) => {
-                    return Some(Err(ReadySetError::Internal(format!(
-                        "deserialize error: {e}"
-                    ))))
-                }
-            };
-            let (tx, rx) = tokio::sync::oneshot::channel();
-            if command_tx
-                .send(AdminCommand::SetReplicationPosition {
-                    position,
-                    response: tx,
-                })
-                .is_err()
-            {
-                return Some(Err(ReadySetError::Internal(
-                    "controller channel closed".into(),
-                )));
-            }
-            Some(await_response(rx).await)
-        }
-        (&Method::POST, "/reload_upstream_servers") => {
-            let (tx, rx) = tokio::sync::oneshot::channel();
-            if command_tx
-                .send(AdminCommand::ReloadUpstreamServers(tx))
-                .is_err()
-            {
-                return Some(Err(ReadySetError::Internal(
-                    "controller channel closed".into(),
-                )));
-            }
-            Some(await_response(rx).await)
-        }
-        (&Method::POST, "/change_cdc_url") => {
-            let url: String = match bincode::deserialize(body) {
-                Ok(u) => u,
-                Err(e) => {
-                    return Some(Err(ReadySetError::Internal(format!(
-                        "deserialize error: {e}"
-                    ))))
-                }
-            };
-            let (tx, rx) = tokio::sync::oneshot::channel();
-            if command_tx
-                .send(AdminCommand::ChangeCdcUrl { url, response: tx })
-                .is_err()
-            {
-                return Some(Err(ReadySetError::Internal(
-                    "controller channel closed".into(),
-                )));
-            }
-            Some(await_response(rx).await)
-        }
-        _ => None,
-    }
+    Some(match command {
+        Ok(command) => send_admin_command(command_tx, command, rx).await,
+        Err(error) => Err(error.into()),
+    })
+}
+
+/// Send `command` to the controller event loop and await its response on `rx`.
+async fn send_admin_command(
+    command_tx: &UnboundedSender<AdminCommand>,
+    command: AdminCommand,
+    rx: tokio::sync::oneshot::Receiver<ReadySetResult<()>>,
+) -> ReadySetResult<Vec<u8>> {
+    command_tx
+        .send(command)
+        .map_err(|_| internal_err!("controller channel closed"))?;
+    tokio::time::timeout(FAILOVER_RESPONSE_TIMEOUT, rx)
+        .await
+        .map_err(|_| internal_err!("failover command timed out"))?
+        .map_err(|_| internal_err!("controller dropped"))??;
+    Ok(bincode::serialize(&())?)
 }
 
 async fn handle_controller_request(

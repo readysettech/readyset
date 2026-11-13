@@ -1074,23 +1074,30 @@ impl NoriaConnector {
         Ok(QueryResult::Empty)
     }
 
-    pub(crate) async fn stop_replication(&mut self) -> ReadySetResult<QueryResult<'static>> {
-        self.inner.noria.stop_replication().await?;
+    pub(crate) async fn stop_replication(
+        &mut self,
+        channel: Option<String>,
+    ) -> ReadySetResult<QueryResult<'static>> {
+        self.inner.noria.stop_replication(channel).await?;
         Ok(QueryResult::Empty)
     }
 
-    pub(crate) async fn start_replication(&mut self) -> ReadySetResult<QueryResult<'static>> {
-        self.inner.noria.start_replication().await?;
+    pub(crate) async fn start_replication(
+        &mut self,
+        channel: Option<String>,
+    ) -> ReadySetResult<QueryResult<'static>> {
+        self.inner.noria.start_replication(channel).await?;
         Ok(QueryResult::Empty)
     }
 
     pub(crate) async fn set_replication_position(
         &mut self,
         position: &str,
+        channel: Option<String>,
     ) -> ReadySetResult<QueryResult<'static>> {
         self.inner
             .noria
-            .set_replication_position(position.to_string())
+            .set_replication_position(position.to_string(), channel)
             .await?;
         Ok(QueryResult::Empty)
     }

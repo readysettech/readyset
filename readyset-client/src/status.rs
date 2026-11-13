@@ -129,8 +129,44 @@ impl From<ReadySetControllerStatus> for Vec<(String, String)> {
             ))
         }
 
+        // The aggregate rows describe a single channel completely.
+        if status.channels.len() > 1 {
+            for channel in status.channels {
+                let suffix = channel_suffix(channel.catalog.as_deref());
+                res.push((
+                    format!("{REPLICATION_STATUS_VARIABLE}{suffix}"),
+                    channel.replication_status.to_string(),
+                ));
+                if let Some(cdc_server) = channel.cdc_server {
+                    res.push((format!("{CDC_SERVER_VARIABLE}{suffix}"), cdc_server));
+                }
+                if let Some(offset) = channel.max_replication_offset {
+                    res.push((
+                        format!("{MAX_REPLICATION_OFFSET}{suffix}"),
+                        offset.to_string(),
+                    ));
+                }
+                if let Some(offset) = channel.min_replication_offset {
+                    res.push((
+                        format!("{MIN_REPLICATION_OFFSET}{suffix}"),
+                        offset.to_string(),
+                    ));
+                }
+            }
+        }
+
         res
     }
+}
+
+/// Return the replication channel of `catalog`: `''` for `None`, otherwise its name.
+pub fn replication_channel(catalog: Option<&str>) -> &str {
+    catalog.unwrap_or("")
+}
+
+/// Return the suffix of the status variables of the replication channel of `catalog`.
+pub fn channel_suffix(catalog: Option<&str>) -> String {
+    format!(" (channel '{}')", replication_channel(catalog))
 }
 
 /// Whether or not snapshotting has completed.
@@ -372,6 +408,55 @@ mod tests {
         assert_eq!(status.cdc_server, None);
         assert_eq!(status.min_replication_offset, offset("0/20"));
         assert_eq!(status.max_replication_offset, None);
+    }
+
+    #[test]
+    fn single_channel_has_only_aggregate_rows() {
+        let status = ReadySetControllerStatus::new(
+            CurrentStatus::Online,
+            vec![channel(
+                None,
+                ReplicationStatus::Running,
+                Some("url:5432"),
+                offset("0/20"),
+                offset("0/30"),
+            )],
+        );
+        let rows = Vec::<(String, String)>::from(status);
+        assert!(rows.iter().all(|(name, _)| !name.contains("(channel")));
+    }
+
+    #[test]
+    fn channel_rows() {
+        let status = ReadySetControllerStatus::new(
+            CurrentStatus::Online,
+            vec![
+                channel(
+                    None,
+                    ReplicationStatus::Running,
+                    Some("url:5432"),
+                    offset("0/20"),
+                    offset("0/30"),
+                ),
+                channel(Some("db2"), ReplicationStatus::Stopped, None, None, None),
+            ],
+        );
+        let rows = Vec::<(String, String)>::from(status);
+        let channel_rows: Vec<_> = rows
+            .iter()
+            .filter(|(name, _)| name.contains("(channel"))
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect();
+        assert_eq!(
+            channel_rows,
+            vec![
+                ("Replication Status (channel '')", "Running"),
+                ("CDC Server (channel '')", "url:5432"),
+                ("Maximum Replication Offset (channel '')", "(0/30, 0/30)"),
+                ("Minimum Replication Offset (channel '')", "(0/20, 0/20)"),
+                ("Replication Status (channel 'db2')", "Stopped"),
+            ]
+        );
     }
 
     #[test]

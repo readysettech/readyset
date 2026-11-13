@@ -6,7 +6,7 @@ use database_utils::{SharedUpstreamRegistry, UpstreamConfig};
 use readyset_client::ReadySetHandle;
 use readyset_client::consensus::{Authority, AuthorityControl};
 use readyset_client::debug::stats::PersistentStats;
-use readyset_client::status::ReadySetControllerStatus;
+use readyset_client::status::{ReadySetControllerStatus, channel_suffix};
 use readyset_common::host_info::{HostInfo, collect_host_info};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -50,6 +50,10 @@ impl ReadySetStatus {
             self.connection_count.to_string(),
         ));
 
+        let multiple_channels = self
+            .controller_status
+            .as_ref()
+            .is_some_and(|status| status.channels.len() > 1);
         if let Some(controller_status) = self.controller_status {
             status.append(&mut Vec::<(String, String)>::from(controller_status));
         } else {
@@ -73,7 +77,20 @@ impl ReadySetStatus {
                 time_or_null(stats.last_started_replication),
             ));
             if let Some(err) = stats.last_replicator_error {
-                status.push(("Last replicator error".to_string(), err))
+                let suffix = if multiple_channels {
+                    channel_suffix(None)
+                } else {
+                    String::new()
+                };
+                status.push((format!("Last replicator error{suffix}"), err))
+            }
+            let mut catalog_errors: Vec<_> = stats.catalog_replicator_errors.into_iter().collect();
+            catalog_errors.sort();
+            for (catalog, err) in catalog_errors {
+                status.push((
+                    format!("Last replicator error{}", channel_suffix(Some(&catalog))),
+                    err,
+                ));
             }
         }
 

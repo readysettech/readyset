@@ -1,3 +1,4 @@
+use readyset_client::status::replication_channel;
 use readyset_data::{DfType, DfValue};
 
 use crate::bind_vrel;
@@ -11,6 +12,7 @@ const REPLICATION_STATUS_SCHEMA: &[(&str, DfType)] = &[
     ("consume_lag", DfType::UnsignedBigInt),
     ("persist_lag", DfType::UnsignedBigInt),
     ("heartbeat_staleness_seconds", DfType::Double),
+    ("channel", DfType::DEFAULT_TEXT),
 ];
 
 fn replication_status_read(ctx: &VrelContext) -> VrelRead {
@@ -20,7 +22,7 @@ fn replication_status_read(ctx: &VrelContext) -> VrelRead {
             .replication_lag_status()
             .await
             .unwrap_or_default();
-        let rows: VrelRows = Box::new(statuses.into_iter().map(|(_, s)| {
+        let rows: VrelRows = Box::new(statuses.into_iter().map(|(catalog, s)| {
             vec![
                 s.mode.to_string().into(),
                 s.upstream_offset.into(),
@@ -31,6 +33,7 @@ fn replication_status_read(ctx: &VrelContext) -> VrelRead {
                 s.staleness_seconds
                     .map(DfValue::Double)
                     .unwrap_or(DfValue::None),
+                replication_channel(catalog.as_deref()).into(),
             ]
         }));
         Ok(rows)
