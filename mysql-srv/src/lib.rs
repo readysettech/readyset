@@ -312,25 +312,6 @@ impl Column {
     }
 }
 
-#[cfg(test)]
-mod column_tests {
-    use super::*;
-
-    #[test]
-    fn from_mysql_decodes_text_fields_per_results_encoding() {
-        let upstream = mysql_async::Column::new(ColumnType::MYSQL_TYPE_VAR_STRING)
-            .with_name(b"situa\xE7\xE3o");
-
-        let column = Column::from_mysql(&upstream, Encoding::LATIN1);
-        assert_eq!(column.column, "situação");
-
-        let upstream = mysql_async::Column::new(ColumnType::MYSQL_TYPE_VAR_STRING)
-            .with_name("situação".as_bytes());
-        let column = Column::from_mysql(&upstream, Encoding::Utf8);
-        assert_eq!(column.column, "situação");
-    }
-}
-
 pub use crate::error::MsqlSrvError;
 pub use crate::errorcodes::ErrorKind;
 pub use crate::params::{ParamParser, ParamValue, Params};
@@ -1308,5 +1289,24 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod column_tests {
+    use super::*;
+
+    #[test]
+    fn from_mysql_decodes_text_fields_per_results_encoding() {
+        let upstream = mysql_async::Column::new(ColumnType::MYSQL_TYPE_VAR_STRING)
+            .with_name(b"situa\xE7\xE3o");
+
+        let column = Column::from_mysql(&upstream, Encoding::LATIN1);
+        assert_eq!(column.column, "situação");
+
+        let upstream = mysql_async::Column::new(ColumnType::MYSQL_TYPE_VAR_STRING)
+            .with_name("situação".as_bytes());
+        let column = Column::from_mysql(&upstream, Encoding::Utf8);
+        assert_eq!(column.column, "situação");
     }
 }

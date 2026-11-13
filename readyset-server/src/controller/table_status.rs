@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap},
+    mem,
     sync::Arc,
 };
 
@@ -67,10 +68,9 @@ impl TableStatusState {
 
                 if is_single_process {
                     // Update our local table status state machine.
-                    if let Err(err) = table_statuses.set(statuses).await {
+                    if let Err(err) = table_statuses.set(mem::take(&mut statuses)).await {
                         error!("Dropping table statuses: {err}");
                     }
-                    statuses = HashMap::new();
                 } else {
                     // The controller is not local to this process, send via HTTP.
                     let mut controller = match controller_http.use_connection().await {
@@ -83,7 +83,7 @@ impl TableStatusState {
                     if let Err(err) = controller.set_table_status(&statuses).await {
                         error!("Failed to send table statuses via HTTP: {err}");
                     } else {
-                        statuses = HashMap::new();
+                        statuses.clear();
                     }
                 }
             }

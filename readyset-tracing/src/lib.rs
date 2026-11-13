@@ -138,7 +138,7 @@ impl Default for Options {
         Self {
             log_dir: None,
             log_file: None,
-            log_rotation: "daily".try_into().expect("daily is a valid log rotation"),
+            log_rotation: RotationCadence::Daily,
             log_format: LogFormat::Full,
             no_color: false,
             log_level: "info".to_owned(),
@@ -164,20 +164,6 @@ pub enum RotationCadence {
     Minutely,
     /// Never rotate logs
     Never,
-}
-
-impl TryFrom<&str> for RotationCadence {
-    type Error = Error;
-
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        match s {
-            "daily" => Ok(Self::Daily),
-            "hourly" => Ok(Self::Hourly),
-            "minutely" => Ok(Self::Minutely),
-            "never" => Ok(Self::Never),
-            _ => Err(Error::InvalidRotationCadence(s.to_owned())),
-        }
-    }
 }
 
 impl From<RotationCadence> for Rotation {

@@ -2221,7 +2221,7 @@ WHERE
         _ => panic!(),
     };
 
-    let dest: QueryDestination = destination.as_str().try_into().unwrap();
+    let dest: QueryDestination = destination.parse().unwrap();
 
     assert_matches!(dest, QueryDestination::Readyset(_));
     assert_eq!(status, "ok");

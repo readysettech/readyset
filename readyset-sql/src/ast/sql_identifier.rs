@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use std::convert::TryFrom;
 use std::fmt;
 use std::mem::size_of;
+use std::str::FromStr;
 
 use proptest::arbitrary::Arbitrary;
 use readyset_util::SizeOf;
@@ -106,11 +107,11 @@ impl TinyText {
     }
 }
 
-impl TryFrom<&str> for TinyText {
-    type Error = &'static str;
+impl FromStr for TinyText {
+    type Err = &'static str;
 
     /// If an str can fit inside a `TinyText` returns new `TinyText` with that str
-    fn try_from(s: &str) -> Result<Self, &'static str> {
+    fn from_str(s: &str) -> Result<Self, &'static str> {
         if s.len() > TINYTEXT_WIDTH {
             return Err("slice too long");
         }
@@ -231,7 +232,7 @@ impl Default for SqlIdentifier {
 impl From<&str> for SqlIdentifier {
     #[inline]
     fn from(s: &str) -> Self {
-        match TinyText::try_from(s) {
+        match TinyText::from_str(s) {
             Ok(tt) => SqlIdentifier(IdentInner::Tiny(tt)),
             Err(_) => SqlIdentifier(IdentInner::Text(s.into())),
         }

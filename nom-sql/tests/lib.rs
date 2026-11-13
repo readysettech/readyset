@@ -2,6 +2,7 @@ extern crate nom_sql;
 
 use std::fs::File;
 use std::io::Read;
+use std::mem;
 use std::path::Path;
 
 use readyset_sql::Dialect;
@@ -91,8 +92,7 @@ fn parse_file(dialect: Dialect, path: &str) -> (i32, i32) {
         } else {
             // end of query
             q.push_str(l);
-            queries.push(q.clone());
-            q = String::new();
+            queries.push(mem::take(&mut q));
         }
     }
     println!("Loaded {} table definitions", queries.len());
@@ -195,8 +195,7 @@ fn hotcrp_schema() {
         } else {
             // end of query
             q.push_str(l);
-            queries.push(q.clone());
-            q = String::new();
+            queries.push(mem::take(&mut q));
         }
     }
     println!("Loaded {} table definitions", queries.len());

@@ -1248,7 +1248,7 @@ async fn replication_of_other_tables_succeeds_even_after_error() {
         then_assert: |(result, destination)| {
             assert_eq!(result, [1]);
             assert_matches!(
-                destination.as_str().try_into(),
+                destination.parse(),
                 Ok(QueryDestination::Readyset(Some(_)))
             );
         }
@@ -1999,7 +1999,7 @@ async fn named_cache_queryable_after_being_cleared() {
         };
 
         assert_eq!(
-            destination.as_str().try_into(),
+            destination.parse(),
             Ok(QueryDestination::Readyset(Some("test".into())))
         );
 
@@ -2093,7 +2093,7 @@ mod failure_injection_tests {
             },
             then_assert: |result| {
                 let row = result();
-                let destination = QueryDestination::try_from(row.first().unwrap().as_str()).unwrap();
+                let destination = row.first().unwrap().parse::<QueryDestination>().unwrap();
                 assert_matches!(destination, QueryDestination::Readyset(_));
                 let status = row.get(1).unwrap();
                 assert_eq!(status, "ok");

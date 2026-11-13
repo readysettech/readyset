@@ -424,11 +424,11 @@ mod tests {
                             );
 
                             let index_hit = IndexHint {
-                                hint_type: hint_type.try_into().unwrap(),
-                                index_or_key: index_or_key.try_into().unwrap(),
+                                hint_type: hint_type.parse().unwrap(),
+                                index_or_key: index_or_key.parse().unwrap(),
                                 index_usage_type: match index_for {
                                     &"" => None,
-                                    _ => Some(index_for.trim().try_into().unwrap()),
+                                    _ => Some(index_for.trim().parse().unwrap()),
                                 },
                                 index_list: index_list.clone(),
                             };

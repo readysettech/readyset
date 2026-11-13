@@ -1,4 +1,5 @@
 use std::fmt;
+use std::str::FromStr;
 
 use itertools::Itertools;
 use readyset_util::fmt::fmt_with;
@@ -20,24 +21,16 @@ pub enum IndexHintType {
     Force,
 }
 
-impl TryFrom<&str> for IndexHintType {
-    type Error = AstConversionError;
+impl FromStr for IndexHintType {
+    type Err = AstConversionError;
 
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s {
             "USE" => IndexHintType::Use,
             "IGNORE" => IndexHintType::Ignore,
             "FORCE" => IndexHintType::Force,
             e => unsupported!("Unsupported index hint type: {e}")?,
         })
-    }
-}
-
-impl TryFrom<&&str> for IndexHintType {
-    type Error = AstConversionError;
-
-    fn try_from(s: &&str) -> Result<Self, Self::Error> {
-        IndexHintType::try_from(*s)
     }
 }
 
@@ -71,23 +64,15 @@ pub enum IndexOrKeyType {
     Key,
 }
 
-impl TryFrom<&str> for IndexOrKeyType {
-    type Error = AstConversionError;
+impl FromStr for IndexOrKeyType {
+    type Err = AstConversionError;
 
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s {
             "INDEX" => IndexOrKeyType::Index,
             "KEY" => IndexOrKeyType::Key,
             e => unsupported!("Invalid index or key type: {e}")?,
         })
-    }
-}
-
-impl TryFrom<&&str> for IndexOrKeyType {
-    type Error = AstConversionError;
-
-    fn try_from(s: &&str) -> Result<Self, Self::Error> {
-        IndexOrKeyType::try_from(*s)
     }
 }
 
@@ -113,24 +98,16 @@ pub enum IndexUsageType {
     GroupBy,
 }
 
-impl TryFrom<&str> for IndexUsageType {
-    type Error = AstConversionError;
+impl FromStr for IndexUsageType {
+    type Err = AstConversionError;
 
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s {
             "FOR JOIN" => IndexUsageType::Join,
             "FOR ORDER BY" => IndexUsageType::OrderBy,
             "FOR GROUP BY" => IndexUsageType::GroupBy,
             e => unsupported!("Invalid index usage type: {e}")?,
         })
-    }
-}
-
-impl TryFrom<&&str> for IndexUsageType {
-    type Error = AstConversionError;
-
-    fn try_from(s: &&str) -> Result<Self, Self::Error> {
-        IndexUsageType::try_from(*s)
     }
 }
 

@@ -376,7 +376,7 @@ impl<DB: UpstreamDatabase + 'static> ShallowRefreshPool<DB> {
                         Ok(vars) => {
                             upstream = Some(conn);
                             database = request.database.clone();
-                            session_vars = BTreeMap::new();
+                            session_vars.clear();
                             initial_vars = vars;
                         }
                         Err(e) => {

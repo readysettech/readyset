@@ -178,7 +178,11 @@ pub async fn last_query_info(conn: &Client) -> QueryInfo {
         _ => panic!("Unexpected SimpleQueryMessage"),
     };
 
-    let destination = QueryDestination::try_from(row.get("Query_destination").unwrap()).unwrap();
+    let destination = row
+        .get("Query_destination")
+        .unwrap()
+        .parse::<QueryDestination>()
+        .unwrap();
     let reason = row.get("Readyset_reason").unwrap().to_owned();
 
     QueryInfo {

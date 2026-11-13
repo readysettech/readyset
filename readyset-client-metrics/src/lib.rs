@@ -1,5 +1,6 @@
 use std::convert::TryFrom;
 use std::fmt;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -126,9 +127,9 @@ impl Default for QueryDestination {
     }
 }
 
-impl TryFrom<&str> for QueryDestination {
-    type Error = ReadySetError;
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
+impl FromStr for QueryDestination {
+    type Err = ReadySetError;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
         if let Some(name) = value
             .strip_prefix("readyset(")
             .and_then(|s| s.strip_suffix(')'))
@@ -164,7 +165,7 @@ impl TryFrom<&str> for QueryDestination {
 impl TryFrom<String> for QueryDestination {
     type Error = ReadySetError;
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        value.as_str().try_into()
+        value.parse()
     }
 }
 
@@ -322,7 +323,7 @@ mod tests {
         ] {
             let printed = dest.to_string();
             assert_eq!(
-                QueryDestination::try_from(printed.as_str()).unwrap(),
+                printed.parse::<QueryDestination>().unwrap(),
                 dest,
                 "{printed} did not parse back to {dest:?}"
             );

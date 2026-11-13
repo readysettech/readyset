@@ -30,7 +30,7 @@ async fn last_target(client: &Client) -> (QueryDestination, String) {
             _ => None,
         })
         .expect("EXPLAIN LAST STATEMENT row");
-    let destination = QueryDestination::try_from(row.get(0).expect("destination")).unwrap();
+    let destination = row.get(0).expect("destination").parse::<QueryDestination>().unwrap();
     (destination, row.get(1).unwrap_or_default().to_owned())
 }
 

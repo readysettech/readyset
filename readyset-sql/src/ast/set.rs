@@ -1,4 +1,5 @@
 use std::fmt;
+use std::str::FromStr;
 
 use itertools::Itertools;
 use proptest::option;
@@ -331,10 +332,10 @@ pub enum VariableScope {
     Session,
 }
 
-impl TryFrom<&str> for VariableScope {
-    type Error = AstConversionError;
+impl FromStr for VariableScope {
+    type Err = AstConversionError;
 
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
         Ok(if value.eq_ignore_ascii_case("@@LOCAL") {
             Self::Local
         } else if value.eq_ignore_ascii_case("@@GLOBAL") {
@@ -354,9 +355,7 @@ impl TryFrom<sqlparser::ast::ObjectNamePart> for VariableScope {
 
     fn try_from(value: sqlparser::ast::ObjectNamePart) -> Result<Self, Self::Error> {
         match value {
-            sqlparser::ast::ObjectNamePart::Identifier(ident) => {
-                VariableScope::try_from(ident.value.as_str())
-            }
+            sqlparser::ast::ObjectNamePart::Identifier(ident) => ident.value.parse(),
             sqlparser::ast::ObjectNamePart::Function(_) => {
                 unsupported!("identifier constructor in variable scope")
             }
@@ -451,7 +450,7 @@ impl TryFromDialect<Vec<sqlparser::ast::Ident>> for Variable {
         if value.is_empty() {
             Ok(name.try_into_dialect(dialect)?)
         } else if value.len() == 1 {
-            let scope = value.pop().unwrap().value.as_str().try_into()?;
+            let scope = value.pop().unwrap().value.parse()?;
             Ok(Self {
                 scope,
                 name: name.into(),

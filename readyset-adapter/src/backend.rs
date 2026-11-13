@@ -1673,8 +1673,7 @@ impl FromRow for QueryInfo {
                 let dest = std::str::from_utf8(d).map_err(|_| FromRowError(row.clone()))?;
 
                 if c.name_str() == "Query_destination" {
-                    res.destination =
-                        QueryDestination::try_from(dest).map_err(|_| FromRowError(row.clone()))?;
+                    res.destination = dest.parse().map_err(|_| FromRowError(row.clone()))?;
                 } else if c.name_str() == "Readyset_reason" {
                     res.reason = std::str::from_utf8(d)
                         .map_err(|_| FromRowError(row.clone()))?

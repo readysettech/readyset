@@ -115,7 +115,7 @@ impl RawPgConn {
             .next()
             .and_then(|cols| cols.into_iter().next())
             .expect("EXPLAIN LAST STATEMENT row");
-        QueryDestination::try_from(dest.as_str()).expect("valid query destination")
+        dest.parse::<QueryDestination>().expect("valid query destination")
     }
 
     /// Parse/Bind/Execute `query` as an unnamed prepared statement with a single

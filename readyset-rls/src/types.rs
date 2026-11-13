@@ -38,37 +38,6 @@ impl RlsConfig {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn poll_interval_clamps_to_supported_range() {
-        assert_eq!(RlsConfig::default().poll_interval, Duration::from_secs(60));
-
-        let one_sec = Duration::from_secs(1);
-        let one_day = Duration::from_secs(24 * 60 * 60);
-        assert_eq!(
-            RlsConfig::default()
-                .with_poll_interval(Duration::ZERO)
-                .poll_interval,
-            one_sec
-        );
-        assert_eq!(
-            RlsConfig::default()
-                .with_poll_interval(Duration::from_secs(u64::from(u32::MAX)))
-                .poll_interval,
-            one_day
-        );
-        assert_eq!(
-            RlsConfig::default()
-                .with_poll_interval(Duration::from_secs(5))
-                .poll_interval,
-            Duration::from_secs(5)
-        );
-    }
-}
-
 /// A session-scoped input a policy expression reads. The analyzer emits
 /// the set of these a scoped cache must fold into its lookup key; the
 /// adapter resolves each against the session's state at lookup time.
@@ -109,4 +78,35 @@ pub struct FunctionMeta {
     /// Session inputs the function reads; folded into the cache key
     /// wherever the function appears in a policy.
     pub reads: Box<[SessionInputType]>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn poll_interval_clamps_to_supported_range() {
+        assert_eq!(RlsConfig::default().poll_interval, Duration::from_secs(60));
+
+        let one_sec = Duration::from_secs(1);
+        let one_day = Duration::from_secs(24 * 60 * 60);
+        assert_eq!(
+            RlsConfig::default()
+                .with_poll_interval(Duration::ZERO)
+                .poll_interval,
+            one_sec
+        );
+        assert_eq!(
+            RlsConfig::default()
+                .with_poll_interval(Duration::from_secs(u64::from(u32::MAX)))
+                .poll_interval,
+            one_day
+        );
+        assert_eq!(
+            RlsConfig::default()
+                .with_poll_interval(Duration::from_secs(5))
+                .poll_interval,
+            Duration::from_secs(5)
+        );
+    }
 }

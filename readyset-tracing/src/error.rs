@@ -5,8 +5,6 @@ use tracing_subscriber::{filter::ParseError, reload};
 pub enum Error {
     #[error("failed to parse filter: {0}")]
     Parse(#[from] ParseError),
-    #[error("invalid rotation cadence: {0}")]
-    InvalidRotationCadence(String),
     #[error("could not open file for appending: {0}")]
     CouldNotOpenFile(#[from] std::io::Error),
     #[error("log level reload handle not initialized")]

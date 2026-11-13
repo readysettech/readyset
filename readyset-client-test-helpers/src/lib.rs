@@ -1284,7 +1284,7 @@ pub async fn explain_last_statement(conn: &mut DatabaseConnection) -> QueryInfo 
         .get_single_row()
         .unwrap();
 
-    let destination = QueryDestination::try_from(row.get(0).unwrap().as_str()).unwrap();
+    let destination = row.get(0).unwrap().parse::<QueryDestination>().unwrap();
 
     QueryInfo {
         destination,
