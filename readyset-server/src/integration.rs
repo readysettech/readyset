@@ -7674,6 +7674,308 @@ async fn straddled_join_beside_a_partial_ingress_takes_a_write_at_a_filled_key()
     shutdown_tx.shutdown().await;
 }
 
+/// The first migration adds `u`, the UNION ALL of two projections of `t`, and a partial reader on
+/// `u` keyed on `c0`. The replay paths of that reader start at `t` and go through `u`. The second
+/// migration joins `s` with `u` on `g` and adds a full reader below the join. The join looks up
+/// rows of `u` by `g`, so it needs a full state of `u`.
+///
+/// A full state on `u` would be on the replay paths of the first reader. A replay for that reader
+/// would then write rows of `t` into that state, which already holds them, and the join would find
+/// a second copy. So the planner gives the join a copy of `u` with a full state, and `u` stays
+/// without state.
+#[tokio::test(flavor = "multi_thread")]
+async fn refill_through_a_union_that_a_later_join_reads_keeps_the_join_exact() {
+    use crate::controller::migrate::Migration;
+
+    let (mut g, shutdown_tx) = start_simple_unsharded("refill_through_later_full_union").await;
+    let col = |index| DfExpr::Column {
+        index,
+        ty: DfType::Unknown,
+    };
+    let (t, u, s) = g
+        .migrate(move |mig: &mut Migration<'_>| {
+            let columns = make_columns(&["c0", "g", "p"]);
+            let t = mig.add_base("t", columns, Base::new().with_primary_key([0]));
+            let arm = |mig: &mut Migration<'_>, name| {
+                let project = Project::new(t, vec![col(0), col(1)]);
+                mig.add_ingredient(name, make_columns(&["c0", "g"]), project)
+            };
+            let (a1, a2) = (arm(mig, "a1"), arm(mig, "a2"));
+            let emits = HashMap::from([(a1, vec![0, 1]), (a2, vec![0, 1])]);
+            let u = Union::new(emits, union::DuplicateMode::UnionAll).unwrap();
+            let u = mig.add_ingredient("u", make_columns(&["c0", "g"]), u);
+            mig.maintain_anonymous(u, &Index::hash_map(vec![0]));
+            let s = mig.add_base(
+                "s",
+                make_columns(&["c0", "g"]),
+                Base::new().with_primary_key([0]),
+            );
+            (t, u, s)
+        })
+        .await;
+    g.migrate(move |mig| {
+        // With `s` as the left input, the join runs in the domain of `u`, and the nearest node
+        // where it can look up rows of `u` is `u` itself. In another domain it would look them up
+        // in the state of a new ingress, which is off the replay paths of the reader on `u`.
+        let emit = vec![(Side::Right, 0), (Side::Left, 0), (Side::Right, 1)];
+        let j = Join::new(s, u, JoinType::Inner, vec![(1, 1)], emit, true, None);
+        let j = mig.add_ingredient("j", make_columns(&["c0", "c1", "g"]), j);
+        let bogokey = DfExpr::Literal {
+            val: 0.into(),
+            ty: DfType::Int,
+        };
+        let jb = Project::new(j, vec![col(0), col(1), bogokey]);
+        let jb = mig.add_ingredient("jb", make_columns(&["c0", "c1", "bogokey"]), jb);
+        mig.maintain_anonymous(jb, &Index::hash_map(vec![2]));
+    })
+    .await;
+    let states = g.materialization_info().await.unwrap();
+    assert!(states.iter().all(|m| m.node_index != u), "{states:?}");
+    let copy = states
+        .iter()
+        .find(|m| m.node_name.name == "u" && m.node_description != "R")
+        .expect("the join reads a copy of the union");
+    assert!(!copy.partial, "{copy:?}");
+
+    let mut t = g.table_by_index(t).await.unwrap();
+    let mut s = g.table_by_index(s).await.unwrap();
+    let mut union_reader = g.view("u").await.unwrap().into_reader_handle().unwrap();
+    let mut join_reader = g.view("jb").await.unwrap().into_reader_handle().unwrap();
+    let key = [DfValue::from(0)];
+    let read_union = async |r: &mut readyset_client::ReaderHandle| {
+        let rows = r
+            .lookup(&key, Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec();
+        rows.into_iter().sorted().collect::<Vec<_>>()
+    };
+    let read_join = async |r: &mut readyset_client::ReaderHandle| {
+        let rows = r
+            .lookup(&key, Dialect::DEFAULT_MYSQL)
+            .await
+            .unwrap()
+            .into_vec();
+        rows.into_iter()
+            .map(|r| (i32::try_from(&r[0]).unwrap(), i32::try_from(&r[1]).unwrap()))
+            .sorted()
+            .collect::<Vec<_>>()
+    };
+    // Read key 0 from the reader on `u` while `t` is empty. The replay for this read carries no
+    // rows. The inserts below then reach the full state of `u` and key 0 of the reader as writes.
+    assert!(read_union(&mut union_reader).await.is_empty());
+    for c0 in 0..2 {
+        t.insert(vec![c0.into(), 0.into(), 0.into()]).await.unwrap();
+    }
+    s.insert(vec![10.into(), 0.into()]).await.unwrap();
+    // `u` emits each row of `t` twice, once from each projection, so the join emits each pair of a
+    // `t` row and an `s` row twice.
+    let pairs = |s_rows: std::ops::Range<i32>| {
+        (0..2)
+            .cartesian_product(s_rows)
+            .flat_map(|p| [p; 2])
+            .collect::<Vec<_>>()
+    };
+    eventually!(
+        run_test: { read_join(&mut join_reader).await },
+        then_assert: |rows| assert_eq!(rows, pairs(10..11))
+    );
+
+    let eviction = g
+        .evict_single(None)
+        .await
+        .unwrap()
+        .expect("the union's reader holds key 0");
+    assert_eq!(eviction.key, key);
+    let union_row = vec![DfValue::from(0), DfValue::from(0)];
+    eventually!(
+        run_test: { read_union(&mut union_reader).await },
+        then_assert: |rows| assert_eq!(rows, vec![union_row.clone(); 2])
+    );
+    // This write makes the join look up `g = 0` in its full state of `u`. That state must still
+    // hold each row of `t` twice. A copy from the replay would add extra pairs for the new row.
+    s.insert(vec![11.into(), 0.into()]).await.unwrap();
+    eventually!(
+        run_test: { read_join(&mut join_reader).await },
+        then_assert: |rows| assert_eq!(rows, pairs(10..12))
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
+/// `w` is a view of `u JOIN t` with rows 1 to 3, read through `caches`. A cache over `w` reads the
+/// join's output through the view, which holds no state, so its replays run through the join.
+async fn start_caches_over_a_view_of_a_join(
+    prefix: &str,
+    caches: &[&str],
+) -> (crate::Handle, ShutdownSender) {
+    let (mut g, shutdown_tx) = start_simple_unsharded(prefix).await;
+    let mut sql = vec![
+        "CREATE TABLE t (id int PRIMARY KEY, k int, c1 int);",
+        "CREATE TABLE u (id int PRIMARY KEY);",
+        "CREATE TABLE x (id int PRIMARY KEY, k int, c int);",
+        "CREATE VIEW w AS SELECT t.id AS id, t.k AS k, t.c1 AS c1 FROM u JOIN t ON t.id = u.id;",
+    ];
+    sql.extend_from_slice(caches);
+    extend_view_of_a_join(&mut g, &sql).await;
+    let mut t = g.table("t").await.unwrap();
+    let mut u = g.table("u").await.unwrap();
+    for (id, k, c1) in [(1, 1, 1), (2, 1, 2), (3, 2, 1)] {
+        t.insert(int_row(&[id, k, c1])).await.unwrap();
+        u.insert(int_row(&[id])).await.unwrap();
+    }
+    let mut x = g.table("x").await.unwrap();
+    x.insert(int_row(&[10, 1, 1])).await.unwrap();
+    sleep().await;
+    (g, shutdown_tx)
+}
+
+async fn extend_view_of_a_join(g: &mut crate::Handle, sql: &[&str]) {
+    g.extend_recipe(ChangeList::from_strings(sql.to_vec(), Dialect::DEFAULT_MYSQL).unwrap())
+        .await
+        .unwrap();
+}
+
+/// A later cache that looks `w` up on `k`, which it can do only at a materialization of the join.
+const LOOKS_UP_THE_VIEW_ON_K: &str =
+    "CREATE CACHE q2 FROM SELECT x.id AS xid, w.id AS wid FROM x JOIN w ON x.k = w.k WHERE x.c = ?;";
+
+/// Deletes row 3 of `w`, moves row 2 from `c1 = 2` to 1 and adds row 4 under `k = 1, c1 = 1`.
+async fn write_the_view_of_a_join(g: &mut crate::Handle) {
+    let mut t = g.table("t").await.unwrap();
+    let mut u = g.table("u").await.unwrap();
+    t.delete(int_row(&[3])).await.unwrap();
+    u.delete(int_row(&[3])).await.unwrap();
+    t.update(int_row(&[2]), vec![(2, Modification::Set(1.into()))])
+        .await
+        .unwrap();
+    t.insert(int_row(&[4, 1, 1])).await.unwrap();
+    u.insert(int_row(&[4])).await.unwrap();
+    sleep().await;
+}
+
+/// q1 holds keys of `c1` that q2, which looks the view's join up on `k`, has not read. q1 still
+/// sees every write under them.
+#[tokio::test(flavor = "multi_thread")]
+async fn earlier_cache_below_a_join_a_later_cache_looks_up() {
+    let q1 = "CREATE CACHE q1 FROM SELECT id FROM w WHERE c1 = ?;";
+    let (mut g, shutdown_tx) =
+        start_caches_over_a_view_of_a_join("earlier_cache_below_a_join_a_later_cache", &[q1]).await;
+    let q1_at = |key| CacheRead::at("q1", key, &["id"]);
+    assert_eq!(
+        cache_rows(&mut g, &q1_at(1)).await,
+        [int_row(&[1]), int_row(&[3])]
+    );
+    assert_eq!(cache_rows(&mut g, &q1_at(2)).await, [int_row(&[2])]);
+
+    extend_view_of_a_join(&mut g, &[LOOKS_UP_THE_VIEW_ON_K]).await;
+    write_the_view_of_a_join(&mut g).await;
+    assert_eq!(
+        cache_rows(&mut g, &q1_at(1)).await,
+        [int_row(&[1]), int_row(&[2]), int_row(&[4])]
+    );
+    assert_eq!(
+        cache_rows(&mut g, &q1_at(2)).await,
+        Vec::<Vec<DfValue>>::new()
+    );
+    assert_eq!(
+        cache_rows(&mut g, &CacheRead::at("q2", 1, &["xid", "wid"])).await,
+        [int_row(&[10, 1]), int_row(&[10, 2]), int_row(&[10, 4])]
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
+/// An earlier count over the view holds state below the view's join, and q4, created with q2,
+/// reads the view on `k` with no node of its own between them. Every cache reads every write.
+#[tokio::test(flavor = "multi_thread")]
+async fn earlier_count_below_a_join_and_a_cache_beside_the_one_that_looks_it_up() {
+    let n1 = "CREATE CACHE n1 FROM SELECT c1, count(*) AS n FROM w WHERE c1 = ? GROUP BY c1;";
+    let (mut g, shutdown_tx) =
+        start_caches_over_a_view_of_a_join("earlier_count_below_a_join_and_a_cache_beside", &[n1])
+            .await;
+    let n1_at = |key| CacheRead::at("n1", key, &["c1", "n"]);
+    assert_eq!(cache_rows(&mut g, &n1_at(1)).await, [int_row(&[1, 2])]);
+    assert_eq!(cache_rows(&mut g, &n1_at(2)).await, [int_row(&[2, 1])]);
+
+    let q4 = "CREATE CACHE q4 FROM SELECT * FROM w WHERE k = ?;";
+    extend_view_of_a_join(&mut g, &[LOOKS_UP_THE_VIEW_ON_K, q4]).await;
+    write_the_view_of_a_join(&mut g).await;
+    assert_eq!(cache_rows(&mut g, &n1_at(1)).await, [int_row(&[1, 3])]);
+    assert_eq!(
+        cache_rows(&mut g, &n1_at(2)).await,
+        Vec::<Vec<DfValue>>::new()
+    );
+    assert_eq!(
+        cache_rows(&mut g, &CacheRead::at("q4", 1, &["id", "k", "c1"])).await,
+        [
+            int_row(&[1, 1, 1]),
+            int_row(&[2, 1, 1]),
+            int_row(&[4, 1, 1])
+        ]
+    );
+    assert_eq!(
+        cache_rows(&mut g, &CacheRead::at("q2", 1, &["xid", "wid"])).await,
+        [int_row(&[10, 1]), int_row(&[10, 2]), int_row(&[10, 4])]
+    );
+
+    shutdown_tx.shutdown().await;
+}
+
+/// q2 reads `w2`, a join of `w` with `x`, as it is, so it adds only a reader. Its key takes a
+/// column from each side of `w`'s join, so it needs an index on that join, which q1's replays run
+/// through. Both caches read every write.
+#[tokio::test(flavor = "multi_thread")]
+async fn later_reader_keyed_across_a_join_below_another_join() {
+    let (mut g, shutdown_tx) = start_simple_unsharded("later_reader_keyed_across_a_join").await;
+    extend_view_of_a_join(
+        &mut g,
+        &[
+            "CREATE TABLE t (id int PRIMARY KEY, c1 int);",
+            "CREATE TABLE u (id int PRIMARY KEY, c2 int);",
+            "CREATE TABLE x (id int PRIMARY KEY);",
+            "CREATE VIEW w AS SELECT t.id AS id, t.c1 AS c1, u.c2 AS c2 FROM u JOIN t ON t.id = u.id;",
+            "CREATE VIEW w2 AS SELECT w.id AS id, w.c1 AS c1, w.c2 AS c2 FROM w JOIN x ON x.id = w.id;",
+            "CREATE CACHE q1 FROM SELECT id, c1, c2 FROM w2 WHERE c1 = ?;",
+        ],
+    )
+    .await;
+    let mut t = g.table("t").await.unwrap();
+    let mut u = g.table("u").await.unwrap();
+    let mut x = g.table("x").await.unwrap();
+    for (id, c1, c2) in [(1, 1, 1), (2, 1, 2), (3, 2, 1)] {
+        t.insert(int_row(&[id, c1])).await.unwrap();
+        u.insert(int_row(&[id, c2])).await.unwrap();
+        x.insert(int_row(&[id])).await.unwrap();
+    }
+    sleep().await;
+    let columns = &["id", "c1", "c2"];
+    let q1 = CacheRead::at("q1", 1, columns);
+    let q2 = CacheRead {
+        cache: "q2",
+        key: int_row(&[1, 1]),
+        columns,
+    };
+    assert_eq!(
+        cache_rows(&mut g, &q1).await,
+        [int_row(&[1, 1, 1]), int_row(&[2, 1, 2])]
+    );
+
+    let q2_sql = "CREATE CACHE q2 FROM SELECT id, c1, c2 FROM w2 WHERE c1 = ? AND c2 = ?;";
+    extend_view_of_a_join(&mut g, &[q2_sql]).await;
+    assert_eq!(cache_rows(&mut g, &q2).await, [int_row(&[1, 1, 1])]);
+
+    u.update(int_row(&[2]), vec![(1, Modification::Set(1.into()))])
+        .await
+        .unwrap();
+    sleep().await;
+    let both = [int_row(&[1, 1, 1]), int_row(&[2, 1, 1])];
+    assert_eq!(cache_rows(&mut g, &q1).await, both);
+    assert_eq!(cache_rows(&mut g, &q2).await, both);
+
+    shutdown_tx.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn straddled_join_beside_a_partial_ingress_reads_a_cold_key() {
     let (mut g, shutdown_tx, [mut a, mut b]) =

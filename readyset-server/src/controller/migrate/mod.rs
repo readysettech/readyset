@@ -1175,26 +1175,37 @@ fn plan_add_nodes(
         // And now, the last piece of the puzzle -- set up materializations
         debug!("initializing new materializations");
 
-        dataflow_state.materializations.extend(
+        // `extend` returns an edge if the new nodes would give a state, full or partial, to an
+        // existing node that a partial replay path goes through. The copy of the parent then takes
+        // every new child of the parent, so that all new nodes read the same node. Otherwise, check
+        // to see if we've just tried to add a fully materialized node below an existing partially
+        // materialized node
+        let (invalid_edge, move_new_children) = match dataflow_state.materializations.extend(
             &mut dataflow_state.ingredients,
             &new_nodes,
             &dmp,
-        )?;
+        )? {
+            Some(edge) => (Some(edge), true),
+            None => (
+                dataflow_state
+                    .materializations
+                    .validate(&dataflow_state.ingredients, &new_nodes)?,
+                false,
+            ),
+        };
+        if let Some(InvalidEdge { parent, child }) = invalid_edge {
+            debug!(?child, ?parent, "rerouting node to a copy of its parent");
+            let mut children = vec![child];
+            if move_new_children {
+                children = dataflow_state
+                    .ingredients
+                    .neighbors_directed(parent, petgraph::EdgeDirection::Outgoing)
+                    .filter(|c| new_nodes.contains(c))
+                    .collect();
+                children.sort();
+            }
 
-        // Check to see if we've just tried to add a fully materialized node below an existing
-        // partially materialized node
-        if let Some(InvalidEdge { parent, child }) = dataflow_state
-            .materializations
-            .validate(&dataflow_state.ingredients, &new_nodes)?
-        {
-            debug!(
-                ?child,
-                ?parent,
-                "rerouting full node found below partial node",
-            );
-
-            // Try to find an existing fully materialized equivalent of that partially materialized
-            // parent
+            // Try to find an existing copy of that parent
             let (duplicate_index, is_new) =
                 if let Some(idx) = dataflow_state.materializations.get_redundant(&parent) {
                     (*idx, false)
@@ -1208,17 +1219,9 @@ fn plan_add_nodes(
                     // add to graph
                     let idx = dataflow_state.ingredients.add_node(duplicate_node);
                     local_redundant_partial.insert(parent, idx);
-                    // Add the child node to `new_nodes`, so that on the next iteration of the
-                    // loop we make sure that any lookup obligations into the duplicated parent
-                    // are satisfied
-                    new_nodes.insert(child);
-                    dataflow_state.ingredients[child].replace_sibling(parent, idx);
                     (idx, true)
                 };
 
-            dataflow_state
-                .ingredients
-                .add_edge(duplicate_index, child, ());
             if is_new {
                 // Recreate edges coming into parent on duplicate
                 let incoming: Vec<_> = dataflow_state
@@ -1231,14 +1234,24 @@ fn plan_add_nodes(
                 // Add to new nodes for processing in next loop iteration
                 new_nodes.insert(duplicate_index);
             }
-            // Indicate that the incoming nodes have changed. This entry will be read during
-            // the remapping stage in the next iteration of the loop
-            swapped.insert((child, parent), duplicate_index);
-            // remove old edge
-            #[allow(clippy::unwrap_used)]
-            // we just found this edge in Materializations::validate()
-            let old_edge = dataflow_state.ingredients.find_edge(parent, child).unwrap();
-            dataflow_state.ingredients.remove_edge(old_edge);
+            for child in children {
+                if is_new || move_new_children {
+                    // Add the child node to `new_nodes`, so that on the next iteration of the
+                    // loop we make sure that any lookup obligations into the duplicated parent
+                    // are satisfied
+                    new_nodes.insert(child);
+                    dataflow_state.ingredients[child].replace_sibling(parent, duplicate_index);
+                }
+                // Indicate that the incoming nodes have changed. This entry will be read during
+                // the remapping stage in the next iteration of the loop
+                swapped.insert((child, parent), duplicate_index);
+                #[allow(clippy::unwrap_used)] // `child` is a child of `parent`
+                let old_edge = dataflow_state.ingredients.find_edge(parent, child).unwrap();
+                dataflow_state.ingredients.remove_edge(old_edge);
+                dataflow_state
+                    .ingredients
+                    .add_edge(duplicate_index, child, ());
+            }
         } else {
             dataflow_state.domain_nodes = domain_nodes;
 

@@ -373,7 +373,13 @@ impl DfState {
         // metric. since we know that the reader must be relatively close, a BFS search is the way
         // to go.
         let mut bfs = Bfs::new(&self.ingredients, node);
-        while let Some(child) = bfs.next(&self.ingredients) {
+        let below = std::iter::from_fn(|| bfs.next(&self.ingredients));
+        // Migration planning can reroute a reader onto copies of `node` and its ancestors. The
+        // reader is still for `node`, but it is not below `node`.
+        let rerouted = self
+            .ingredients
+            .externals(petgraph::EdgeDirection::Outgoing);
+        for child in below.chain(rerouted) {
             if self.ingredients[child].is_reader_for(node) && self.ingredients[child].name() == name
             {
                 // Check for any filter requirements we can satisfy when
@@ -1999,8 +2005,24 @@ impl DfState {
 
         routing::connect(&self.ingredients, &mut dmp, &new)?;
 
-        self.materializations
-            .extend(&mut self.ingredients, &new, &dmp)?;
+        if let Some(edge) = self
+            .materializations
+            .extend(&mut self.ingredients, &new, &dmp)?
+        {
+            antithesis_sdk::assert_unreachable!(
+                "recovery got a rejected materialization plan",
+                &serde_json::json!({
+                    "parent": edge.parent.index(),
+                    "child": edge.child.index(),
+                })
+            );
+            internal!(
+                "recovery got a materialization plan that needs a reroute of the edge from node \
+                 {} to node {}",
+                edge.parent.index(),
+                edge.child.index()
+            );
+        }
 
         self.materializations
             .commit(&mut self.ingredients, &new, &mut dmp)?;

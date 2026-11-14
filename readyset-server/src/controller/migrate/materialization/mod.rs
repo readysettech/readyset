@@ -5,7 +5,7 @@
 //! domains, but does not perform that copying itself (that is the role of the `augmentation`
 //! module).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{self, Display};
 
 use bimap::BiHashMap;
@@ -143,7 +143,9 @@ pub(in crate::controller) struct Materializations {
     pub(in crate::controller) paths: HashMap<NodeIndex, BiHashMap<Tag, (Index, Vec<NodeIndex>)>>,
 
     /// Map of full nodes that are duplicates of partial nodes. Entries are added when we perform
-    /// rerouting of full nodes found below partial nodes in migration planning.
+    /// rerouting of full nodes found below partial nodes in migration planning. Entries are also
+    /// added when we reroute new nodes that would give state to an existing node that a partial
+    /// replay path goes through (see [`Materializations::replayed_stateless_nodes`]).
     pub(in crate::controller) redundant_partial: HashMap<NodeIndex, NodeIndex>,
 
     partial: HashSet<NodeIndex>,
@@ -217,13 +219,17 @@ impl Materializations {
 
     /// Extend the current set of materializations with any additional materializations needed to
     /// satisfy indexing obligations in the given set of (new) nodes.
+    ///
+    /// If the new nodes would give a state to an existing node that a partial replay path goes
+    /// through, this returns the edge to reroute and changes no materialization. See
+    /// [`Materializations::replayed_stateless_nodes`].
     #[allow(clippy::cognitive_complexity)]
     pub(in crate::controller) fn extend(
         &mut self,
         graph: &mut Graph,
         new: &HashSet<NodeIndex>,
         dmp: &DomainMigrationPlan,
-    ) -> ReadySetResult<()> {
+    ) -> ReadySetResult<Option<InvalidEdge>> {
         let span = info_span!("materializations:extend");
         let _g = span.enter();
         // this code used to be a mess, and will likely be a mess this time around too.
@@ -339,6 +345,13 @@ impl Materializations {
                 }
             }
         }
+
+        // If a reroute is possible, save the materializations so that a reroute can undo this call.
+        let replayed = self.replayed_stateless_nodes(graph, new);
+        let saved = (!replayed.is_empty()).then(|| {
+            let added = (self.added.clone(), self.added_weak.clone());
+            (self.have.clone(), added, self.partial.clone())
+        });
 
         // map all the indices to the corresponding columns in the parent
         fn map_lookup_indices(
@@ -674,6 +687,31 @@ impl Materializations {
         }
         assert!(replay_obligations.is_empty());
 
+        let gained_state = replayed.iter().filter(|n| self.have.contains_key(n)).min();
+        if let (Some(&node), Some((have, (added, added_weak), partial))) = (gained_state, saved) {
+            let full = !self.partial.contains(&node);
+            (self.have, self.added, self.added_weak, self.partial) =
+                (have, added, added_weak, partial);
+            let Some(edge) = self.edge_to_new_node(graph, new, node) else {
+                internal!(
+                    "a migration gives a state to node {}, which a partial replay path goes \
+                     through, and no new node below it can be rerouted",
+                    node.index()
+                );
+            };
+            if full {
+                antithesis_sdk::assert_reachable!(
+                    "planner reroutes new nodes away from a full state on a partial replay path"
+                );
+            } else {
+                antithesis_sdk::assert_reachable!(
+                    "planner reroutes new nodes away from a partial state on a partial replay path"
+                );
+            }
+            debug!(node = %node.index(), full, "a partial replay path goes through a new state");
+            return Ok(Some(edge));
+        }
+
         // Mark nodes as beyond the frontier as dictated by the strategy
         for &ni in new {
             #[allow(clippy::unwrap_used)] // graph must contain nodes in new
@@ -728,7 +766,71 @@ impl Materializations {
             }
         }
 
-        Ok(())
+        Ok(None)
+    }
+
+    /// The existing nodes without state that a replay path of a live partial node goes through.
+    ///
+    /// A partial replay path starts at the nearest node with state above its target, so the nodes
+    /// between them have no state. A migration must not give one of them a state, full or partial:
+    ///
+    /// - A full state already holds the rows that a replay on the path carries, so it would hold a
+    ///   second copy of them.
+    /// - A partial state does not know the tag of the path, so a replay does not fill it. The node
+    ///   then drops each write whose key is a hole in that state, and the target of the path
+    ///   misses that write.
+    ///
+    /// The existing paths cannot be planned again: a domain cannot remove a replay path, a miss
+    /// triggers every path for an index, and replays on the old paths can be in flight during the
+    /// migration. So if `extend` gives a state to one of these nodes, the migration gives a copy of
+    /// that node to the new nodes below it instead (see [`Materializations::edge_to_new_node`]).
+    fn replayed_stateless_nodes(&self, graph: &Graph, new: &HashSet<NodeIndex>) -> Vec<NodeIndex> {
+        let mut nodes: Vec<NodeIndex> = self
+            .paths
+            .iter()
+            .filter(|(target, _)| self.partial.contains(target) && !graph[**target].is_dropped())
+            .flat_map(|(_, paths)| paths.right_values())
+            .flat_map(|(_, nodes)| nodes.get(1..nodes.len().saturating_sub(1)).unwrap_or(&[]))
+            .filter(|ni| !new.contains(ni) && !self.have.contains_key(ni))
+            .copied()
+            .collect();
+        nodes.sort();
+        nodes.dedup();
+        nodes
+    }
+
+    /// Finds the nearest new node below `ni` that reaches `ni` through existing nodes, and returns
+    /// the edge from its parent to it. Only new nodes add obligations, and an obligation goes up
+    /// from the node that has it, so a new node below `ni` caused its state. The obligation can go
+    /// up through an existing partial state: a new index on that state adds replay paths above it.
+    ///
+    /// The migration gives the child of the edge, and each other new child of the parent, a copy
+    /// of the parent. The copy is a new node, so no replay path goes through it. Each reroute moves
+    /// the new nodes one node up, until they read a copy of `ni`.
+    fn edge_to_new_node(
+        &self,
+        graph: &Graph,
+        new: &HashSet<NodeIndex>,
+        ni: NodeIndex,
+    ) -> Option<InvalidEdge> {
+        let mut seen = HashSet::from([ni]);
+        let mut queue = VecDeque::from([ni]);
+        while let Some(parent) = queue.pop_front() {
+            let mut children: Vec<_> = graph
+                .neighbors_directed(parent, petgraph::EdgeDirection::Outgoing)
+                .filter(|&c| !graph[c].is_dropped())
+                .collect();
+            children.sort();
+            if let Some(&child) = children.iter().find(|c| new.contains(c)) {
+                return Some(InvalidEdge { parent, child });
+            }
+            for child in children {
+                if !graph[child].is_reader() && seen.insert(child) {
+                    queue.push_back(child);
+                }
+            }
+        }
+        None
     }
 
     /// Retrieves the materialization status of a given node, or None
@@ -1142,6 +1244,39 @@ impl Materializations {
         self.added.clear();
         self.new_readers.clear();
         self.had.extend(self.have.keys().copied());
+        self.check_partial_paths(graph)
+    }
+
+    /// Checks that no partial replay path goes through a node with state, full or partial. See
+    /// [`Materializations::replayed_stateless_nodes`].
+    fn check_partial_paths(&self, graph: &Graph) -> ReadySetResult<()> {
+        for (&target, paths) in &self.paths {
+            if !self.partial.contains(&target) || graph[target].is_dropped() {
+                continue;
+            }
+            for (tag, (_, nodes)) in paths {
+                let Some(interior) = nodes.get(1..nodes.len().saturating_sub(1)) else {
+                    continue;
+                };
+                if let Some(ni) = interior.iter().find(|ni| self.have.contains_key(ni)) {
+                    let partial = self.partial.contains(ni);
+                    antithesis_sdk::assert_unreachable!(
+                        "a partial replay path goes through a node with state",
+                        &serde_json::json!({
+                            "node": ni.index(),
+                            "tag": tag.to_string(),
+                            "partial": partial,
+                        })
+                    );
+                    internal!(
+                        "partial replay path {tag} to node {} goes through the state of node {} \
+                         (partial: {partial})",
+                        target.index(),
+                        ni.index()
+                    );
+                }
+            }
+        }
         Ok(())
     }
 
