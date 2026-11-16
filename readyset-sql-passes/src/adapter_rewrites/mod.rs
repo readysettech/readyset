@@ -1510,7 +1510,8 @@ mod tests {
     struct ClearMetadataVisitor;
 
     impl<'ast> VisitorMut<'ast> for ClearMetadataVisitor {
-        type Error = String;
+        type Error = !;
+
         fn visit_select_statement(
             &mut self,
             query: &'ast mut SelectStatement,
@@ -1536,7 +1537,7 @@ mod tests {
             );
 
             let mut visitor = ClearMetadataVisitor;
-            visitor.visit_select_statement(self).unwrap();
+            visitor.visit_select_statement(self);
         }
     }
 

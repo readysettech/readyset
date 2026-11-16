@@ -1,4 +1,4 @@
-use readyset_errors::{ReadySetError, ReadySetResult, invalid_query};
+use readyset_errors::{ReadySetResult, invalid_query};
 use readyset_sql::analysis::visit::{Visitor, walk_function_expr};
 use readyset_sql::ast::{
     CacheInner, CreateCacheStatement, FunctionExpr, SelectStatement, TrxCachePolicy,
@@ -54,7 +54,7 @@ impl BucketFunctionVisitor {
 }
 
 impl<'ast> Visitor<'ast> for BucketFunctionVisitor {
-    type Error = ReadySetError;
+    type Error = !;
 
     fn visit_function_expr(
         &mut self,

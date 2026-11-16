@@ -211,7 +211,7 @@ macro_rules! as_column {
 macro_rules! is_window_function_expr {
     ($expr:expr) => {{
         let mut contains_window_functions = false;
-        let _ = for_each_window_function($expr, &mut |_| contains_window_functions = true);
+        for_each_window_function($expr, &mut |_| contains_window_functions = true);
         contains_window_functions
     }};
 }
@@ -744,14 +744,14 @@ pub(crate) fn contains_select(expr: &Expr) -> bool {
         yes: bool,
     }
     impl<'a> Visitor<'a> for Vis {
-        type Error = ReadySetError;
+        type Error = !;
         fn visit_select_statement(&mut self, _: &'a SelectStatement) -> Result<(), Self::Error> {
             self.yes = true;
             Ok(())
         }
     }
     let mut vis = Vis { yes: false };
-    let _ = vis.visit_expr(expr);
+    vis.visit_expr(expr);
     vis.yes
 }
 
@@ -778,7 +778,7 @@ pub(crate) fn contain_subqueries_with_limit_clause(stmt: &SelectStatement) -> Re
     }
 
     impl<'ast> Visitor<'ast> for LookupVisitor {
-        type Error = ReadySetError;
+        type Error = !;
 
         fn visit_select_statement(
             &mut self,
@@ -1418,7 +1418,8 @@ pub(crate) fn collect_columns_in_expr_mut(expr: &mut Expr) -> Vec<&mut Expr> {
         columns: Vec<&'a mut Expr>,
     }
     impl<'a> VisitorMut<'a> for ColVisitor<'a> {
-        type Error = ReadySetError;
+        type Error = !;
+
         fn visit_expr(&mut self, expr: &'a mut Expr) -> Result<(), Self::Error> {
             if matches!(expr, Expr::Column(_)) {
                 self.columns.push(expr);
@@ -1437,8 +1438,7 @@ pub(crate) fn collect_columns_in_expr_mut(expr: &mut Expr) -> Vec<&mut Expr> {
     let mut v = ColVisitor {
         columns: Vec::new(),
     };
-    // SAFETY: the visitor only collects Column nodes and skips subqueries; it cannot fail.
-    v.visit_expr(expr).expect("column collection is infallible");
+    v.visit_expr(expr);
     v.columns
 }
 
@@ -1470,7 +1470,8 @@ pub(crate) fn collect_columns_in_expr(expr: &Expr) -> Vec<&Expr> {
         columns: Vec<&'a Expr>,
     }
     impl<'ast> Visitor<'ast> for ColVisitor<'ast> {
-        type Error = ReadySetError;
+        type Error = !;
+
         fn visit_expr(&mut self, expr: &'ast Expr) -> Result<(), Self::Error> {
             if matches!(expr, Expr::Column(_)) {
                 self.columns.push(expr);
@@ -1486,8 +1487,7 @@ pub(crate) fn collect_columns_in_expr(expr: &Expr) -> Vec<&Expr> {
     let mut v = ColVisitor {
         columns: Vec::new(),
     };
-    // SAFETY: the visitor only collects Column nodes and skips subqueries; it cannot fail.
-    v.visit_expr(expr).expect("column collection is infallible");
+    v.visit_expr(expr);
     v.columns
 }
 
@@ -1517,13 +1517,13 @@ pub(crate) fn collect_outermost_columns_mut(stmt: &mut SelectStatement) -> Vec<&
 pub(crate) fn for_each_aggregate<'a>(
     expr: &'a Expr,
     func_visitor: &'a mut impl FnMut(&FunctionExpr),
-) -> ReadySetResult<()> {
+) {
     struct ForEachVisitor<'a> {
         func_visitor: &'a mut dyn FnMut(&FunctionExpr),
     }
 
     impl<'ast> Visitor<'ast> for ForEachVisitor<'ast> {
-        type Error = ReadySetError;
+        type Error = !;
 
         fn visit_function_expr(
             &mut self,
@@ -1565,19 +1565,19 @@ pub(crate) fn for_each_aggregate<'a>(
         }
     }
 
-    ForEachVisitor { func_visitor }.visit_expr(expr)
+    ForEachVisitor { func_visitor }.visit_expr(expr);
 }
 
 pub(crate) fn for_each_window_function<'a>(
     expr: &'a Expr,
     window_func_visitor: &'a mut impl FnMut(&'a Expr),
-) -> ReadySetResult<()> {
+) {
     struct ForEachVisitor<'a> {
         window_func_visitor: &'a mut dyn FnMut(&'a Expr),
     }
 
     impl<'ast> Visitor<'ast> for ForEachVisitor<'ast> {
-        type Error = ReadySetError;
+        type Error = !;
 
         fn visit_expr(&mut self, expr: &'ast Expr) -> Result<(), Self::Error> {
             if matches!(expr, Expr::WindowFunction { .. }) {
@@ -1596,19 +1596,19 @@ pub(crate) fn for_each_window_function<'a>(
     ForEachVisitor {
         window_func_visitor,
     }
-    .visit_expr(expr)
+    .visit_expr(expr);
 }
 
 pub(crate) fn for_each_window_function_mut<'a>(
     expr: &'a mut Expr,
     window_func_visitor: &'a mut impl FnMut(&'a mut Expr),
-) -> ReadySetResult<()> {
+) {
     struct ForEachVisitor<'a> {
         window_func_visitor: &'a mut dyn FnMut(&'a mut Expr),
     }
 
     impl<'ast> VisitorMut<'ast> for ForEachVisitor<'ast> {
-        type Error = ReadySetError;
+        type Error = !;
 
         fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
             if matches!(expr, Expr::WindowFunction { .. }) {
@@ -1630,12 +1630,12 @@ pub(crate) fn for_each_window_function_mut<'a>(
     ForEachVisitor {
         window_func_visitor,
     }
-    .visit_expr(expr)
+    .visit_expr(expr);
 }
 
 pub fn is_aggregated_expr(expr: &Expr) -> ReadySetResult<bool> {
     let mut has_aggregates = false;
-    for_each_aggregate(expr, &mut |_| has_aggregates = true)?;
+    for_each_aggregate(expr, &mut |_| has_aggregates = true);
     Ok(has_aggregates)
 }
 
@@ -1671,7 +1671,7 @@ fn calculate_aggregate_only_expression_for_empty_data_set(mut expr: Expr) -> Rea
     struct ForEachVisitor {}
 
     impl<'ast> VisitorMut<'ast> for ForEachVisitor {
-        type Error = ReadySetError;
+        type Error = !;
 
         fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
             match expr {
@@ -1928,9 +1928,9 @@ pub(crate) fn extract_aggregate_fallback_for_expr(
     }
 
     impl<'ast> VisitorMut<'ast> for ForEachVisitor<'ast> {
-        type Error = ReadySetError;
+        type Error = !;
 
-        fn visit_expr(&mut self, expr: &'ast mut Expr) -> ReadySetResult<()> {
+        fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
             if let Expr::Column(column) = expr
                 && let Some(rel) = self.stmt_rel.as_ref()
                 && column.table.as_ref() == Some(rel)
@@ -1955,7 +1955,10 @@ pub(crate) fn extract_aggregate_fallback_for_expr(
             }
         }
 
-        fn visit_select_statement(&mut self, _: &'ast mut SelectStatement) -> ReadySetResult<()> {
+        fn visit_select_statement(
+            &mut self,
+            _: &'ast mut SelectStatement,
+        ) -> Result<(), Self::Error> {
             Ok(())
         }
     }
@@ -2928,7 +2931,7 @@ pub(crate) fn extract_correlation_keys(
     }
 
     impl<'a> Visitor<'a> for EqConstraintsVisitor<'a> {
-        type Error = ReadySetError;
+        type Error = !;
 
         fn visit_expr(&mut self, expr: &'a Expr) -> Result<(), Self::Error> {
             if is_column_eq_column(expr, |lhs_col, rhs_col| {
@@ -3461,7 +3464,7 @@ pub(crate) fn rewrite_top_k_in_place_with_partition(
                 *partition_by = partition_by_columns.clone();
                 patched = true;
             }
-        })?;
+        });
         Ok(patched)
     }
 
@@ -3697,7 +3700,7 @@ fn fix_correlated_subquery_with_window_functions(
                     partition_by.push(Expr::Column(local_col.clone()));
                 }
             }
-        })?
+        })
     }
     Ok(())
 }
@@ -3931,7 +3934,7 @@ pub(crate) fn deep_columns_visitor(
     stmt: &SelectStatement,
     shadow_rel: &Relation,
     visitor: &mut impl FnMut(&Expr),
-) -> ReadySetResult<()> {
+) {
     struct ExprVisitor<'a> {
         shadow_rel: &'a Relation,
         visitor: &'a mut dyn FnMut(&Expr),
@@ -3939,7 +3942,7 @@ pub(crate) fn deep_columns_visitor(
     }
 
     impl<'a> Visitor<'a> for ExprVisitor<'a> {
-        type Error = ReadySetError;
+        type Error = !;
 
         fn visit_expr(&mut self, expr: &'a Expr) -> Result<(), Self::Error> {
             if matches!(expr, Expr::Column(_)) {
@@ -3965,7 +3968,7 @@ pub(crate) fn deep_columns_visitor(
         visitor,
         depth: 0,
     }
-    .visit_select_statement(stmt)
+    .visit_select_statement(stmt);
 }
 
 /// Visit all `Expr::Column` nodes in `expr`, descending into nested subqueries but
@@ -3980,14 +3983,14 @@ pub(crate) fn deep_columns_expr_visitor(
     expr: &Expr,
     shadow_rel: &Relation,
     visitor: &mut impl FnMut(&Expr),
-) -> ReadySetResult<()> {
+) {
     struct ExprVisitor<'a> {
         shadow_rel: &'a Relation,
         visitor: &'a mut dyn FnMut(&Expr),
     }
 
     impl<'a> Visitor<'a> for ExprVisitor<'a> {
-        type Error = ReadySetError;
+        type Error = !;
 
         fn visit_expr(&mut self, expr: &'a Expr) -> Result<(), Self::Error> {
             if matches!(expr, Expr::Column(_)) {
@@ -4010,7 +4013,7 @@ pub(crate) fn deep_columns_expr_visitor(
         shadow_rel,
         visitor,
     }
-    .visit_expr(expr)
+    .visit_expr(expr);
 }
 
 /// The set of relations `stmt` correlates to, relative to itself: every
@@ -4073,7 +4076,8 @@ struct StandardizePlaceholdersVisitor {
 }
 
 impl<'ast> VisitorMut<'ast> for StandardizePlaceholdersVisitor {
-    type Error = ReadySetError;
+    type Error = !;
+
     fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
         match literal {
             Literal::Placeholder(item @ ItemPlaceholder::QuestionMark) => {
@@ -4176,7 +4180,8 @@ pub(crate) fn normalize_having_and_group_by_for_statement(
         }
 
         impl<'ast> VisitorMut<'ast> for HavingVisitor<'ast> {
-            type Error = ReadySetError;
+            type Error = !;
+
             fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
                 // Expression alias: replace expression with alias ref
                 if let Some(alias) = self.expr_aliases.get(expr) {
@@ -5385,7 +5390,7 @@ mod for_each_aggregate_tests {
 
     fn count_aggregates(expr: &Expr) -> usize {
         let mut n = 0;
-        for_each_aggregate(expr, &mut |_| n += 1).expect("walk succeeds");
+        for_each_aggregate(expr, &mut |_| n += 1);
         n
     }
 

@@ -29,7 +29,7 @@
 //! `is_supported_join_condition`) accepts either operand order via its predicate closure, so
 //! the temporary "backward" form is invisible to them.
 
-use readyset_errors::{ReadySetError, ReadySetResult};
+use readyset_errors::ReadySetResult;
 use readyset_sql::analysis::visit_mut::{self, VisitorMut};
 use readyset_sql::ast::{JoinOperator, JoinRightSide, SelectStatement};
 use std::mem;
@@ -49,7 +49,7 @@ impl NormalizeRightJoin for SelectStatement {
 struct NormalizeRightJoinVisitor;
 
 impl<'ast> VisitorMut<'ast> for NormalizeRightJoinVisitor {
-    type Error = ReadySetError;
+    type Error = !;
 
     fn visit_select_statement(
         &mut self,

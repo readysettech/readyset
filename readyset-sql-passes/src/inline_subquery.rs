@@ -314,7 +314,7 @@ pub(crate) fn refs_rel_anywhere(expr: &Expr, rel: &Relation) -> ReadySetResult<b
         if is_column_of!(as_column!(e), *rel) {
             seen = true;
         }
-    })?;
+    });
     Ok(seen)
 }
 
@@ -508,7 +508,7 @@ fn window_functions_block_inlining(
     // Check A: reject if any referenced inner column maps to a WF expression.
     for (col, expr) in ext_to_int {
         let mut is_wf = false;
-        for_each_window_function(expr, &mut |_| is_wf = true)?;
+        for_each_window_function(expr, &mut |_| is_wf = true);
         if is_wf && outer_refs_to_inner.contains(col) {
             return Ok(true); // reject
         }
@@ -519,7 +519,7 @@ fn window_functions_block_inlining(
     for expr in outermost_expression(outer_stmt) {
         for_each_window_function(expr, &mut |wf_expr| {
             wf_columns.extend(columns_iter(wf_expr).cloned());
-        })?;
+        });
     }
     for col in &wf_columns {
         if col.table.as_ref() == Some(inner_rel)
@@ -717,7 +717,7 @@ fn downstream_reference_non_trivial_lhs_output(
             {
                 found = true;
             }
-        })?;
+        });
         if found {
             return Ok(true);
         }
@@ -766,7 +766,7 @@ fn is_base_subquery_predicate_allow_hoisting(
         if is_column_of!(col, *hoist_rel) {
             found = true;
         }
-    })?;
+    });
     if found {
         return Ok(false);
     }

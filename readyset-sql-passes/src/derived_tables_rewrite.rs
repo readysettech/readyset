@@ -19,7 +19,7 @@ use crate::rewrite_utils::{
 use crate::unnest_subqueries::{NonNullSchema, agg_only_no_gby_cardinality};
 use crate::{get_local_from_items_iter, get_local_from_items_iter_mut, is_single_from_item};
 use itertools::Either;
-use readyset_errors::{ReadySetError, ReadySetResult, internal, internal_err};
+use readyset_errors::{ReadySetResult, internal, internal_err};
 use readyset_sql::analysis::visit::Visitor;
 use readyset_sql::ast::JoinOperator::InnerJoin;
 use readyset_sql::ast::{
@@ -938,7 +938,7 @@ fn contains_subquery_predicates(stmt: &SelectStatement) -> ReadySetResult<bool> 
     }
 
     impl<'a> Visitor<'a> for Vis {
-        type Error = ReadySetError;
+        type Error = !;
         fn visit_select_statement(&mut self, _: &'a SelectStatement) -> Result<(), Self::Error> {
             self.select_found = true;
             Ok(())

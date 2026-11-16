@@ -1607,7 +1607,7 @@ mod tests {
     struct NodeCounter(usize);
 
     impl<'ast> VisitorMut<'ast> for NodeCounter {
-        type Error = ();
+        type Error = !;
 
         fn visit_column(&mut self, _column: &'ast mut Column) -> Result<(), Self::Error> {
             self.0 += 1;
@@ -1718,7 +1718,7 @@ mod tests {
 
     fn node_count(mut query: SqlQuery) -> usize {
         let mut counter = NodeCounter::default();
-        counter.visit_sql_query(&mut query).unwrap();
+        counter.visit_sql_query(&mut query);
         counter.0
     }
 

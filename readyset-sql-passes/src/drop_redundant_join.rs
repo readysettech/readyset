@@ -408,7 +408,7 @@ fn collect_rhs_refs(
     stmt: &SelectStatement,
     rhs_rel: &Relation,
     rhs_refs: &mut HashSet<SqlIdentifier>,
-) -> ReadySetResult<()> {
+) {
     deep_columns_visitor(stmt, rhs_rel, &mut |expr| {
         let column = as_column!(expr);
         if is_column_of!(column, *rhs_rel) {
@@ -587,7 +587,7 @@ fn try_drop_self_join_at<U: UniqueColumnsSchema>(
         let mut stmt_tables = mem::take(&mut stmt.tables);
 
         let mut rhs_refs = HashSet::new();
-        collect_rhs_refs(stmt, &rhs_rel, &mut rhs_refs)?;
+        collect_rhs_refs(stmt, &rhs_rel, &mut rhs_refs);
 
         // SAFETY: `lhs_is_subset_of_rhs` returned `Ok(true)` only if
         // `stmt_tables[tab_idx]` is a subquery whose first FROM item is the same

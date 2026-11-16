@@ -738,7 +738,7 @@ struct AutoCacheVisitor<'a> {
 }
 
 impl Visitor for AutoCacheVisitor<'_> {
-    type Break = ();
+    type Break = !;
 
     fn pre_visit_query(&mut self, query: &Query) -> ControlFlow<Self::Break> {
         // A CTE body can be a data-modifying statement (`WITH x AS (INSERT/UPDATE/DELETE

@@ -190,7 +190,7 @@ struct ArrayConstructorDetector {
 }
 
 impl<'a> Visitor<'a> for ArrayConstructorDetector {
-    type Error = ReadySetError;
+    type Error = !;
 
     fn visit_expr(&mut self, expr: &'a Expr) -> Result<(), Self::Error> {
         match expr {
@@ -205,7 +205,7 @@ impl<'a> Visitor<'a> for ArrayConstructorDetector {
 
 fn contains_array_constructor_in_expr(expr: &Expr) -> bool {
     let mut detector = ArrayConstructorDetector::default();
-    let _ = detector.visit_expr(expr);
+    detector.visit_expr(expr);
     detector.found
 }
 
@@ -231,7 +231,7 @@ impl<'ast> Visitor<'ast> for ArrayConstructorValidator {
 
     fn visit_group_by_clause(&mut self, group_by: &'ast GroupByClause) -> ReadySetResult<()> {
         let mut detector = ArrayConstructorDetector::default();
-        let _ = detector.visit_group_by_clause(group_by);
+        detector.visit_group_by_clause(group_by);
         if detector.found {
             unsupported!("Array constructor not supported in GROUP BY clause");
         }
@@ -240,7 +240,7 @@ impl<'ast> Visitor<'ast> for ArrayConstructorValidator {
 
     fn visit_order_clause(&mut self, order: &'ast OrderClause) -> ReadySetResult<()> {
         let mut detector = ArrayConstructorDetector::default();
-        let _ = detector.visit_order_clause(order);
+        detector.visit_order_clause(order);
         if detector.found {
             unsupported!("Array constructor not supported in ORDER BY clause");
         }
@@ -266,7 +266,7 @@ impl<'ast> Visitor<'ast> for ArrayConstructorValidator {
                         // Top-level array constructor is allowed, but check if the subquery
                         // itself contains nested array constructors
                         let mut detector = ArrayConstructorDetector::default();
-                        let _ = detector.visit_select_statement(query);
+                        detector.visit_select_statement(query);
                         if detector.found {
                             unsupported!(
                                 "Nested array constructors (array constructor within array constructor) are not supported"

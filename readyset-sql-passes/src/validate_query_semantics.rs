@@ -172,7 +172,7 @@ fn validate_no_nested_aggregates(stmt: &SelectStatement) -> ReadySetResult<()> {
     /// Returns true if any aggregate's arguments contain another aggregate.
     fn has_nested(expr: &Expr) -> bool {
         let mut found = false;
-        let _ = for_each_aggregate(expr, &mut |agg| {
+        for_each_aggregate(expr, &mut |agg| {
             if agg
                 .arguments()
                 .any(|a| is_aggregated_expr(a).unwrap_or(false))
@@ -193,7 +193,7 @@ fn validate_no_nested_aggregates(stmt: &SelectStatement) -> ReadySetResult<()> {
         // nested aggregates (e.g., SUM(SUM(x)) OVER() is valid but
         // SUM(AVG(SUM(x))) OVER() is not).
         let mut nested_in_wf = false;
-        let _ = for_each_window_function(expr, &mut |wf| {
+        for_each_window_function(expr, &mut |wf| {
             if let Expr::WindowFunction {
                 function,
                 partition_by,
@@ -582,7 +582,7 @@ fn is_aggregate_only_expression(expr: &Expr) -> bool {
         rejected: bool,
     }
     impl<'a> Visitor<'a> for Vis {
-        type Error = ReadySetError;
+        type Error = !;
 
         fn visit_function_expr(&mut self, fe: &'a FunctionExpr) -> Result<(), Self::Error> {
             let is_agg = is_aggregate(fe);
@@ -619,7 +619,7 @@ fn is_aggregate_only_expression(expr: &Expr) -> bool {
         agg_depth: 0,
         rejected: false,
     };
-    let _ = vis.visit_expr(expr);
+    vis.visit_expr(expr);
     !vis.rejected
 }
 
@@ -668,7 +668,7 @@ fn validate_no_duplicate_derived_table_columns(
             if is_column_of!(column, *alias_rel) && duplicates.contains(&column.name) {
                 ambiguous_ref = Some(column.clone());
             }
-        })?;
+        });
         if let Some(col) = ambiguous_ref {
             return Err(ambiguous_column_err(&col, alias_rel, dialect));
         }

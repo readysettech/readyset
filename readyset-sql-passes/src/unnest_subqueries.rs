@@ -32,9 +32,7 @@ use crate::{
     BaseSchemasContext, get_local_from_items_iter, get_local_from_items_iter_mut, is_column_of,
 };
 use itertools::{Either, Itertools};
-use readyset_errors::{
-    ReadySetError, ReadySetResult, internal, invalid_query_err, invariant, unsupported,
-};
+use readyset_errors::{ReadySetResult, internal, invalid_query_err, invariant, unsupported};
 
 use readyset_sql::analysis::{
     is_aggregate,
@@ -344,7 +342,7 @@ fn contains_duplicate_sensitive_window_function(stmt: &SelectStatement) -> Ready
             if wf_is_duplicate_sensitive(wf) {
                 found = true;
             }
-        })?;
+        });
         if found {
             return Ok(true);
         }
@@ -366,7 +364,7 @@ fn collect_subquery_predicates_with_placement_mut(
     }
 
     impl<'a> VisitorMut<'a> for PlacementVisitor<'a> {
-        type Error = ReadySetError;
+        type Error = !;
 
         fn visit_expr(&mut self, expr: &'a mut Expr) -> Result<(), Self::Error> {
             if is_supported_subquery_predicate(expr) {

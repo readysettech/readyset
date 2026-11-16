@@ -1292,6 +1292,12 @@ impl From<Utf8Error> for ReadySetError {
     }
 }
 
+impl From<!> for ReadySetError {
+    fn from(never: !) -> Self {
+        never
+    }
+}
+
 /// Sets a failpoint with the provided
 /// To trigger a generic ReadysetError::Internal error, enable the failpoint with "return".
 /// A custom error can be provided with "return(error)" where error is a ReadySetError that has been
