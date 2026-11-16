@@ -163,10 +163,16 @@ impl Display for Graphviz<'_> {
 
         // replay paths
         for (src, paths) in &self.materializations.paths {
+            let constants = self.materializations.replay_constants.get(src);
             for (tag, (index, dsts)) in paths {
                 let s = "&nbsp;&nbsp;";
                 let dst = dsts[0]; // ignore downward path; obvious
-                let t = format!("{s}tag: {}{s}\n{s}cols: {:?}{s}", tag, index.columns);
+                let mut t = format!("{s}tag: {}{s}\n{s}cols: {:?}{s}", tag, index.columns);
+                if let Some(constants) = constants.and_then(|tags| tags.get(tag)) {
+                    let constants = constants.to_string().replace('"', "\\\"");
+                    write!(t, "\n{s}constants: {constants}{s}")
+                        .expect("write to String is infallible");
+                }
                 out!(
                     f,
                     1,

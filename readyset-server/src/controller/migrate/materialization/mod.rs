@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{self, Display};
 
 use bimap::BiHashMap;
+use dataflow::domain::ReplayConstants;
 use dataflow::prelude::*;
 use dataflow::{DomainRequest, LookupIndex};
 use petgraph::graph::NodeIndex;
@@ -141,6 +142,15 @@ pub(in crate::controller) struct Materializations {
 
     /// A list of replay paths for each node, indexed by tag.
     pub(in crate::controller) paths: HashMap<NodeIndex, BiHashMap<Tag, (Index, Vec<NodeIndex>)>>,
+
+    /// The constants of the replay paths in `paths` whose source is a base table followed by a
+    /// filter node with constants, by node and tag
+    pub(in crate::controller) replay_constants: HashMap<NodeIndex, HashMap<Tag, ReplayConstants>>,
+
+    /// The constants `extend` picks for replays from a base table, keyed by the base table, the
+    /// filter node after it and the replay index. Cleared at the end of `commit`.
+    pub(in crate::controller) source_constants:
+        HashMap<(NodeIndex, NodeIndex, Index), ReplayConstants>,
 
     /// Map of full nodes that are duplicates of partial nodes. Entries are added when we perform
     /// rerouting of full nodes found below partial nodes in migration planning. Entries are also
@@ -623,14 +633,31 @@ impl Materializations {
                                 // We've found an already-materialized node along our path - we can
                                 // use that as the source of our eventual replay path
                                 //
+                                // If the node after this base table on the path is a filter node
+                                // with constants, the replay reads the table by those constants,
+                                // from an index that starts with them. `i` counts from the end.
+                                let next = path.segments().get(path.len() - i);
+                                let constants = next.and_then(|next| {
+                                    let filter = &graph[next.node];
+                                    let constants =
+                                        ReplayConstants::new(&graph[*node], filter, index)?;
+                                    Some((next.node, constants))
+                                });
+                                let index = match constants {
+                                    Some((filter, constants)) => {
+                                        let read = constants.index().clone();
+                                        let source = (*node, filter, index.clone());
+                                        self.source_constants.insert(source, constants);
+                                        read
+                                    }
+                                    None => index.clone(),
+                                };
                                 // Nodes in `new` start out empty, so they need the index even if
                                 // `have` already lists it.
-                                if !m.contains(index) || new.contains(node) {
+                                if !m.contains(&index) || new.contains(node) {
                                     // we need to add an index to this materialization to make that
                                     // happen
-                                    add.entry(*node)
-                                        .or_insert_with(HashSet::new)
-                                        .insert(index.clone());
+                                    add.entry(*node).or_insert_with(HashSet::new).insert(index);
                                 }
                                 break;
                             }
@@ -1242,6 +1269,7 @@ impl Materializations {
         }
 
         self.added.clear();
+        self.source_constants.clear();
         self.new_readers.clear();
         self.had.extend(self.have.keys().copied());
         self.check_partial_paths(graph)
@@ -1362,7 +1390,7 @@ impl Materializations {
         }
 
         // construct and disseminate a plan for each index
-        let (pending, paths) = {
+        let (pending, paths, constants) = {
             let mut plan = plan::Plan::new(self, graph, ni, dmp);
             for index in index_on.drain() {
                 plan.add(index)?;
@@ -1371,6 +1399,8 @@ impl Materializations {
         };
         // grr `HashMap` doesn't implement `IndexMut`
         self.paths.entry(ni).or_default().extend(paths);
+        let tags = self.replay_constants.entry(ni).or_default();
+        tags.extend(constants);
 
         if pending.is_empty() {
             trace!("No replays to do");

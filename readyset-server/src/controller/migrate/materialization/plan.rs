@@ -9,6 +9,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::TryFrom;
 
+use dataflow::domain::ReplayConstants;
 use dataflow::payload::{PrepareStateKind, ReplayPathSegment, TriggerEndpoint};
 use dataflow::prelude::*;
 use dataflow::DomainRequest;
@@ -58,6 +59,8 @@ pub(super) struct Plan<'a> {
     parent_indexes: HashMap<(NodeIndex, Index), HashSet<Index>>,
     /// New paths added in this run of the planner.
     paths: HashMap<Tag, (Index, Vec<NodeIndex>)>,
+    /// The constants of new paths whose source is read by filter constants, by tag
+    constants: HashMap<Tag, ReplayConstants>,
     /// Do we already have some replay paths for this node?
     has_paths: bool,
     pending: Vec<PendingReplay>,
@@ -96,6 +99,7 @@ impl<'a> Plan<'a> {
             indexes: Default::default(),
             parent_indexes: Default::default(),
             paths: Default::default(),
+            constants: Default::default(),
             has_paths,
             pending: Vec::new(),
         }
@@ -421,6 +425,22 @@ impl<'a> Plan<'a> {
                         .collect(),
                 ),
             );
+            // The constants `extend` picked for this path's source, if any
+            let constants = match (&path.source().index, path.segments()) {
+                (Some(index), [base, filter, ..]) => {
+                    let source = (base.node, filter.node, index.clone());
+                    self.m.source_constants.get(&source).cloned()
+                }
+                _ => None,
+            };
+            if let Some(constants) = &constants {
+                let have = self.m.have.get(&path.source().node);
+                invariant!(
+                    have.is_some_and(|have| have.contains(constants.index())),
+                    "replay path reads its source from a missing index"
+                );
+                self.constants.insert(tag, constants.clone());
+            }
 
             if path.has_extension() {
                 if let Some(upstream_index) = path.target().index.clone() {
@@ -581,7 +601,8 @@ impl<'a> Plan<'a> {
                     path: locals,
                     notify_done: false,
                     trigger: TriggerEndpoint::None,
-                    constants: None,
+                    // Only the first domain reads the source
+                    constants: if i == 0 { constants.clone() } else { None },
                 };
 
                 // the first domain also gets to know source node
@@ -693,10 +714,15 @@ impl<'a> Plan<'a> {
     /// instantaneous.
     ///
     /// Returns a list of backfill replays that need to happen before the migration is complete,
-    /// and a set of replay paths for this node indexed by tag.
+    /// the replay paths for this node, and the constants of the paths that have them, both indexed
+    /// by tag.
     pub(super) fn finalize(
         mut self,
-    ) -> ReadySetResult<(Vec<PendingReplay>, HashMap<Tag, (Index, Vec<NodeIndex>)>)> {
+    ) -> ReadySetResult<(
+        Vec<PendingReplay>,
+        HashMap<Tag, (Index, Vec<NodeIndex>)>,
+        HashMap<Tag, ReplayConstants>,
+    )> {
         let our_node = &self.graph[self.node];
         let s = if let Some(r) = our_node.as_reader() {
             let index = r
@@ -781,7 +807,7 @@ impl<'a> Plan<'a> {
         } else {
             invariant!(self.pending.is_empty());
         }
-        Ok((self.pending, self.paths))
+        Ok((self.pending, self.paths, self.constants))
     }
 
     fn setup_packet_filter(&mut self) -> ReadySetResult<()> {

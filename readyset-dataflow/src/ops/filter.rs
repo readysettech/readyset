@@ -27,6 +27,11 @@ impl Filter {
             expression,
         }
     }
+
+    /// The predicate that rows have to satisfy to pass the filter
+    pub(crate) fn expression(&self) -> &Expr {
+        &self.expression
+    }
 }
 
 impl Ingredient for Filter {

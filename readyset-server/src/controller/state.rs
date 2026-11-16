@@ -1969,6 +1969,7 @@ impl DfState {
                 }
             }
             self.materializations.paths.remove(ni);
+            self.materializations.replay_constants.remove(ni);
             self.materializations.redundant_partial.remove(ni);
         }
         // `redundant_partial` maps partial-parent → full-duplicate; if either side is gone,
