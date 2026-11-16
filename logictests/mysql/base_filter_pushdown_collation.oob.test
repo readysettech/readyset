@@ -1,0 +1,79 @@
+# A replay from a base table followed by a filter node reads the table by the filter's constants.
+# In a case-insensitive column, values that differ in bytes can be equal, so the read must find all
+# of them. In a binary column it must find only the exact value. The padded collation treats some
+# texts as equal even though their index keys differ, so its constants stay in the filter node.
+
+statement ok
+CREATE TABLE ci_items (id INT PRIMARY KEY, owner INT, kind INT, status VARCHAR(10) COLLATE utf8mb4_0900_ai_ci, code VARCHAR(10) COLLATE utf8mb4_bin)
+
+statement ok
+INSERT INTO ci_items VALUES
+(1, 1, 2, 'Active', 'x'),
+(2, 1, 2, 'active', 'X'),
+(3, 1, 2, 'ACTIVE', 'x'),
+(4, 1, 2, 'other', 'x'),
+(5, 1, 3, 'active', 'x'),
+(6, 2, 2, 'active', 'x')
+
+onlyif readyset
+statement ok
+CREATE CACHE ci FROM SELECT id FROM ci_items WHERE owner = ? AND kind = 2 AND (status = 'active' OR status = 'paused')
+
+onlyif readyset
+statement ok
+CREATE CACHE bin FROM SELECT id FROM ci_items WHERE owner = ? AND kind = 2 AND (code = 'x' OR code = 'y')
+
+query I rowsort
+SELECT id FROM ci_items WHERE owner = 1 AND kind = 2 AND (status = 'active' OR status = 'paused')
+----
+1
+2
+3
+
+query I rowsort
+SELECT id FROM ci_items WHERE owner = 1 AND kind = 2 AND (code = 'x' OR code = 'y')
+----
+1
+3
+4
+
+statement ok
+INSERT INTO ci_items VALUES (7, 2, 2, 'ACTIVE', 'X'), (8, 2, 2, 'Active', 'x')
+
+query I rowsort
+SELECT id FROM ci_items WHERE owner = 2 AND kind = 2 AND (status = 'active' OR status = 'paused')
+----
+6
+7
+8
+
+query I rowsort
+SELECT id FROM ci_items WHERE owner = 2 AND kind = 2 AND (code = 'x' OR code = 'y')
+----
+6
+8
+
+statement ok
+CREATE TABLE pad_items (id INT PRIMARY KEY, owner INT, status VARCHAR(20) COLLATE utf8mb4_unicode_ci)
+
+statement ok
+INSERT INTO pad_items VALUES (1, 1, 'active'), (2, 1, 'active '), (3, 1, 'other'), (4, 1, 'é')
+
+onlyif readyset
+statement ok
+CREATE CACHE pad FROM SELECT id FROM pad_items WHERE owner = ? AND (status = 'active' OR status = 'paused')
+
+onlyif readyset
+statement ok
+CREATE CACHE pad_accent FROM SELECT id FROM pad_items WHERE owner = ? AND (status = 'é' OR status = 'é')
+
+query I rowsort
+SELECT id FROM pad_items WHERE owner = 1 AND (status = 'active' OR status = 'paused')
+----
+1
+2
+
+query I rowsort
+SELECT id FROM pad_items WHERE owner = 1 AND (status = 'é' OR status = 'é')
+----
+4

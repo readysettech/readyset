@@ -16,6 +16,7 @@ mod autoparam_exclusions;
 mod autoparam_mode;
 mod autoparam_mode_psql;
 mod avg_pla_regression;
+mod base_filter_pushdown;
 mod begin_transaction_modifiers_mysql;
 mod begin_transaction_modifiers_psql;
 mod bytea_text_psql;
