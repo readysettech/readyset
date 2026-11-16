@@ -9,7 +9,6 @@
 //! The key difference is that shallow cache rewrites always operate on the sqlparser AST directly,
 //! rather than the Readyset AST and the parameterization pass replaces all literals.
 
-use std::convert::Infallible;
 use std::ops::ControlFlow;
 
 use readyset_data::{DfValue, PassThroughFormat};
@@ -224,7 +223,7 @@ struct ReorderNumberedPlaceholdersVisitor {
 }
 
 impl Visitor for ReorderNumberedPlaceholdersVisitor {
-    type Break = Infallible;
+    type Break = !;
 
     fn post_visit_expr(&mut self, expr: &Expr) -> ControlFlow<Self::Break> {
         if let Expr::Value(ValueWithSpan {
@@ -318,7 +317,7 @@ struct MaxPlaceholderVisitor {
 }
 
 impl Visitor for MaxPlaceholderVisitor {
-    type Break = Infallible;
+    type Break = !;
 
     fn post_visit_expr(&mut self, expr: &Expr) -> ControlFlow<Self::Break> {
         if let Expr::Value(ValueWithSpan {
@@ -349,7 +348,7 @@ struct AnonymizeVisitor<'a> {
 }
 
 impl VisitorMut for AnonymizeVisitor<'_> {
-    type Break = Infallible;
+    type Break = !;
 
     fn post_visit_relation(&mut self, relation: &mut ObjectName) -> ControlFlow<Self::Break> {
         for part in relation.0.iter_mut() {

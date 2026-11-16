@@ -18,7 +18,7 @@ struct TableReferenceCollector {
 }
 
 impl<'ast> Visitor<'ast> for TableReferenceCollector {
-    type Error = std::convert::Infallible;
+    type Error = !;
 
     fn visit_table_expr(&mut self, table_expr: &'ast TableExpr) -> Result<(), Self::Error> {
         match &table_expr.inner {

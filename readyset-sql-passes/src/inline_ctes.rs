@@ -76,7 +76,7 @@ struct Bound {
 }
 
 impl<'ast> Visitor<'ast> for Bound {
-    type Error = std::convert::Infallible;
+    type Error = !;
 
     fn visit_select_statement(
         &mut self,

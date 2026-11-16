@@ -68,7 +68,6 @@ pub use truncate::*;
 pub use update::*;
 pub use use_statement::*;
 
-use std::convert::Infallible;
 use std::hash::{Hash, Hasher};
 use std::ops::{ControlFlow, Deref, DerefMut};
 
@@ -201,7 +200,7 @@ impl ShallowCacheQuery {
         struct QuestionMarkPlaceholdersVisitor;
 
         impl VisitorMut for QuestionMarkPlaceholdersVisitor {
-            type Break = Infallible;
+            type Break = !;
 
             fn post_visit_expr(&mut self, expr: &mut Expr) -> ControlFlow<Self::Break> {
                 let Expr::Value(ValueWithSpan {

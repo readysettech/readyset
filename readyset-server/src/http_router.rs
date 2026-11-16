@@ -1,4 +1,3 @@
-use std::convert::Infallible;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
@@ -257,7 +256,7 @@ async fn events_stream(State(state): State<NoriaServerHttpRouter>) -> Response {
 
     let live_stream = BroadcastStream::new(events_rx).filter_map(|event| match event {
         Ok(event) => match event.to_sse() {
-            Ok(s) => Some(Ok::<String, Infallible>(s)),
+            Ok(s) => Some(Ok::<String, !>(s)),
             Err(error) => {
                 warn!(%error, "Failed to serialize controller event for SSE");
                 None
@@ -268,8 +267,7 @@ async fn events_stream(State(state): State<NoriaServerHttpRouter>) -> Response {
             None
         }
     });
-    let combined =
-        tokio_stream::iter(Some(Ok::<String, Infallible>(initial_sse))).chain(live_stream);
+    let combined = tokio_stream::iter(Some(Ok::<String, !>(initial_sse))).chain(live_stream);
     let body = Body::from_stream(combined);
 
     Response::builder()

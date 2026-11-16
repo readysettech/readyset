@@ -45,7 +45,6 @@
 //! (Stage 3 of the extended-subquery-decorrelation project).
 
 use std::collections::HashSet;
-use std::convert::Infallible;
 use std::mem;
 
 use crate::derived_tables_rewrite::promote_null_rejecting_outer_joins_where;
@@ -127,7 +126,8 @@ fn contains_star_projection(stmt: &SelectStatement) -> bool {
         found: bool,
     }
     impl<'ast> Visitor<'ast> for StarCheck {
-        type Error = Infallible;
+        type Error = !;
+
         fn visit_field_definition_expr(
             &mut self,
             fde: &'ast FieldDefinitionExpr,
@@ -376,7 +376,8 @@ fn collect_subquery_aliases(stmt: &SelectStatement, out: &mut HashSet<SqlIdentif
         out: &'a mut HashSet<SqlIdentifier>,
     }
     impl<'ast, 'a> Visitor<'ast> for Collector<'a> {
-        type Error = Infallible;
+        type Error = !;
+
         fn visit_table_expr(&mut self, te: &'ast TableExpr) -> Result<(), Self::Error> {
             if let Some((_, alias)) = as_sub_query_with_alias(te) {
                 self.out.insert(alias);

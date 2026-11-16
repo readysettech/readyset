@@ -154,7 +154,7 @@ impl<'a> Entropy<'a> {
 }
 
 impl rand::rand_core::TryRng for Entropy<'_> {
-    type Error = std::convert::Infallible;
+    type Error = !;
 
     fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
         let v = if self.head < self.tape.len() {

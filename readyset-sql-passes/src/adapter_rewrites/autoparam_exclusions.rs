@@ -83,8 +83,8 @@ impl ExclusionWrapper {
         &mut self,
         node: &'ast mut T,
         excluded: bool,
-        walk: impl FnOnce(&mut Self, &'ast mut T) -> Result<(), std::convert::Infallible>,
-    ) -> Result<(), std::convert::Infallible> {
+        walk: impl FnOnce(&mut Self, &'ast mut T) -> Result<(), !>,
+    ) -> Result<(), !> {
         if excluded {
             self.excluded_depth += 1;
         }
@@ -97,7 +97,7 @@ impl ExclusionWrapper {
 }
 
 impl<'ast> VisitorMut<'ast> for ExclusionWrapper {
-    type Error = std::convert::Infallible;
+    type Error = !;
 
     fn visit_expr(&mut self, expression: &'ast mut Expr) -> Result<(), Self::Error> {
         self.maybe_wrap_comparison(expression);
@@ -142,7 +142,7 @@ fn collect_literals(stmt: &SelectStatement) -> Vec<Literal> {
     struct CollectLiterals(Vec<Literal>);
 
     impl<'ast> Visitor<'ast> for CollectLiterals {
-        type Error = std::convert::Infallible;
+        type Error = !;
 
         fn visit_literal(&mut self, literal: &'ast Literal) -> Result<(), Self::Error> {
             self.0.push(literal.clone());

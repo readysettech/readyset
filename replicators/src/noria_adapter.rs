@@ -218,7 +218,7 @@ impl<'a> NoriaAdapter<'a> {
         table_status_tx: UnboundedSender<(Relation, TableStatus)>,
         lag_status: SharedLagStatus,
         stream_started: &AtomicBool,
-    ) -> ReadySetResult<std::convert::Infallible> {
+    ) -> ReadySetResult<!> {
         // Resnapshot when restarting the server to apply changes that may have been made to the
         // replication-tables config parameter.
         let mut resnapshot = server_startup;
@@ -368,7 +368,7 @@ impl<'a> NoriaAdapter<'a> {
         table_status_tx: UnboundedSender<(Relation, TableStatus)>,
         lag_status: SharedLagStatus,
         stream_started: &AtomicBool,
-    ) -> ReadySetResult<std::convert::Infallible> {
+    ) -> ReadySetResult<!> {
         let server = format!(
             "{}:{}",
             mysql_options.ip_or_hostname(),
@@ -697,7 +697,7 @@ impl<'a> NoriaAdapter<'a> {
         parsing_preset: ParsingPreset,
         table_status_tx: UnboundedSender<(Relation, TableStatus)>,
         lag_status: SharedLagStatus,
-    ) -> ReadySetResult<std::convert::Infallible> {
+    ) -> ReadySetResult<!> {
         set_failpoint_return_err!(failpoints::START_INNER_POSTGRES);
 
         let dbname = pgsql_opts.get_dbname().ok_or_else(|| {

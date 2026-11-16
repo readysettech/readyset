@@ -526,7 +526,6 @@ impl ControllerEventsClient {
 
 #[cfg(test)]
 mod tests {
-    use std::convert::Infallible;
     use std::net::SocketAddr;
 
     use axum::body::{Body, Bytes};
@@ -619,11 +618,11 @@ mod tests {
         let addr = listener.local_addr().expect("local_addr");
 
         let handler = move || async move {
-            let item = Ok::<Bytes, Infallible>(Bytes::from_static(event.as_bytes()));
+            let item = Ok::<Bytes, !>(Bytes::from_static(event.as_bytes()));
             let body = match close {
                 StreamClose::AfterFirst => Body::from_stream(stream::iter(vec![item])),
                 StreamClose::Stall => Body::from_stream(
-                    stream::iter(vec![item]).chain(stream::pending::<Result<Bytes, Infallible>>()),
+                    stream::iter(vec![item]).chain(stream::pending::<Result<Bytes, !>>()),
                 ),
             };
             ([("Content-Type", "text/event-stream")], body).into_response()

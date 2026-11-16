@@ -109,7 +109,8 @@ impl UnsupportedPlaceholderVisitor {
 }
 
 impl<'ast> Visitor<'ast> for UnsupportedPlaceholderVisitor {
-    type Error = std::convert::Infallible;
+    type Error = !;
+
     fn visit_where_clause(&mut self, expr: &'ast Expr) -> Result<(), Self::Error> {
         self.context.in_where_clause = true;
         let Ok(_) = self.visit_expr(expr);

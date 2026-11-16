@@ -66,7 +66,7 @@ struct ReplaceLiteralsWithPlaceholdersVisitor {
 }
 
 impl<'ast> VisitorMut<'ast> for ReplaceLiteralsWithPlaceholdersVisitor {
-    type Error = std::convert::Infallible;
+    type Error = !;
 
     fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
         self.out.push(mem::replace(

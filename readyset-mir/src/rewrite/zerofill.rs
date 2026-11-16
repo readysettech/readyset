@@ -3,7 +3,6 @@
 //! In text results from MySQL, a `ZEROFILL` value is padded with zeros to the display width.
 
 use std::collections::HashSet;
-use std::convert::Infallible;
 use std::fmt;
 
 use dataflow::ops::union::DuplicateMode;
@@ -82,7 +81,7 @@ struct Operands<'a> {
 }
 
 impl<'a> Visitor<'a> for Operands<'a> {
-    type Error = Infallible;
+    type Error = !;
 
     fn visit_expr(&mut self, expr: &'a Expr) -> Result<(), Self::Error> {
         if let Expr::Column(column) = expr {

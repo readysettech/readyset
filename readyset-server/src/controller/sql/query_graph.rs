@@ -896,7 +896,7 @@ fn extract_having_aggregates(
     }
 
     impl<'ast> VisitorMut<'ast> for AggregateFinder {
-        type Error = std::convert::Infallible;
+        type Error = !;
 
         fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
             if matches!(expr, Expr::Call(fun) if is_aggregate(fun)) {
@@ -1009,7 +1009,7 @@ fn replace_aggregate_defaults(expr: &mut Expr) {
     struct Visitor;
 
     impl<'ast> VisitorMut<'ast> for Visitor {
-        type Error = std::convert::Infallible;
+        type Error = !;
 
         fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
             match expr {
@@ -1617,7 +1617,8 @@ pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult
                             to: SqlIdentifier,
                         }
                         impl<'ast> VisitorMut<'ast> for RenameColumn {
-                            type Error = std::convert::Infallible;
+                            type Error = !;
+
                             fn visit_column(
                                 &mut self,
                                 column: &'ast mut Column,

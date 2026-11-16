@@ -2,7 +2,6 @@
 //! Display. These wrappers are intended to be used to hide user PII and credentials in logs or
 //! errors.
 
-use std::convert::Infallible;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::ops::Deref;
 use std::str::FromStr;
@@ -79,7 +78,8 @@ impl Debug for RedactedString {
 }
 
 impl FromStr for RedactedString {
-    type Err = Infallible;
+    type Err = !;
+
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         Ok(RedactedString(input.to_string()))
     }

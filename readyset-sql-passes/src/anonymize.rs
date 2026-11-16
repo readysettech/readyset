@@ -57,7 +57,8 @@ impl Anonymize for [SqlIdentifier] {
 /// placeholders, booleans, and `NULL`) in the AST with `Literal::String("<anonymized>")`
 struct AnonymizeLiteralsVisitor;
 impl<'ast> VisitorMut<'ast> for AnonymizeLiteralsVisitor {
-    type Error = std::convert::Infallible;
+    type Error = !;
+
     fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
         if !matches!(
             literal,
@@ -151,7 +152,7 @@ impl AnonymizeVisitor<'_> {
 }
 
 impl<'ast> VisitorMut<'ast> for AnonymizeVisitor<'_> {
-    type Error = std::convert::Infallible;
+    type Error = !;
 
     fn visit_sql_identifier(
         &mut self,

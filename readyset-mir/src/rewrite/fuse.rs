@@ -145,7 +145,7 @@ fn inline_expr_references(expr: &mut Expr, parent_emit: &[ProjectExpr]) {
     struct InlineParentExprReferencesVisitor<'a>(&'a [ProjectExpr]);
 
     impl<'ast> VisitorMut<'ast> for InlineParentExprReferencesVisitor<'_> {
-        type Error = std::convert::Infallible;
+        type Error = !;
 
         fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
             if let Expr::Column(ast::Column { name, .. }) = expr {

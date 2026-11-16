@@ -5,7 +5,6 @@
 //! pulling in a serialization crate.
 
 use std::collections::VecDeque;
-use std::convert::Infallible;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -122,9 +121,8 @@ struct Echo;
 
 impl Service<Msg<u32>> for Echo {
     type Response = Msg<u32>;
-    type Error = Infallible;
-    type Future =
-        std::pin::Pin<Box<dyn std::future::Future<Output = Result<Msg<u32>, Infallible>> + Send>>;
+    type Error = !;
+    type Future = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Msg<u32>, !>> + Send>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -303,9 +301,8 @@ struct Manual {
 
 impl Service<Msg<u32>> for Manual {
     type Response = Msg<u32>;
-    type Error = Infallible;
-    type Future =
-        std::pin::Pin<Box<dyn std::future::Future<Output = Result<Msg<u32>, Infallible>> + Send>>;
+    type Error = !;
+    type Future = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Msg<u32>, !>> + Send>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))

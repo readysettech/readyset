@@ -265,7 +265,7 @@ pub(super) fn unwrap_all_preserved(query: &mut SelectStatement) {
     struct UnwrapPreservedVisitor;
 
     impl<'ast> VisitorMut<'ast> for UnwrapPreservedVisitor {
-        type Error = std::convert::Infallible;
+        type Error = !;
 
         fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
             unwrap_preserved(literal);
@@ -548,7 +548,7 @@ struct AnalyzeLiteralsVisitor {
 }
 
 impl<'ast> VisitorMut<'ast> for AnalyzeLiteralsVisitor {
-    type Error = std::convert::Infallible;
+    type Error = !;
 
     fn visit_select_statement(
         &mut self,
@@ -934,7 +934,8 @@ mod tests {
     fn autoparam_keeps_preserved_literal_inline() {
         struct FreezeStrings;
         impl<'ast> VisitorMut<'ast> for FreezeStrings {
-            type Error = std::convert::Infallible;
+            type Error = !;
+
             fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
                 if matches!(literal, Literal::String(_)) {
                     let inner = mem::replace(literal, Literal::Null);
@@ -985,7 +986,8 @@ mod tests {
     fn autoparam_keeps_preserved_range_literal_inline() {
         struct FreezeIntoPreserved;
         impl<'ast> VisitorMut<'ast> for FreezeIntoPreserved {
-            type Error = std::convert::Infallible;
+            type Error = !;
+
             fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
                 // Freeze the range bound `10`, leaving the equality literal `5` to parameterize.
                 if matches!(literal, Literal::Integer(10) | Literal::UnsignedInteger(10)) {

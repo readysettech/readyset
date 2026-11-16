@@ -123,7 +123,7 @@ impl RecipeExpr {
                 struct CollectCustomTypesVisitor<'a>(Vec<&'a Relation>);
 
                 impl<'a> Visitor<'a> for CollectCustomTypesVisitor<'a> {
-                    type Error = std::convert::Infallible;
+                    type Error = !;
 
                     fn visit_sql_type(&mut self, sql_type: &'a SqlType) -> Result<(), Self::Error> {
                         if let SqlType::Other(ty) = sql_type {

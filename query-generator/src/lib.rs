@@ -162,7 +162,8 @@ impl From<&SqlIdentifier> for TableName {
 }
 
 impl FromStr for TableName {
-    type Err = std::convert::Infallible;
+    type Err = !;
+
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self::from(s))
     }
@@ -202,7 +203,8 @@ impl From<&SqlIdentifier> for ColumnName {
 }
 
 impl FromStr for ColumnName {
-    type Err = std::convert::Infallible;
+    type Err = !;
+
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self::from(s))
     }
@@ -3160,6 +3162,7 @@ pub struct OperationList(pub Vec<Operations>);
 
 impl FromStr for OperationList {
     type Err = anyhow::Error;
+
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Self(
             s.split(',')

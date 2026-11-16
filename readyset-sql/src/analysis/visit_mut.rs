@@ -38,7 +38,7 @@ use crate::ast::*;
 ///     struct PlaceholderCounter(usize);
 ///
 ///     impl<'ast> VisitorMut<'ast> for PlaceholderCounter {
-///         type Error = std::convert::Infallible;
+///         type Error = !;
 ///
 ///         fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
 ///             if matches!(literal, Literal::Placeholder(_)) {

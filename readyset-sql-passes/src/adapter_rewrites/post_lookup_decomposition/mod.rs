@@ -29,7 +29,7 @@ fn expr_referenced_in_having_or_order_by(target: &Expr, query: &SelectStatement)
     }
 
     impl<'ast> Visitor<'ast> for ContainsExpr<'_> {
-        type Error = std::convert::Infallible;
+        type Error = !;
 
         fn visit_expr(&mut self, expr: &'ast Expr) -> Result<(), Self::Error> {
             if expr == self.needle {

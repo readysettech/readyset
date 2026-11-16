@@ -96,7 +96,7 @@ fn negate_expr(expr: &mut Expr) -> bool {
 
 struct NormalizeNegationVisitor;
 impl<'ast> VisitorMut<'ast> for NormalizeNegationVisitor {
-    type Error = std::convert::Infallible;
+    type Error = !;
 
     fn visit_expr(&mut self, expr: &'ast mut Expr) -> Result<(), Self::Error> {
         if let Expr::UnaryOp {

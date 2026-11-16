@@ -2099,7 +2099,8 @@ mod tests {
         // Minimal Rng implementation to simulate an external source.
         struct CounterRng(u64);
         impl TryRng for CounterRng {
-            type Error = std::convert::Infallible;
+            type Error = !;
+
             fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
                 Ok(self.try_next_u64()? as u32)
             }

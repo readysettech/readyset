@@ -6,7 +6,7 @@ struct SetCatalogVisitor<'a> {
 }
 
 impl<'ast> VisitorMut<'ast> for SetCatalogVisitor<'_> {
-    type Error = std::convert::Infallible;
+    type Error = !;
 
     fn visit_table(&mut self, table: &'ast mut Relation) -> Result<(), Self::Error> {
         table.catalog = Some(self.catalog.clone());

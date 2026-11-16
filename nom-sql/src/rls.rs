@@ -176,7 +176,7 @@ mod tests {
         }
 
         impl<'ast> Visitor<'ast> for RlsPolicyVisitor {
-            type Error = std::convert::Infallible;
+            type Error = !;
 
             fn visit_table(&mut self, table: &'ast Relation) -> Result<(), Self::Error> {
                 self.stmt.table = table.clone();

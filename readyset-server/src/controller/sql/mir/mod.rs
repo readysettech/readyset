@@ -1683,7 +1683,7 @@ impl SqlToMirConverter {
         }
 
         impl<'ast> Visitor<'ast> for TheVisitor {
-            type Error = std::convert::Infallible;
+            type Error = !;
 
             fn visit_expr(&mut self, expr: &'ast Expr) -> Result<(), Self::Error> {
                 macro_rules! as_column {

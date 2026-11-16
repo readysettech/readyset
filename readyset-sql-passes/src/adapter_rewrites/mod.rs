@@ -1357,7 +1357,7 @@ fn client_parameter_count(query: &SelectStatement) -> ReadySetResult<u16> {
     }
 
     impl<'ast> Visitor<'ast> for ParameterCount {
-        type Error = std::convert::Infallible;
+        type Error = !;
 
         fn visit_literal(&mut self, literal: &'ast Literal) -> Result<(), Self::Error> {
             match literal {
@@ -1384,7 +1384,7 @@ struct ReorderNumberedPlaceholdersVisitor {
 }
 
 impl<'ast> VisitorMut<'ast> for ReorderNumberedPlaceholdersVisitor {
-    type Error = std::convert::Infallible;
+    type Error = !;
 
     fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
         if let Literal::Placeholder(ItemPlaceholder::DollarNumber(n)) = literal {
@@ -1444,6 +1444,7 @@ struct NumberPlaceholdersVisitor {
 
 impl<'ast> VisitorMut<'ast> for NumberPlaceholdersVisitor {
     type Error = ReadySetError;
+
     fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
         if let Literal::Placeholder(item) = literal {
             // client-provided queries aren't allowed to mix question-mark and dollar-number
@@ -2577,7 +2578,8 @@ mod tests {
             fn inline_literals(stmt: &SelectStatement) -> usize {
                 struct Count(usize);
                 impl<'ast> Visitor<'ast> for Count {
-                    type Error = std::convert::Infallible;
+                    type Error = !;
+
                     fn visit_literal(&mut self, l: &'ast Literal) -> Result<(), Self::Error> {
                         if !matches!(l, Literal::Placeholder(_)) {
                             self.0 += 1;
@@ -3878,7 +3880,8 @@ mod tests {
             fn a_statement_mixing_the_spellings_is_refused() {
                 struct QuestionFirst(bool);
                 impl<'ast> VisitorMut<'ast> for QuestionFirst {
-                    type Error = std::convert::Infallible;
+                    type Error = !;
+
                     fn visit_literal(
                         &mut self,
                         literal: &'ast mut Literal,

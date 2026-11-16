@@ -468,7 +468,7 @@ fn collect_non_aggregated_columns<'a>(
     }
 
     impl<'ast> Visitor<'ast> for Collector<'ast, '_> {
-        type Error = std::convert::Infallible;
+        type Error = !;
 
         fn visit_column(&mut self, column: &'ast Column) -> Result<(), Self::Error> {
             self.cols.push(column);
