@@ -7,7 +7,7 @@ use std::fmt;
 use dataflow_expression::{BinaryOperator, Expr};
 use itertools::Itertools;
 use readyset_client::{KeyComparison, ReplayKeys};
-use readyset_data::DfType;
+use readyset_data::{Collation, DfType};
 use readyset_util::ranges::Bound;
 use serde::{Deserialize, Serialize};
 use vec1::Vec1;
@@ -264,12 +264,24 @@ fn constant_value(expr: &Expr) -> Option<DfValue> {
         .flatten()
 }
 
-/// Whether a lookup of `value` in an index on a `column` column finds exactly the rows that
-/// `column = value` keeps, with the column compared as `compared_as`
+/// Whether looking up `value` in an index on a column of type `column` finds exactly the rows
+/// that `column = value` keeps, when the comparison casts the column to `compared_as`
 fn can_push(column: &DfType, compared_as: &DfType, value: &DfValue) -> bool {
-    // Integers compare by value under any integer cast. A cast that fails on an out-of-range
-    // value makes the filter drop the row, and a lookup of `value` doesn't find it either.
-    column.is_any_int() && compared_as.is_any_int() && value.is_integer()
+    match column {
+        // Integers compare by value under any integer cast. A cast that fails on an out-of-range
+        // value makes the filter drop the row, and a lookup of `value` doesn't find it either.
+        _ if column.is_any_int() => compared_as.is_any_int() && value.is_integer(),
+        // An index stores a text under its collation's sort key, and two texts are equal in a
+        // collation when their sort keys are equal. So if the comparison uses the column's
+        // collation, a lookup of the value finds exactly the rows where `col = value` is true.
+        // CHAR is left out because `=` ignores padding the key keeps, and the padded collation
+        // because `=` treats some texts as equal whose keys differ.
+        DfType::Text(c) | DfType::VarChar(_, c) if *c != Collation::Utf8AiCiPad => {
+            (compared_as == column || *compared_as == DfType::Text(*c))
+                && value.collation() == Some(*c)
+        }
+        _ => false,
+    }
 }
 
 /// Whether `a` and `b` have the same index key
@@ -280,7 +292,6 @@ fn same_key(a: &DfValue, b: &DfValue) -> bool {
 #[cfg(test)]
 mod tests {
     use dataflow_expression::utils::{column_with_type, make_int_column, make_literal};
-    use readyset_data::Collation;
 
     use super::*;
     use crate::node::special::Base;
@@ -396,6 +407,74 @@ mod tests {
         // A list over the cap is ignored, and the column's other conditions still apply
         let narrower = all_of([int_list(MAX_LOOKUPS as i32 + 1), col_eq(0, 2.into())]);
         assert_eq!(equals(narrower, &types), vec![(0, vec![2.into()])]);
+    }
+
+    #[test]
+    fn equalities_of_text_in_the_column_collation() {
+        let text = |s: &str, c: Collation| DfValue::from_str_and_collation(s, c);
+        let shifted = DfType::Text(Collation::Utf8Shifted);
+        let ci = DfType::VarChar(10, Collation::Utf8AiCi);
+        let pad = DfType::VarChar(20, Collation::Utf8AiCiPad);
+        let fixed = DfType::Char(5, Collation::Utf8Shifted);
+        let types = [shifted.clone(), ci.clone(), fixed.clone(), pad.clone()];
+        // Text constants are cast to the column's type, and MySQL compares a VARCHAR column as
+        // text in its collation
+        let status = |s: &str| {
+            let constant = cast(make_literal(s.into()), shifted.clone());
+            eq(column_with_type(0, shifted.clone()), constant)
+        };
+        let name = |s: &str| {
+            let column = cast(
+                column_with_type(1, ci.clone()),
+                DfType::Text(Collation::Utf8AiCi),
+            );
+            eq(column, make_literal(text(s, Collation::Utf8AiCi)))
+        };
+        // 'A' and 'a' have the same case-insensitive key
+        let expr = all_of([
+            any_of([status("a"), status("b"), status("a")]),
+            any_of([name("A"), name("a")]),
+        ]);
+        let found = vec![
+            (
+                0,
+                vec![
+                    text("a", Collation::Utf8Shifted),
+                    text("b", Collation::Utf8Shifted),
+                ],
+            ),
+            (1, vec![text("A", Collation::Utf8AiCi)]),
+        ];
+        assert_eq!(equals(expr, &types), found);
+
+        let shifted_column = || column_with_type(0, shifted.clone());
+        for expr in [
+            // A constant in another collation, or a comparison in another collation
+            eq(shifted_column(), make_literal(text("a", Collation::Utf8))),
+            eq(
+                cast(shifted_column(), DfType::Text(Collation::Utf8Ci)),
+                make_literal(text("a", Collation::Utf8Ci)),
+            ),
+            // A comparison that truncates the column
+            eq(
+                cast(shifted_column(), DfType::VarChar(1, Collation::Utf8Shifted)),
+                make_literal(text("a", Collation::Utf8Shifted)),
+            ),
+            eq(
+                column_with_type(2, fixed.clone()),
+                make_literal(text("a", Collation::Utf8Shifted)),
+            ),
+            eq(
+                cast(
+                    column_with_type(3, pad.clone()),
+                    DfType::Text(Collation::Utf8AiCiPad),
+                ),
+                make_literal(text("active", Collation::Utf8AiCiPad)),
+            ),
+        ] {
+            let shown = expr.to_string();
+            assert_eq!(equals(expr, &types), vec![], "{shown}");
+        }
     }
 
     #[test]
