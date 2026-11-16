@@ -33,7 +33,7 @@ pub trait SetCatalog {
 
 impl SetCatalog for CreateTableStatement {
     fn set_catalog(&mut self, catalog: &SqlIdentifier) -> &mut Self {
-        let Ok(()) = SetCatalogVisitor { catalog }.visit_create_table_statement(self);
+        SetCatalogVisitor { catalog }.visit_create_table_statement(self);
         self
     }
 }

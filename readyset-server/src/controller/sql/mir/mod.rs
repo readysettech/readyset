@@ -1786,7 +1786,7 @@ impl SqlToMirConverter {
         };
 
         if let Some(ref where_clause) = subquery.where_clause {
-            visitor.visit_expr(where_clause).expect("Just checked");
+            visitor.visit_expr(where_clause);
         }
 
         if let Err(e) = visitor.result {

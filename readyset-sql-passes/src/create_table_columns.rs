@@ -34,7 +34,7 @@ pub trait CreateTableColumns {
 
 impl CreateTableColumns for CreateTableStatement {
     fn normalize_create_table_columns(&mut self) -> &mut Self {
-        let Ok(()) = CreateTableColumnsVisitor::default().visit_create_table_statement(self);
+        CreateTableColumnsVisitor::default().visit_create_table_statement(self);
         self
     }
 }

@@ -43,7 +43,7 @@ async fn range(
 
         let b = String::from(char::from_u32(a as _).unwrap());
         let mut k = Vec::new();
-        let Ok(()) = collator.write_sort_key_to(&b, &mut k);
+        collator.write_sort_key_to(&b, &mut k);
         col.entry(k).and_modify(push).or_insert(vec![a]);
     }
 }

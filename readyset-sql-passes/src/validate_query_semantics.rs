@@ -506,7 +506,7 @@ fn collect_non_aggregated_columns<'a>(
         cols: Vec::new(),
         gb_exprs,
     };
-    let _ = collector.visit_expr(expr);
+    collector.visit_expr(expr);
     collector.cols
 }
 

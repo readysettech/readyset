@@ -195,7 +195,7 @@ impl AliasRemoval for SelectStatement {
             out: Default::default(),
         };
 
-        let Ok(_) = visitor.visit_select_statement(self);
+        visitor.visit_select_statement(self);
 
         if let Some(rewrites) = rewrites.as_deref_mut() {
             rewrites.extend(visitor.out);

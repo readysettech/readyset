@@ -222,7 +222,7 @@ impl<'ast> Visitor<'ast> for UnsupportedPlaceholderVisitor {
 impl DetectUnsupportedPlaceholders for SelectStatement {
     fn detect_unsupported_placeholders(&self, config: Config) -> ReadySetResult<()> {
         let mut visitor = UnsupportedPlaceholderVisitor::new(config);
-        let Ok(()) = visitor.visit_select_statement(self);
+        visitor.visit_select_statement(self);
 
         let unsupported_placeholders = visitor.unsupported_placeholders();
 

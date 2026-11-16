@@ -217,7 +217,7 @@ impl ShallowCacheQuery {
         }
 
         let mut visitor = QuestionMarkPlaceholdersVisitor;
-        let _ = VisitMut::visit(&mut **self, &mut visitor);
+        VisitMut::visit(&mut **self, &mut visitor);
     }
 
     /// Removes **all** optimizer hints from the inner `Select` AST node, regardless of prefix, and

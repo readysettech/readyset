@@ -102,7 +102,7 @@ impl<'ast> Visitor<'ast> for Bound {
 /// the pass without being walked again, and what tells the pass what it is about to leave.
 fn bound_entries(statement: &SelectStatement) -> Bound {
     let mut bound = Bound::default();
-    let Ok(()) = bound.visit_select_statement(statement);
+    bound.visit_select_statement(statement);
     bound
 }
 

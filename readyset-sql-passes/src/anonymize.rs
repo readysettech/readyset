@@ -16,13 +16,13 @@ pub trait Anonymize {
 
 impl Anonymize for CreateTableStatement {
     fn anonymize(&mut self, anonymizer: &mut Anonymizer) {
-        let Ok(()) = AnonymizeVisitor { anonymizer }.visit_create_table_statement(self);
+        AnonymizeVisitor { anonymizer }.visit_create_table_statement(self);
     }
 }
 
 impl Anonymize for CreateViewStatement {
     fn anonymize(&mut self, anonymizer: &mut Anonymizer) {
-        let Ok(()) = AnonymizeVisitor { anonymizer }.visit_create_view_statement(self);
+        AnonymizeVisitor { anonymizer }.visit_create_view_statement(self);
     }
 }
 
@@ -41,7 +41,7 @@ impl Anonymize for String {
 }
 impl Anonymize for SelectStatement {
     fn anonymize(&mut self, anonymizer: &mut Anonymizer) {
-        let Ok(()) = AnonymizeVisitor { anonymizer }.visit_select_statement(self);
+        AnonymizeVisitor { anonymizer }.visit_select_statement(self);
     }
 }
 
@@ -111,11 +111,11 @@ impl Anonymizer {
     }
 
     pub fn anonymize_create_table(&mut self, stmt: &mut CreateTableStatement) {
-        let Ok(()) = AnonymizeVisitor { anonymizer: self }.visit_create_table_statement(stmt);
+        AnonymizeVisitor { anonymizer: self }.visit_create_table_statement(stmt);
     }
 
     pub fn anonymize_create_view(&mut self, stmt: &mut CreateViewStatement) {
-        let Ok(()) = AnonymizeVisitor { anonymizer: self }.visit_create_view_statement(stmt);
+        AnonymizeVisitor { anonymizer: self }.visit_create_view_statement(stmt);
     }
 
     // This converts any SqlIdentifier::TinyText to SqlIdentifier::Text for now, as anonymized

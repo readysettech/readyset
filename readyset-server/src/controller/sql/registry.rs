@@ -135,7 +135,7 @@ impl RecipeExpr {
                 }
 
                 let mut visitor = CollectCustomTypesVisitor::default();
-                let Ok(()) = visitor.visit_select_statement(statement);
+                visitor.visit_select_statement(statement);
                 visitor.0
             }
             _ => vec![], // TODO: compound select statements,

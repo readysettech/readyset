@@ -54,7 +54,7 @@ use crate::ast::*;
 ///     };
 ///
 ///     let mut counter = PlaceholderCounter::default();
-///     counter.visit_select_statement(&mut query).unwrap();
+///     counter.visit_select_statement(&mut query);
 ///     counter.0
 /// }
 ///

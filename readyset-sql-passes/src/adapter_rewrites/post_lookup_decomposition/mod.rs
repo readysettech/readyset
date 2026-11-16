@@ -54,7 +54,7 @@ fn expr_referenced_in_having_or_order_by(target: &Expr, query: &SelectStatement)
             needle,
             found: false,
         };
-        let _ = vis.visit_expr(haystack);
+        vis.visit_expr(haystack);
         vis.found
     }
 

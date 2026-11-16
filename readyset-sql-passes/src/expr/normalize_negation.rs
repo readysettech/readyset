@@ -114,7 +114,7 @@ impl<'ast> VisitorMut<'ast> for NormalizeNegationVisitor {
 }
 
 pub fn normalize_negation(expr: &mut Expr) {
-    let Ok(()) = NormalizeNegationVisitor.visit_expr(expr);
+    NormalizeNegationVisitor.visit_expr(expr);
 }
 
 #[cfg(test)]
@@ -157,7 +157,7 @@ mod tests {
             }),
         };
 
-        let Ok(()) = NormalizeNegationVisitor.visit_expr(&mut expr);
+        NormalizeNegationVisitor.visit_expr(&mut expr);
         assert_eq!(
             expr,
             target,

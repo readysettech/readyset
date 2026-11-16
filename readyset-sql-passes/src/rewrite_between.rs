@@ -82,28 +82,28 @@ impl<'ast> VisitorMut<'ast> for RewriteBetweenVisitor {
 
 impl RewriteBetween for SelectStatement {
     fn rewrite_between(&mut self) -> &mut Self {
-        let Ok(()) = RewriteBetweenVisitor.visit_select_statement(self);
+        RewriteBetweenVisitor.visit_select_statement(self);
         self
     }
 }
 
 impl RewriteBetween for DeleteStatement {
     fn rewrite_between(&mut self) -> &mut Self {
-        let Ok(()) = RewriteBetweenVisitor.visit_delete_statement(self);
+        RewriteBetweenVisitor.visit_delete_statement(self);
         self
     }
 }
 
 impl RewriteBetween for UpdateStatement {
     fn rewrite_between(&mut self) -> &mut Self {
-        let Ok(()) = RewriteBetweenVisitor.visit_update_statement(self);
+        RewriteBetweenVisitor.visit_update_statement(self);
         self
     }
 }
 
 impl RewriteBetween for SqlQuery {
     fn rewrite_between(&mut self) -> &mut Self {
-        let Ok(()) = RewriteBetweenVisitor.visit_sql_query(self);
+        RewriteBetweenVisitor.visit_sql_query(self);
         self
     }
 }

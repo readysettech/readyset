@@ -55,7 +55,7 @@ pub trait ScalarOptimizeExpressions {
 
 impl ScalarOptimizeExpressions for SelectStatement {
     fn scalar_optimize_expressions<C: RewriteDialectContext>(&mut self, context: C) -> &mut Self {
-        let Ok(()) = ScalarOptimizeExpressionsVisitor {
+        ScalarOptimizeExpressionsVisitor {
             dialect: context.dialect(),
         }
         .visit_select_statement(self);

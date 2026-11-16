@@ -932,7 +932,7 @@ fn extract_having_aggregates(
         dialect,
     };
     for pred in having_predicates.iter_mut() {
-        let _ = af.visit_expr(pred);
+        af.visit_expr(pred);
     }
     aggregates.extend(af.result);
 
@@ -1028,7 +1028,7 @@ fn replace_aggregate_defaults(expr: &mut Expr) {
         }
     }
 
-    let Ok(()) = Visitor.visit_expr(expr);
+    Visitor.visit_expr(expr);
 }
 
 /// Replace aggregate function calls with their empty-input default values (COUNT gets 0, all
@@ -1646,8 +1646,7 @@ pub fn to_query_graph(stmt: SelectStatement, dialect: Dialect) -> ReadySetResult
                                         from: new_name,
                                         to: canonical,
                                     };
-                                    // Infallible — unwrap is safe.
-                                    let _ = renamer.visit_expr(expr);
+                                    renamer.visit_expr(expr);
                                 }
                             }
                         };

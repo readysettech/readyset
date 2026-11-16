@@ -29,7 +29,7 @@ impl InlineLiterals for SelectStatement {
         let mut visitor = InlineLiteralsVisitor {
             placeholder_literal_map,
         };
-        let Ok(()) = visitor.visit_select_statement(&mut self);
+        visitor.visit_select_statement(&mut self);
         self
     }
 }

@@ -108,12 +108,12 @@ fn uses(inner: &MirNodeInner) -> Vec<(Column, Use<'_>)> {
     let mut uses = vec![];
     match inner {
         MirNodeInner::Filter { conditions } => {
-            let Ok(()) = operands.visit_expr(conditions);
+            operands.visit_expr(conditions);
         }
         MirNodeInner::Project { emit } => {
             for expr in emit {
                 if let ProjectExpr::Expr { expr, .. } = expr {
-                    let Ok(()) = operands.visit_expr(expr);
+                    operands.visit_expr(expr);
                 }
             }
         }
@@ -124,7 +124,7 @@ fn uses(inner: &MirNodeInner) -> Vec<(Column, Use<'_>)> {
             left_local_preds, ..
         } => {
             for predicate in left_local_preds {
-                let Ok(()) = operands.visit_expr(predicate);
+                operands.visit_expr(predicate);
             }
         }
         MirNodeInner::Aggregation { on, .. }

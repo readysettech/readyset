@@ -44,7 +44,7 @@ pub fn wrap_autoparam_exclusions(stmt: &mut SelectStatement, control: &Autoparam
         control: *control,
         excluded_depth: 0,
     };
-    let Ok(()) = visitor.visit_select_statement(stmt);
+    visitor.visit_select_statement(stmt);
 }
 
 struct ExclusionWrapper {
@@ -137,7 +137,7 @@ impl<'ast> VisitorMut<'ast> for ExclusionWrapper {
 /// Collect every literal in the statement in visit order.
 #[cfg(test)]
 fn collect_literals(stmt: &SelectStatement) -> Vec<Literal> {
-    use readyset_sql::analysis::visit::{self, Visitor};
+    use readyset_sql::analysis::visit::Visitor;
 
     struct CollectLiterals(Vec<Literal>);
 
@@ -151,7 +151,7 @@ fn collect_literals(stmt: &SelectStatement) -> Vec<Literal> {
     }
 
     let mut visitor = CollectLiterals(vec![]);
-    let Ok(()) = visit::Visitor::visit_select_statement(&mut visitor, stmt);
+    visitor.visit_select_statement(stmt);
     visitor.0
 }
 

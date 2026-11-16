@@ -85,7 +85,7 @@ trait ReplaceLiteralsWithPlaceholders {
 impl ReplaceLiteralsWithPlaceholders for SelectStatement {
     fn replace_literals(&mut self) -> Vec<Literal> {
         let mut visitor = ReplaceLiteralsWithPlaceholdersVisitor::default();
-        let Ok(()) = visitor.visit_select_statement(self);
+        visitor.visit_select_statement(self);
         visitor.out
     }
 }

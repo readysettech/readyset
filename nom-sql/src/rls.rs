@@ -201,7 +201,7 @@ mod tests {
         let mut vis = RlsPolicyVisitor {
             stmt: CreateRlsStatement::new("".into(), false),
         };
-        vis.visit_create_rls_statement(&stmt).unwrap();
+        vis.visit_create_rls_statement(&stmt);
 
         assert_eq!(vis.stmt, stmt);
     }

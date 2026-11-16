@@ -142,7 +142,7 @@ fn contains_star_projection(stmt: &SelectStatement) -> bool {
         }
     }
     let mut check = StarCheck { found: false };
-    let _ = check.visit_select_statement(stmt);
+    check.visit_select_statement(stmt);
     check.found
 }
 
@@ -385,7 +385,7 @@ fn collect_subquery_aliases(stmt: &SelectStatement, out: &mut HashSet<SqlIdentif
             visit::walk_table_expr(self, te)
         }
     }
-    let _ = Collector { out }.visit_select_statement(stmt);
+    Collector { out }.visit_select_statement(stmt);
 }
 
 /// Trigger predicate: does the statement's ORDER BY contain a subquery?

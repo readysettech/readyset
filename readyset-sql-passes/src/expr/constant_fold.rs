@@ -99,7 +99,7 @@ impl<'ast> VisitorMut<'ast> for ConstantFoldVisitor {
 /// need to preserve `CAST` type annotations (e.g. for PostgreSQL function overload resolution),
 /// use [`constant_fold_expr_preserving_casts`] instead.
 pub fn constant_fold_expr(expr: &mut Expr, dialect: Dialect) {
-    let Ok(()) = ConstantFoldVisitor {
+    ConstantFoldVisitor {
         dialect,
         preserve_casts: false,
     }
@@ -117,7 +117,7 @@ pub fn constant_fold_expr(expr: &mut Expr, dialect: Dialect) {
 /// `CAST(3 AS INT)`. Nested Casts are also preserved (e.g., `CAST(CAST(1+2 AS INT) AS TEXT)`
 /// becomes `CAST(CAST(3 AS INT) AS TEXT)`).
 pub fn constant_fold_expr_preserving_casts(expr: &mut Expr, dialect: Dialect) {
-    let Ok(()) = ConstantFoldVisitor {
+    ConstantFoldVisitor {
         dialect,
         preserve_casts: true,
     }

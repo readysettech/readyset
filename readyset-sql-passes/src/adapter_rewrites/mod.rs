@@ -1372,7 +1372,7 @@ fn client_parameter_count(query: &SelectStatement) -> ReadySetResult<u16> {
     }
 
     let mut count = ParameterCount::default();
-    let Ok(()) = count.visit_select_statement(query);
+    count.visit_select_statement(query);
     let params = count.question_marks.max(count.highest_number);
     u16::try_from(params)
         .map_err(|_| unsupported_err!("{params} parameters, more than {}", u16::MAX))
@@ -1406,7 +1406,7 @@ fn reorder_numbered_placeholders(
         out: vec![],
     };
 
-    let Ok(()) = visitor.visit_select_statement(query);
+    visitor.visit_select_statement(query);
 
     // When each of the client's values fills exactly one placeholder, in order, the values need no
     // reordering, which saves the read path a clone of every one of them. A placeholder a pass
@@ -2588,7 +2588,7 @@ mod tests {
                     }
                 }
                 let mut c = Count(0);
-                let Ok(()) = Visitor::visit_select_statement(&mut c, stmt);
+                Visitor::visit_select_statement(&mut c, stmt);
                 c.0
             }
 
@@ -3898,7 +3898,7 @@ mod tests {
                 let mut query = parse_select_statement_postgres(
                     "SELECT t.x FROM t WHERE t.x = $1 AND t.y = $2",
                 );
-                let Ok(()) = QuestionFirst(false).visit_select_statement(&mut query);
+                QuestionFirst(false).visit_select_statement(&mut query);
 
                 let result = standardize_placeholders(&mut query);
                 assert!(

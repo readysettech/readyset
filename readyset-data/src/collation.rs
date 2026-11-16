@@ -334,7 +334,7 @@ impl Collation {
 
         let mut out = Vec::with_capacity(len); // just a close guess
         let make = |c: &CollatorBorrowed| c.write_sort_key_to(s.as_ref(), &mut out);
-        let Ok(()) = match self {
+        match self {
             Self::Utf8 => UTF8.with(make),
             Self::Utf8Ci => UTF8_CI.with(make),
             Self::Utf8AiCi | Self::Utf8AiCiPad => UTF8_AI_CI.with(make),

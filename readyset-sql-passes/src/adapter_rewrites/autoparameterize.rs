@@ -273,7 +273,7 @@ pub(super) fn unwrap_all_preserved(query: &mut SelectStatement) {
         }
     }
 
-    let Ok(()) = UnwrapPreservedVisitor.visit_select_statement(query);
+    UnwrapPreservedVisitor.visit_select_statement(query);
 }
 
 impl AutoParameterizeVisitor {
@@ -721,7 +721,7 @@ pub fn auto_parameterize_query(
         cap_predicates: cap_predicates.clone(),
         ..Default::default()
     };
-    visitor.visit_select_statement(query).unwrap();
+    visitor.visit_select_statement(query);
 
     let (autoparameterize_equals, autoparameterize_ranges) = if !autoparameterize {
         // Every literal the author wrote stays inline, which is the form a cache created with
@@ -950,7 +950,7 @@ mod tests {
             "SELECT id FROM users WHERE name = \"frozen\" AND id = 5",
             dialect,
         );
-        FreezeStrings.visit_select_statement(&mut query).unwrap();
+        FreezeStrings.visit_select_statement(&mut query);
 
         let params = auto_parameterize_query(
             &mut query,

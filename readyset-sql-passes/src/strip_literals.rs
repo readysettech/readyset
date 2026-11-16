@@ -56,7 +56,7 @@ pub trait StripLiterals {
 impl StripLiterals for SelectStatement {
     fn strip_literals(&mut self) -> Vec<Literal> {
         let mut visitor = StripLiteralsVisitor::new();
-        let Ok(()) = visitor.visit_select_statement(self);
+        visitor.visit_select_statement(self);
         visitor.literals
     }
 }

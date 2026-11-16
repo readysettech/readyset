@@ -124,7 +124,7 @@ pub fn anonymize_shallow_query(query: &mut ShallowCacheQuery, anonymizer: &mut A
     );
 
     let mut visitor = AnonymizeVisitor { anonymizer };
-    let _ = VisitMut::visit(&mut **query, &mut visitor);
+    VisitMut::visit(&mut **query, &mut visitor);
 }
 
 /// Substitutes placeholders in a cloned query with the provided DfValues.
@@ -170,7 +170,7 @@ pub fn literalize_shallow_query(
 /// Returns `None` if placeholders are already sequential (optimization to avoid work at runtime).
 fn reorder_numbered_placeholders(query: &Query) -> Option<Vec<usize>> {
     let mut visitor = ReorderNumberedPlaceholdersVisitor::default();
-    let _ = Visit::visit(query, &mut visitor);
+    Visit::visit(query, &mut visitor);
 
     // As an optimization, check if the placeholders were *already* ordered and contiguous, and
     // return None if so. This allows us to save some clones on the actual read-path.
@@ -338,7 +338,7 @@ impl Visitor for MaxPlaceholderVisitor {
 /// count. Zero for a query without numbered placeholders.
 pub fn max_placeholder_index(query: &ShallowCacheQuery) -> usize {
     let mut visitor = MaxPlaceholderVisitor { max: 0 };
-    let _ = Visit::visit(&**query, &mut visitor);
+    Visit::visit(&**query, &mut visitor);
     visitor.max
 }
 

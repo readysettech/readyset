@@ -162,7 +162,7 @@ fn inline_expr_references(expr: &mut Expr, parent_emit: &[ProjectExpr]) {
         }
     }
 
-    let Ok(()) = InlineParentExprReferencesVisitor(parent_emit).visit_expr(expr);
+    InlineParentExprReferencesVisitor(parent_emit).visit_expr(expr);
 }
 
 /// Rewrite the given query to fuse subsequent [`Project`] nodes into one node, inlining
