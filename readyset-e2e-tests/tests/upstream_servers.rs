@@ -568,10 +568,11 @@ async fn show_connections_reports_the_picked_upstream() {
     let mut rs = mysql_async::Conn::new(rs_opts.clone()).await.unwrap();
     wait_online(&mut rs).await;
 
-    let rows: Vec<(String, String, Option<String>)> = rs.query("SHOW CONNECTIONS").await.unwrap();
+    let rows: Vec<(u64, String, String, Option<String>)> =
+        rs.query("SHOW CONNECTIONS").await.unwrap();
     assert!(
         rows.iter()
-            .any(|(_, _, upstream)| upstream.as_deref() == Some(live.as_str())),
+            .any(|(_, _, _, upstream)| upstream.as_deref() == Some(live.as_str())),
         "{rows:?}"
     );
 

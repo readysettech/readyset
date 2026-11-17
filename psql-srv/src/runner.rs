@@ -123,16 +123,18 @@ impl<B: PsqlBackend, C: AsyncRead + AsyncWrite + Unpin> Runner<B, C> {
     async fn handle_request(&mut self, request: FrontendMessage) -> Result<(), Error> {
         if self.enable_statement_logging {
             match request {
-                // The backend logs statements itself, with the client's user and address.
+                // The backend logs statements itself.
                 FrontendMessage::Query { .. }
                 | FrontendMessage::Parse { .. }
                 | FrontendMessage::Bind { .. }
                 | FrontendMessage::Execute { .. } => {}
                 // Credentials: log only the message name.
                 FrontendMessage::Authenticate { .. } | FrontendMessage::SaslResponse { .. } => {
-                    info!(target: "client_statement", "{request}")
+                    info!(target: "client_statement", "conn={} {request}", self.backend.connection_id())
                 }
-                _ => info!(target: "client_statement", "{request:?}"),
+                _ => {
+                    info!(target: "client_statement", "conn={} {request:?}", self.backend.connection_id())
+                }
             }
         }
 

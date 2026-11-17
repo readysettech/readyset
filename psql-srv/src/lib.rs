@@ -147,6 +147,11 @@ pub trait PsqlBackend {
     /// Determine if the connection is in an open transaction.
     fn in_transaction(&self) -> bool;
 
+    /// Id that tags this connection's lines in the statement log; 0 when the backend has none.
+    fn connection_id(&self) -> u64 {
+        0
+    }
+
     /// Loads any extended types from the upstream postgres, returning a map of Oid to typelen
     async fn load_extended_types(&mut self) -> Result<HashMap<Oid, i16>, Error>;
 }

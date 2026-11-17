@@ -74,6 +74,7 @@ use std::fmt::{self, Debug};
 use std::marker::PhantomData;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{
     Arc, OnceLock, PoisonError, RwLock as StdRwLock, RwLockReadGuard as StdRwLockReadGuard,
 };
@@ -193,6 +194,12 @@ const SHALLOW_CACHE_MISS: &str = "shallow cache miss";
 /// Unique identifier for a prepared statement, local to a single [`Backend`].
 type StatementId = u32;
 
+/// Identifies a client connection for the life of the process.
+pub type ConnectionId = u64;
+
+/// Source of [`ConnectionId`]s. Starts at 1 so 0 can mean a backend without one.
+static NEXT_CONNECTION_ID: AtomicU64 = AtomicU64::new(1);
+
 use crate::ROUTING_CHECK_INTERVAL;
 use crate::shallow_refresh_pool::ShallowRefreshPool;
 pub use crate::shallow_refresh_pool::ShallowRefreshRequest;
@@ -201,6 +208,8 @@ use crate::upstream_servers::{self, PickedServer};
 /// Information about an active connection
 #[derive(Debug, Clone, Eq, PartialEq, Hash, PartialOrd, Ord)]
 pub struct ConnectionInfo {
+    /// Process-wide unique id of the connection, first so the set orders by it
+    pub id: ConnectionId,
     /// The remote address of the connection
     pub addr: SocketAddr,
     /// The authenticated username for this connection
@@ -211,8 +220,9 @@ pub struct ConnectionInfo {
 }
 
 impl ConnectionInfo {
-    pub fn new(addr: SocketAddr, username: String) -> Self {
+    pub fn new(id: ConnectionId, addr: SocketAddr, username: String) -> Self {
         Self {
+            id,
             addr,
             username,
             upstream: None,
@@ -552,8 +562,10 @@ impl BackendBuilder {
             readyset_schema_route_all = true;
         }
 
+        let connection_id = NEXT_CONNECTION_ID.fetch_add(1, Ordering::Relaxed);
         if let Some(connections) = &self.connections {
             connections.insert(ConnectionInfo::new(
+                connection_id,
                 self.client_addr,
                 UNAUTHENTICATED_USER.to_string(),
             ));
@@ -567,6 +579,7 @@ impl BackendBuilder {
                 session: None,
             },
             state: BackendState {
+                connection_id,
                 client_addr: self.client_addr,
                 proxy_state,
                 write_tracker: SessionWriteTracker::new(
@@ -1028,6 +1041,8 @@ struct BackendState<DB>
 where
     DB: UpstreamDatabase,
 {
+    /// Process-wide unique id of this connection.
+    connection_id: ConnectionId,
     /// Socket of the connected client.
     client_addr: SocketAddr,
     /// Tracks information related to our decision to proxy or not.
@@ -1208,6 +1223,7 @@ where
     /// This session's entry in the connection-tracking set.
     fn connection_info(&self) -> ConnectionInfo {
         ConnectionInfo {
+            id: self.connection_id,
             addr: self.client_addr,
             username: self
                 .client_username
@@ -1379,6 +1395,17 @@ where
             schema: Cow::Owned(vec![
                 ColumnSchema {
                     column: ast::Column {
+                        name: "connection_id".into(),
+                        table: None,
+                    },
+                    column_type: DfType::UnsignedBigInt,
+                    nullable: false,
+                    base: None,
+                    zerofill: false,
+                    display_width: None,
+                },
+                ColumnSchema {
+                    column: ast::Column {
                         name: "client_addr".into(),
                         table: None,
                     },
@@ -1412,6 +1439,7 @@ where
                 },
             ]),
             columns: Cow::Owned(vec![
+                "connection_id".into(),
                 "client_addr".into(),
                 "username".into(),
                 "upstream".into(),
@@ -1424,6 +1452,7 @@ where
             .flat_map(|c| c.iter())
             .map(|conn| {
                 vec![
+                    DfValue::UnsignedInt(conn.id),
                     conn.addr.to_string().into(),
                     conn.username.clone().into(),
                     conn.upstream
@@ -2158,6 +2187,7 @@ where
         password: Option<RedactedString>,
         interactive: bool,
     ) -> Result<(), DB::Error> {
+        self.log_statement(format_args!("login: {user}@{}", self.state.client_addr));
         if password.is_some() {
             self.update_connection_username(user);
         }
@@ -2596,15 +2626,15 @@ where
         &self.state.users
     }
 
-    /// Writes `msg` to the statement log, prefixed with `user@addr` of this client.
+    /// Process-wide unique id of this connection.
+    pub fn connection_id(&self) -> ConnectionId {
+        self.state.connection_id
+    }
+
+    /// Writes `msg` to the statement log, prefixed with this connection's id.
     pub fn log_statement(&self, msg: fmt::Arguments<'_>) {
         if self.state.statement_texts.is_some() {
-            let user = self
-                .state
-                .client_username
-                .as_deref()
-                .unwrap_or(UNAUTHENTICATED_USER);
-            info!(target: "client_statement", "{user}@{} {msg}", self.state.client_addr);
+            info!(target: "client_statement", "conn={} {msg}", self.state.connection_id);
         }
     }
 

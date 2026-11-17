@@ -356,6 +356,11 @@ impl InitResult {
 // Only used internally
 #[allow(async_fn_in_trait)]
 pub trait MySqlShim<S: AsyncRead + AsyncWrite + Unpin + Send> {
+    /// Id that tags this connection's lines in the statement log; 0 when the shim has none.
+    fn connection_id(&self) -> u64 {
+        0
+    }
+
     /// Called when the client issues a request to prepare `query` for later execution.
     ///
     /// The provided [`StatementMetaWriter`] should be used to notify the client of the statement id
@@ -958,7 +963,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                         | Command::ChangeUser(_)
                 )
             {
-                info!(target: "client_statement", "{:?}", cmd);
+                info!(target: "client_statement", "conn={} {cmd:?}", self.shim.connection_id());
             }
             self.conn.results_encoding = self.shim.results_encoding();
             match cmd {

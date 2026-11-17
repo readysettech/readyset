@@ -215,6 +215,10 @@ impl ps::PsqlBackend for Backend {
         self.inner.in_transaction()
     }
 
+    fn connection_id(&self) -> u64 {
+        self.inner.connection_id()
+    }
+
     /// Loads any extended types from the upstream postgres, returning a map of Oid to typelen
     async fn load_extended_types(&mut self) -> Result<HashMap<Oid, i16>, ps::Error> {
         let err = |m| {

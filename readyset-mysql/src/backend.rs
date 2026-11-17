@@ -1119,6 +1119,10 @@ where
             .map_err(std::io::Error::other)
     }
 
+    fn connection_id(&self) -> u64 {
+        self.noria.connection_id()
+    }
+
     async fn on_close(&mut self, statement_id: DeallocateId) {
         let _ = self.noria.remove_statement(statement_id).await;
     }
