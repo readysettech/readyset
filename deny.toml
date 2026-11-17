@@ -44,6 +44,12 @@ ignore = [
     { id = "RUSTSEC-2026-0391", reason = "zstd with_context constructors are not used; no upgrade path available upstream yet" },
     { id = "RUSTSEC-2026-0398", reason = "zstd-safe seekable feature is not enabled; no upgrade path available upstream yet" },
     { id = "RUSTSEC-2026-0403", reason = "zstd write::Decoder and DCtx::decompress_stream into Vec are not used; no upgrade path available upstream yet" },
+    # chrono and chrono-tz have become unmaintained.
+    # RUSTSEC recommended alternatives:
+    #   - [jiff](https://crates.io/crates/jiff)
+    #   - [time](https://crates.io/crates/time)
+    { id = "RUSTSEC-2026-0543", reason = "The chrono crate is unmaintained" },
+    { id = "RUSTSEC-2026-0555", reason = "The chrono-tz crate is unmaintained" },
 ]
 
 # Ignore "unmaintained" advisories that we do not directly depend on.
