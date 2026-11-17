@@ -34,6 +34,8 @@ static DEFAULT_CHARACTER_SET: u16 = myc::constants::UTF8_GENERAL_CI;
 
 const TEST_USER: &str = "user";
 const TEST_PASSWORD: &str = "password";
+/// Above u32::MAX, to check the handshake carries only the low 32 bits.
+const TEST_CONNECTION_ID: u64 = (1 << 32) + 42;
 
 struct TestingShim<Q, P, E, I, CU, W> {
     columns: Vec<Column>,
@@ -190,6 +192,10 @@ where
 
     fn version(&self) -> String {
         "8.0.26-readyset\0".to_string()
+    }
+
+    fn connection_id(&self) -> u64 {
+        TEST_CONNECTION_ID
     }
 
     fn client_encoding(&self) -> Encoding {
@@ -360,6 +366,23 @@ async fn it_connects() {
         move |_, _, _| unreachable!(),
     )
     .test(|_| Box::pin(async move {}))
+    .await;
+}
+
+#[tokio::test]
+async fn handshake_sends_low_32_bits_of_connection_id() {
+    TestingShim::new(
+        move |_, _| unreachable!(),
+        move |_| unreachable!(),
+        move |_, _, _| unreachable!(),
+        move |_| unreachable!(),
+        move |_, _, _| unreachable!(),
+    )
+    .test(|conn| {
+        Box::pin(async move {
+            assert_eq!(conn.id(), TEST_CONNECTION_ID as u32);
+        })
+    })
     .await;
 }
 

@@ -715,7 +715,9 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
         if !version.ends_with('\0') {
             init_packet.push(0); // ensure null-terminated version string
         }
-        init_packet.extend_from_slice(&[0x08, 0x00, 0x00, 0x00]); // TODO: connection ID
+        // The handshake field is 32 bits, so ids past u32::MAX reach the client truncated and stop
+        // matching SHOW CONNECTIONS and the statement log.
+        init_packet.extend_from_slice(&(self.shim.connection_id() as u32).to_le_bytes());
         init_packet.extend_from_slice(&auth_data[..8]);
         init_packet.push(0);
 
