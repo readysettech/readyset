@@ -227,13 +227,22 @@ impl Options {
         S: Subscriber + Send + Sync + for<'span> LookupSpan<'span>,
     {
         match File::create(file_name) {
-            Ok(f) => Box::new(fmt::layer().with_writer(Arc::new(f)).with_filter(
-                filter::filter_fn(|metadata| is_statement_log(metadata.target())),
-            )),
+            Ok(f) => Box::new(
+                fmt::layer()
+                    .with_ansi(false)
+                    .with_writer(Arc::new(f))
+                    .with_filter(filter::filter_fn(|metadata| {
+                        is_statement_log(metadata.target())
+                    })),
+            ),
             // If we can't create the file, include statements with other logs
-            _ => Box::new(fmt::layer().with_filter(filter::filter_fn(|metadata| {
-                is_statement_log(metadata.target())
-            }))),
+            _ => Box::new(
+                fmt::layer()
+                    .with_ansi(!self.no_color)
+                    .with_filter(filter::filter_fn(|metadata| {
+                        is_statement_log(metadata.target())
+                    })),
+            ),
         }
     }
 
