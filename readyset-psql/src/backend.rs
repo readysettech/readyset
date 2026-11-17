@@ -168,6 +168,7 @@ impl ps::PsqlBackend for Backend {
     }
 
     async fn on_query(&mut self, query: &str) -> Result<ps::QueryResponse<Resultset>, ps::Error> {
+        self.inner.log_statement(format_args!("Query: {query}"));
         self.query(query).await?.try_into()
     }
 
@@ -183,6 +184,7 @@ impl ps::PsqlBackend for Backend {
         parameter_data_types: &[Type],
         statement_type: PreparedStatementType,
     ) -> Result<ps::PrepareResponse, ps::Error> {
+        self.inner.log_statement(format_args!("Prepare: {query}"));
         self.prepare(query, parameter_data_types, statement_type)
             .await?
             .try_into_ps()
@@ -198,6 +200,7 @@ impl ps::PsqlBackend for Backend {
             .iter()
             .map(|p| ParamRef(p).try_into())
             .collect::<Result<Vec<DfValue>, ps::Error>>()?;
+        self.inner.log_execute(statement_id, &params);
         self.execute(statement_id, &params, result_transfer_formats)
             .await?
             .try_into()

@@ -2512,6 +2512,7 @@ where
             let backend_builder = BackendBuilder::new()
                 .client_addr(client_addr)
                 .slowlog(options.log_slow)
+                .statement_logging(options.tracing.statement_logging)
                 .users(users)
                 .cache_acl(cache_acl.clone())
                 .allow_cache_ddl(allow_cache_ddl)

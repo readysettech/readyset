@@ -153,10 +153,7 @@ impl Adapter for MySQLAdapter {
     ) {
         let _ = AuthKeys::initialize(None);
         MySqlIntermediary::run_on_tcp(
-            Backend {
-                noria: backend,
-                enable_statement_logging: false,
-            },
+            Backend { noria: backend },
             s,
             false,
             None,

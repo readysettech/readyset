@@ -226,7 +226,6 @@ async fn setup_adapter(
                 MySqlIntermediary::run_on_tcp(
                     readyset_mysql::Backend {
                         noria: make_backend!(MySqlUpstream, MySqlQueryHandler, Dialect::MySQL,),
-                        enable_statement_logging: false,
                     },
                     s,
                     false,

@@ -121,7 +121,16 @@ impl<B: PsqlBackend> Runner<B, tokio::net::TcpStream> {
 
 impl<B: PsqlBackend, C: AsyncRead + AsyncWrite + Unpin> Runner<B, C> {
     async fn handle_request(&mut self, request: FrontendMessage) -> Result<(), Error> {
-        if self.enable_statement_logging {
+        // The backend logs statements itself, with the client's user and address.
+        if self.enable_statement_logging
+            && !matches!(
+                request,
+                FrontendMessage::Query { .. }
+                    | FrontendMessage::Parse { .. }
+                    | FrontendMessage::Bind { .. }
+                    | FrontendMessage::Execute { .. }
+            )
+        {
             info!(target: "client_statement", "{:?}", request);
         }
 

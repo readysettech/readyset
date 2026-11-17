@@ -31,7 +31,7 @@ use readyset_util::redacted::{RedactedString, Sensitive};
 use std::io::ErrorKind;
 use streaming_iterator::StreamingIterator;
 use tokio::io::{self, AsyncRead, AsyncWrite};
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, trace, warn};
 use upstream::StatementMeta;
 
 use crate::constants::DEFAULT_COLLATION;
@@ -381,9 +381,6 @@ pub fn user_passwords(credentials: UserCredentials) -> UserPasswords {
 pub struct Backend {
     /// Handle to the backing noria client
     pub noria: readyset_adapter::Backend<MySqlUpstream, MySqlQueryHandler>,
-    /// Enables logging of statements received from the client. The `Backend` only logs Query,
-    /// Prepare and Execute statements.
-    pub enable_statement_logging: bool,
 }
 
 impl Deref for Backend {
@@ -799,9 +796,7 @@ where
         info: StatementMetaWriter<'_, S>,
         schema_cache: &mut HashMap<u32, CachedSchema>,
     ) -> io::Result<()> {
-        if self.enable_statement_logging {
-            info!(target: "client_statement", "Prepare: {query}");
-        }
+        self.noria.log_statement(format_args!("Prepare: {query}"));
         use noria_connector::PrepareResult::*;
 
         trace!("delegate");
@@ -937,9 +932,7 @@ where
             }
         };
 
-        if self.enable_statement_logging {
-            info!(target: "client_statement", "Execute: {{id: {id}, params: {:?}}}", value_params)
-        }
+        self.log_execute(id, &value_params);
 
         let results_encoding = self.noria.connectors.noria.results_encoding();
         let results_collation = self.session_results_collation();
@@ -1106,9 +1099,8 @@ where
     }
 
     async fn on_init(&mut self, database: &str) -> io::Result<()> {
-        if self.enable_statement_logging {
-            info!(target: "client_statement", "database: {database}");
-        }
+        self.noria
+            .log_statement(format_args!("database: {database}"));
         self.set_database(database)
             .await
             .map_err(|e| io::Error::other(e.to_string()))
@@ -1120,9 +1112,8 @@ where
         password: &str,
         database: &str,
     ) -> io::Result<()> {
-        if self.enable_statement_logging {
-            info!(target: "client_statement", "change user: {database}");
-        }
+        self.noria
+            .log_statement(format_args!("change user: {user} database: {database}"));
         self.change_user(user, password, database)
             .await
             .map_err(std::io::Error::other)
@@ -1145,9 +1136,7 @@ where
         query: &str,
         results: QueryResultWriter<'_, S>,
     ) -> QueryResultsResponse {
-        if self.enable_statement_logging {
-            info!(target: "client_statement", "Query: {query}");
-        }
+        self.noria.log_statement(format_args!("Query: {query}"));
 
         let results_encoding = self.noria.connectors.noria.results_encoding();
         let results_collation = self.session_results_collation();

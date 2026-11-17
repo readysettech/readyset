@@ -1159,6 +1159,11 @@ where
         Self::update_shallow_support(&self.state, &query_shallow, result.as_ref().err());
 
         let statement_id = result?;
+        // Statement ids are reused once closed, so this holds at most one entry per open
+        // statement.
+        if let Some(texts) = &mut self.state.statement_texts {
+            texts.insert(statement_id, query.to_owned());
+        }
         let prepared_statement = self
             .state
             .prepared

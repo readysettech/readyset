@@ -76,10 +76,7 @@ impl ConnectionHandler for MySqlHandler {
         // this error under the default filter.
         let addr = stream.peer_addr().ok();
         if let Err(e) = MySqlIntermediary::run_on_tcp(
-            readyset_mysql::Backend {
-                noria: backend,
-                enable_statement_logging: self.enable_statement_logging,
-            },
+            readyset_mysql::Backend { noria: backend },
             stream,
             self.enable_statement_logging,
             self.tls_acceptor.clone(),

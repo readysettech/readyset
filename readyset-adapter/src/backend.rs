@@ -432,6 +432,7 @@ impl readyset_schema::virtual_relation::UsersInfo for AllowedUsers {
 pub struct BackendBuilder {
     client_addr: SocketAddr,
     slowlog: bool,
+    statement_logging: bool,
     dialect: Dialect,
     parsing_preset: ParsingPreset,
     users: Arc<AllowedUsers>,
@@ -475,6 +476,7 @@ impl Default for BackendBuilder {
         BackendBuilder {
             client_addr: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(0, 0, 0, 0), 0)),
             slowlog: false,
+            statement_logging: false,
             dialect: Dialect::MySQL,
             parsing_preset: ParsingPreset::for_prod(),
             users: AllowedUsers::empty(),
@@ -586,6 +588,7 @@ impl BackendBuilder {
                 telemetry_sender: self.telemetry_sender,
                 connections: self.connections,
                 client_username: None,
+                statement_texts: self.statement_logging.then(HashMap::new),
                 client_identity: None,
                 status_reporter,
                 sampler_tx: self.sampler_tx,
@@ -637,6 +640,12 @@ impl BackendBuilder {
 
     pub fn slowlog(mut self, slowlog: bool) -> Self {
         self.slowlog = slowlog;
+        self
+    }
+
+    /// Whether to write this session's client statements to the statement log.
+    pub fn statement_logging(mut self, statement_logging: bool) -> Self {
+        self.statement_logging = statement_logging;
         self
     }
 
@@ -1065,6 +1074,9 @@ where
     connections: Option<Arc<SkipSet<ConnectionInfo>>>,
     /// The authenticated username for this connection
     client_username: Option<String>,
+    /// Text of each prepared statement by id, so the statement log can name what an execute
+    /// runs. `None` when statement logging is off.
+    statement_texts: Option<HashMap<StatementId, String>>,
     /// The authenticated username as an identifier, cached so the per-query ACL lookup on
     /// upstreams without a session mirror (MySQL) never converts or allocates.
     client_identity: Option<SqlIdentifier>,
@@ -2582,6 +2594,28 @@ where
     /// The process-wide allowed-users handle for this backend.
     pub fn users(&self) -> &Arc<AllowedUsers> {
         &self.state.users
+    }
+
+    /// Writes `msg` to the statement log, prefixed with `user@addr` of this client.
+    pub fn log_statement(&self, msg: fmt::Arguments<'_>) {
+        if self.state.statement_texts.is_some() {
+            let user = self
+                .state
+                .client_username
+                .as_deref()
+                .unwrap_or(UNAUTHENTICATED_USER);
+            info!(target: "client_statement", "{user}@{} {msg}", self.state.client_addr);
+        }
+    }
+
+    /// Writes an execute of prepared statement `id` to the statement log, with its text.
+    pub fn log_execute(&self, id: StatementId, params: &dyn Debug) {
+        if let Some(texts) = &self.state.statement_texts {
+            let query = texts.get(&id).map_or("<unknown>", String::as_str);
+            self.log_statement(format_args!(
+                "Execute: {{id: {id}, params: {params:?}, query: {query}}}"
+            ));
+        }
     }
 
     /// Prettify queries above an arbitrary length.
