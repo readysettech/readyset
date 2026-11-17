@@ -946,7 +946,8 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                     error: format!("{e:?}"),
                 })
             })?;
-            // These other variants are logged by the readyset-mysql `Backend`.
+            // These other variants are logged by the readyset-mysql `Backend`, which keeps the
+            // credentials in `ChangeUser` out of the log.
             if self.enable_statement_logging
                 && !matches!(
                     cmd,
@@ -954,6 +955,7 @@ impl<B: MySqlShim<S> + Send, S: AsyncWrite + AsyncRead + Unpin + Send> MySqlInte
                         | Command::Prepare(_)
                         | Command::Execute { .. }
                         | Command::Init(_)
+                        | Command::ChangeUser(_)
                 )
             {
                 info!(target: "client_statement", "{:?}", cmd);

@@ -121,17 +121,19 @@ impl<B: PsqlBackend> Runner<B, tokio::net::TcpStream> {
 
 impl<B: PsqlBackend, C: AsyncRead + AsyncWrite + Unpin> Runner<B, C> {
     async fn handle_request(&mut self, request: FrontendMessage) -> Result<(), Error> {
-        // The backend logs statements itself, with the client's user and address.
-        if self.enable_statement_logging
-            && !matches!(
-                request,
+        if self.enable_statement_logging {
+            match request {
+                // The backend logs statements itself, with the client's user and address.
                 FrontendMessage::Query { .. }
-                    | FrontendMessage::Parse { .. }
-                    | FrontendMessage::Bind { .. }
-                    | FrontendMessage::Execute { .. }
-            )
-        {
-            info!(target: "client_statement", "{:?}", request);
+                | FrontendMessage::Parse { .. }
+                | FrontendMessage::Bind { .. }
+                | FrontendMessage::Execute { .. } => {}
+                // Credentials: log only the message name.
+                FrontendMessage::Authenticate { .. } | FrontendMessage::SaslResponse { .. } => {
+                    info!(target: "client_statement", "{request}")
+                }
+                _ => info!(target: "client_statement", "{request:?}"),
+            }
         }
 
         let requires_flush = request.requires_flush();
