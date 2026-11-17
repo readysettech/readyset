@@ -6,7 +6,9 @@ use futures::FutureExt;
 use mysql_async::prelude::Queryable;
 
 use readyset_client_metrics::QueryDestination;
-use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter, last_query_info};
+use readyset_client_test_helpers::mysql_helpers::{
+    self, MySQLAdapter, assert_shallow_hit, assert_shallow_miss, last_query_info,
+};
 use readyset_client_test_helpers::{TestBuilder, TestShutdownSender};
 use readyset_server::Handle;
 use readyset_sql_parsing::ParsingPreset;
@@ -80,20 +82,6 @@ async fn with_global<F: Future<Output = ()>>(name: &str, value: &str, test: F) {
     }
 }
 
-async fn assert_filled(conn: &mut mysql_async::Conn) {
-    assert_matches!(
-        last_query_info(conn).await.destination,
-        QueryDestination::ReadysetThenUpstream(..)
-    );
-}
-
-async fn assert_hit(conn: &mut mysql_async::Conn) {
-    assert_matches!(
-        last_query_info(conn).await.destination,
-        QueryDestination::ReadysetShallow(..)
-    );
-}
-
 #[tokio::test(flavor = "multi_thread")]
 #[tags(serial, slow)]
 #[upstream(mysql)]
@@ -103,38 +91,38 @@ async fn sql_select_limit_partitions_entries() {
 
     let ids: Vec<i64> = a.query(QUERY).await.unwrap();
     assert_eq!(ids, vec![1, 2, 3]);
-    assert_filled(&mut a).await;
+    assert_shallow_miss(&mut a).await;
     let ids: Vec<i64> = a.query(QUERY).await.unwrap();
     assert_eq!(ids, vec![1, 2, 3]);
-    assert_hit(&mut a).await;
+    assert_shallow_hit(&mut a).await;
 
     let mut b = mysql_async::Conn::new(opts).await.unwrap();
     b.query_drop("SET sql_select_limit = 1").await.unwrap();
     let ids: Vec<i64> = b.query(QUERY).await.unwrap();
     assert_eq!(ids, vec![1]);
-    assert_filled(&mut b).await;
+    assert_shallow_miss(&mut b).await;
     let ids: Vec<i64> = b.query(QUERY).await.unwrap();
     assert_eq!(ids, vec![1]);
-    assert_hit(&mut b).await;
+    assert_shallow_hit(&mut b).await;
 
     let ids: Vec<i64> = a.query(QUERY).await.unwrap();
     assert_eq!(ids, vec![1, 2, 3]);
-    assert_hit(&mut a).await;
+    assert_shallow_hit(&mut a).await;
 
     // Binary protocol entries are keyed the same way.
     let ids: Vec<i64> = b.exec(QUERY, ()).await.unwrap();
     assert_eq!(ids, vec![1]);
-    assert_filled(&mut b).await;
+    assert_shallow_miss(&mut b).await;
     let ids: Vec<i64> = a.exec(QUERY, ()).await.unwrap();
     assert_eq!(ids, vec![1, 2, 3]);
-    assert_filled(&mut a).await;
+    assert_shallow_miss(&mut a).await;
 
     b.query_drop("SET sql_select_limit = DEFAULT")
         .await
         .unwrap();
     let ids: Vec<i64> = b.query(QUERY).await.unwrap();
     assert_eq!(ids, vec![1, 2, 3]);
-    assert_hit(&mut b).await;
+    assert_shallow_hit(&mut b).await;
 
     shutdown_tx.shutdown().await;
 }
@@ -152,10 +140,10 @@ async fn sql_select_limit_survives_rollback() {
     a.query_drop("ROLLBACK").await.unwrap();
     let ids: Vec<i64> = a.query(QUERY).await.unwrap();
     assert_eq!(ids, vec![1]);
-    assert_filled(&mut a).await;
+    assert_shallow_miss(&mut a).await;
     let ids: Vec<i64> = a.query(QUERY).await.unwrap();
     assert_eq!(ids, vec![1]);
-    assert_hit(&mut a).await;
+    assert_shallow_hit(&mut a).await;
 
     shutdown_tx.shutdown().await;
 }
@@ -169,20 +157,20 @@ async fn group_concat_max_len_partitions_entries() {
 
     let joined: String = a.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(joined, "1,1,1");
-    assert_filled(&mut a).await;
+    assert_shallow_miss(&mut a).await;
 
     let mut b = mysql_async::Conn::new(opts).await.unwrap();
     b.query_drop("SET group_concat_max_len = 4").await.unwrap();
     let joined: String = b.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(joined, "1,1,");
-    assert_filled(&mut b).await;
+    assert_shallow_miss(&mut b).await;
     let joined: String = b.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(joined, "1,1,");
-    assert_hit(&mut b).await;
+    assert_shallow_hit(&mut b).await;
 
     let joined: String = a.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(joined, "1,1,1");
-    assert_hit(&mut a).await;
+    assert_shallow_hit(&mut a).await;
 
     shutdown_tx.shutdown().await;
 }
@@ -197,7 +185,7 @@ async fn group_concat_max_len_expression_shares_entry() {
     a.query_drop("SET group_concat_max_len = 4").await.unwrap();
     let joined: String = a.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(joined, "1,1,");
-    assert_filled(&mut a).await;
+    assert_shallow_miss(&mut a).await;
 
     let mut b = mysql_async::Conn::new(opts).await.unwrap();
     b.query_drop("SET group_concat_max_len = 2 * 2")
@@ -205,7 +193,7 @@ async fn group_concat_max_len_expression_shares_entry() {
         .unwrap();
     let joined: String = b.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(joined, "1,1,");
-    assert_hit(&mut b).await;
+    assert_shallow_hit(&mut b).await;
 
     shutdown_tx.shutdown().await;
 }
@@ -219,26 +207,26 @@ async fn lc_time_names_partitions_entries() {
 
     let day: String = a.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(day, "Saturday");
-    assert_filled(&mut a).await;
+    assert_shallow_miss(&mut a).await;
 
     let mut b = mysql_async::Conn::new(opts.clone()).await.unwrap();
     b.query_drop("SET lc_time_names = fr_FR").await.unwrap();
     let day: String = b.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(day, "samedi");
-    assert_filled(&mut b).await;
+    assert_shallow_miss(&mut b).await;
     let day: String = b.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(day, "samedi");
-    assert_hit(&mut b).await;
+    assert_shallow_hit(&mut b).await;
 
     let mut c = mysql_async::Conn::new(opts).await.unwrap();
     c.query_drop("SET lc_time_names = 'Fr_fr'").await.unwrap();
     let day: String = c.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(day, "samedi");
-    assert_hit(&mut c).await;
+    assert_shallow_hit(&mut c).await;
 
     let day: String = a.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(day, "Saturday");
-    assert_hit(&mut a).await;
+    assert_shallow_hit(&mut a).await;
 
     shutdown_tx.shutdown().await;
 }
@@ -252,7 +240,7 @@ async fn div_precision_increment_partitions_entries() {
 
     let quotient: String = a.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(quotient, "0.3333");
-    assert_filled(&mut a).await;
+    assert_shallow_miss(&mut a).await;
 
     let mut b = mysql_async::Conn::new(opts).await.unwrap();
     b.query_drop("SET div_precision_increment = 1")
@@ -260,14 +248,14 @@ async fn div_precision_increment_partitions_entries() {
         .unwrap();
     let quotient: String = b.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(quotient, "0.3");
-    assert_filled(&mut b).await;
+    assert_shallow_miss(&mut b).await;
     let quotient: String = b.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(quotient, "0.3");
-    assert_hit(&mut b).await;
+    assert_shallow_hit(&mut b).await;
 
     let quotient: String = a.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(quotient, "0.3333");
-    assert_hit(&mut a).await;
+    assert_shallow_hit(&mut a).await;
 
     shutdown_tx.shutdown().await;
 }
@@ -281,20 +269,20 @@ async fn default_week_format_partitions_entries() {
 
     let week: i64 = a.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(week, 0);
-    assert_filled(&mut a).await;
+    assert_shallow_miss(&mut a).await;
 
     let mut b = mysql_async::Conn::new(opts).await.unwrap();
     b.query_drop("SET default_week_format = 3").await.unwrap();
     let week: i64 = b.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(week, 52);
-    assert_filled(&mut b).await;
+    assert_shallow_miss(&mut b).await;
     let week: i64 = b.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(week, 52);
-    assert_hit(&mut b).await;
+    assert_shallow_hit(&mut b).await;
 
     let week: i64 = a.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(week, 0);
-    assert_hit(&mut a).await;
+    assert_shallow_hit(&mut a).await;
 
     shutdown_tx.shutdown().await;
 }
@@ -308,7 +296,7 @@ async fn block_encryption_mode_partitions_entries() {
 
     let ciphertext: String = a.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(ciphertext, "53E61674DBCC997DD27BD802A2EB9F22");
-    assert_filled(&mut a).await;
+    assert_shallow_miss(&mut a).await;
 
     let mut b = mysql_async::Conn::new(opts.clone()).await.unwrap();
     b.query_drop("SET block_encryption_mode = 'aes-256-cbc'")
@@ -316,10 +304,10 @@ async fn block_encryption_mode_partitions_entries() {
         .unwrap();
     let ciphertext: String = b.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(ciphertext, "ED8EC86B20144BB08F1DD23B3BABAA40");
-    assert_filled(&mut b).await;
+    assert_shallow_miss(&mut b).await;
     let ciphertext: String = b.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(ciphertext, "ED8EC86B20144BB08F1DD23B3BABAA40");
-    assert_hit(&mut b).await;
+    assert_shallow_hit(&mut b).await;
 
     let mut c = mysql_async::Conn::new(opts).await.unwrap();
     c.query_drop("SET block_encryption_mode = 'AES-256-CBC'")
@@ -327,11 +315,11 @@ async fn block_encryption_mode_partitions_entries() {
         .unwrap();
     let ciphertext: String = c.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(ciphertext, "ED8EC86B20144BB08F1DD23B3BABAA40");
-    assert_hit(&mut c).await;
+    assert_shallow_hit(&mut c).await;
 
     let ciphertext: String = a.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(ciphertext, "53E61674DBCC997DD27BD802A2EB9F22");
-    assert_hit(&mut a).await;
+    assert_shallow_hit(&mut a).await;
 
     shutdown_tx.shutdown().await;
 }
@@ -348,7 +336,7 @@ async fn windowing_use_high_precision_partitions_entries() {
 
     let sums: Vec<f64> = a.query(QUERY).await.unwrap();
     assert_eq!(sums, vec![1e20, 1e20, 2.0]);
-    assert_filled(&mut a).await;
+    assert_shallow_miss(&mut a).await;
 
     let mut b = mysql_async::Conn::new(opts.clone()).await.unwrap();
     b.query_drop("SET windowing_use_high_precision = OFF")
@@ -356,10 +344,10 @@ async fn windowing_use_high_precision_partitions_entries() {
         .unwrap();
     let sums: Vec<f64> = b.query(QUERY).await.unwrap();
     assert_eq!(sums, vec![1e20, 1e20, 1.0]);
-    assert_filled(&mut b).await;
+    assert_shallow_miss(&mut b).await;
     let sums: Vec<f64> = b.query(QUERY).await.unwrap();
     assert_eq!(sums, vec![1e20, 1e20, 1.0]);
-    assert_hit(&mut b).await;
+    assert_shallow_hit(&mut b).await;
 
     let mut c = mysql_async::Conn::new(opts).await.unwrap();
     c.query_drop("SET windowing_use_high_precision = 0")
@@ -367,11 +355,11 @@ async fn windowing_use_high_precision_partitions_entries() {
         .unwrap();
     let sums: Vec<f64> = c.query(QUERY).await.unwrap();
     assert_eq!(sums, vec![1e20, 1e20, 1.0]);
-    assert_hit(&mut c).await;
+    assert_shallow_hit(&mut c).await;
 
     let sums: Vec<f64> = a.query(QUERY).await.unwrap();
     assert_eq!(sums, vec![1e20, 1e20, 2.0]);
-    assert_hit(&mut a).await;
+    assert_shallow_hit(&mut a).await;
 
     shutdown_tx.shutdown().await;
 }
@@ -388,7 +376,7 @@ async fn sql_select_limit_survives_refresh() {
     b.query_drop("SET sql_select_limit = 1").await.unwrap();
     let ids: Vec<i64> = b.query(QUERY).await.unwrap();
     assert_eq!(ids, vec![3]);
-    assert_filled(&mut b).await;
+    assert_shallow_miss(&mut b).await;
 
     upstream
         .query_drop("INSERT INTO t (id, s) VALUES (4, 'd')")
@@ -438,7 +426,7 @@ async fn global_sql_select_limit_partitions_entries() {
 
         let ids: Vec<i64> = a.query(QUERY).await.unwrap();
         assert_eq!(ids, vec![1, 2, 3]);
-        assert_hit(&mut a).await;
+        assert_shallow_hit(&mut a).await;
     })
     .await;
 

@@ -3,7 +3,9 @@ use std::panic::AssertUnwindSafe;
 
 use futures::FutureExt;
 use readyset_client_metrics::QueryDestination;
-use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter, last_query_info};
+use readyset_client_test_helpers::psql_helpers::{
+    self, PostgreSQLAdapter, assert_shallow_hit, assert_shallow_miss, last_query_info,
+};
 use readyset_client_test_helpers::{TestBuilder, TestShutdownSender};
 use readyset_server::Handle;
 use readyset_sql_parsing::ParsingPreset;
@@ -77,20 +79,6 @@ async fn with_database_default<F: Future<Output = ()>>(
     }
 }
 
-async fn assert_filled(conn: &Client) {
-    assert_matches!(
-        last_query_info(conn).await.destination,
-        QueryDestination::ReadysetThenUpstream(..)
-    );
-}
-
-async fn assert_hit(conn: &Client) {
-    assert_matches!(
-        last_query_info(conn).await.destination,
-        QueryDestination::ReadysetShallow(..)
-    );
-}
-
 /// Run `query` over the simple protocol and return its first column as wire text.
 async fn simple_texts(conn: &Client, query: &str) -> Vec<String> {
     conn.simple_query(query)
@@ -131,35 +119,35 @@ async fn timezone_abbreviations_partitions_entries() {
     let (a, _upstream, opts, _handle, shutdown_tx) = setup(QUERY, "").await;
 
     assert_eq!(simple_ids(&a, QUERY).await, vec![1]);
-    assert_filled(&a).await;
+    assert_shallow_miss(&a).await;
     assert_eq!(simple_ids(&a, QUERY).await, vec![1]);
-    assert_hit(&a).await;
+    assert_shallow_hit(&a).await;
 
     let b = psql_helpers::connect(opts).await;
     b.simple_query("SET timezone_abbreviations = 'Australia'")
         .await
         .unwrap();
     assert_eq!(simple_ids(&b, QUERY).await, vec![2]);
-    assert_filled(&b).await;
+    assert_shallow_miss(&b).await;
     assert_eq!(simple_ids(&b, QUERY).await, vec![2]);
-    assert_hit(&b).await;
+    assert_shallow_hit(&b).await;
 
     assert_eq!(simple_ids(&a, QUERY).await, vec![1]);
-    assert_hit(&a).await;
+    assert_shallow_hit(&a).await;
 
     // Extended protocol entries are keyed the same way.
     assert_eq!(extended_ids(&b, QUERY).await, vec![2]);
-    assert_filled(&b).await;
+    assert_shallow_miss(&b).await;
     assert_eq!(extended_ids(&a, QUERY).await, vec![1]);
-    assert_filled(&a).await;
+    assert_shallow_miss(&a).await;
     assert_eq!(extended_ids(&b, QUERY).await, vec![2]);
-    assert_hit(&b).await;
+    assert_shallow_hit(&b).await;
 
     b.simple_query("SET timezone_abbreviations = DEFAULT")
         .await
         .unwrap();
     assert_eq!(simple_ids(&b, QUERY).await, vec![1]);
-    assert_hit(&b).await;
+    assert_shallow_hit(&b).await;
 
     shutdown_tx.shutdown().await;
 }
@@ -174,7 +162,7 @@ async fn timezone_abbreviations_reset_by_reset_all_and_discard_all() {
     let (a, _upstream, opts, _handle, shutdown_tx) = setup(QUERY, "").await;
 
     assert_eq!(simple_ids(&a, QUERY).await, vec![1]);
-    assert_filled(&a).await;
+    assert_shallow_miss(&a).await;
 
     let b = psql_helpers::connect(opts).await;
     for reset in ["RESET ALL", "DISCARD ALL"] {
@@ -184,7 +172,7 @@ async fn timezone_abbreviations_reset_by_reset_all_and_discard_all() {
         assert_eq!(simple_ids(&b, QUERY).await, vec![2]);
         b.simple_query(reset).await.unwrap();
         assert_eq!(simple_ids(&b, QUERY).await, vec![1], "{reset}");
-        assert_hit(&b).await;
+        assert_shallow_hit(&b).await;
     }
 
     shutdown_tx.shutdown().await;
@@ -203,7 +191,7 @@ async fn timezone_abbreviations_reset_all_in_rolled_back_transaction() {
         .await
         .unwrap();
     assert_eq!(simple_ids(&a, QUERY).await, vec![2]);
-    assert_filled(&a).await;
+    assert_shallow_miss(&a).await;
 
     a.simple_query("BEGIN").await.unwrap();
     a.simple_query("RESET ALL").await.unwrap();
@@ -211,7 +199,7 @@ async fn timezone_abbreviations_reset_all_in_rolled_back_transaction() {
     a.simple_query("ROLLBACK").await.unwrap();
 
     assert_eq!(simple_ids(&a, QUERY).await, vec![2]);
-    assert_hit(&a).await;
+    assert_shallow_hit(&a).await;
 
     shutdown_tx.shutdown().await;
 }
@@ -270,19 +258,19 @@ async fn default_text_search_config_partitions_entries() {
         .await
         .unwrap();
     assert_eq!(simple_ids(&a, QUERY).await, Vec::<i32>::new());
-    assert_filled(&a).await;
+    assert_shallow_miss(&a).await;
 
     let b = psql_helpers::connect(opts).await;
     b.simple_query("SET default_text_search_config = 'pg_catalog.simple'")
         .await
         .unwrap();
     assert_eq!(simple_ids(&b, QUERY).await, vec![1, 2]);
-    assert_filled(&b).await;
+    assert_shallow_miss(&b).await;
     assert_eq!(simple_ids(&b, QUERY).await, vec![1, 2]);
-    assert_hit(&b).await;
+    assert_shallow_hit(&b).await;
 
     assert_eq!(simple_ids(&a, QUERY).await, Vec::<i32>::new());
-    assert_hit(&a).await;
+    assert_shallow_hit(&a).await;
 
     shutdown_tx.shutdown().await;
 }
@@ -300,7 +288,7 @@ async fn default_text_search_config_survives_refresh() {
         .await
         .unwrap();
     assert_eq!(simple_ids(&b, QUERY).await, vec![1, 2]);
-    assert_filled(&b).await;
+    assert_shallow_miss(&b).await;
 
     upstream
         .simple_query("INSERT INTO events (id) VALUES (3)")
@@ -333,7 +321,7 @@ async fn timezone_abbreviations_survives_refresh() {
         .await
         .unwrap();
     assert_eq!(simple_ids(&b, QUERY).await, vec![2]);
-    assert_filled(&b).await;
+    assert_shallow_miss(&b).await;
 
     upstream
         .simple_query("INSERT INTO events (id, at) VALUES (3, '2026-01-15 00:30:00+00')")

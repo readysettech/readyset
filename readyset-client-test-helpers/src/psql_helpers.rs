@@ -1,3 +1,4 @@
+use std::assert_matches;
 use std::env;
 use std::error::Error;
 use std::sync::Arc;
@@ -189,4 +190,16 @@ pub async fn last_query_info(conn: &Client) -> QueryInfo {
         destination,
         reason,
     }
+}
+
+/// Assert that the last query was served from the shallow cache.
+pub async fn assert_shallow_hit(conn: &Client) {
+    let info = last_query_info(conn).await;
+    assert_matches!(info.destination, QueryDestination::ReadysetShallow(..));
+}
+
+/// Assert that the last query missed the shallow cache and was served by the upstream.
+pub async fn assert_shallow_miss(conn: &Client) {
+    let info = last_query_info(conn).await;
+    assert_matches!(info.destination, QueryDestination::ReadysetThenUpstream(..));
 }

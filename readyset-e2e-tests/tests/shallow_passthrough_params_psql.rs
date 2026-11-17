@@ -1,11 +1,8 @@
 //! Shallow cache reads whose bound parameters have no native `DfValue` representation, such as
 //! a Postgres enum or `cidr`, must fill from upstream and then serve from the cache.
 
-use std::assert_matches;
-
-use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::psql_helpers::{
-    self, BinaryParam, PostgreSQLAdapter, TextParam, last_query_info,
+    self, BinaryParam, PostgreSQLAdapter, TextParam, assert_shallow_hit, assert_shallow_miss,
 };
 use readyset_client_test_helpers::{TestBuilder, TestShutdownSender};
 use readyset_server::Handle;
@@ -38,20 +35,6 @@ async fn setup(queries: &[&str]) -> (Client, Handle, TestShutdownSender<PostgreS
     (conn, handle, shutdown_tx)
 }
 
-async fn assert_filled(conn: &Client) {
-    assert_matches!(
-        last_query_info(conn).await.destination,
-        QueryDestination::ReadysetThenUpstream(..)
-    );
-}
-
-async fn assert_hit(conn: &Client) {
-    assert_matches!(
-        last_query_info(conn).await.destination,
-        QueryDestination::ReadysetShallow(..)
-    );
-}
-
 async fn ids(conn: &Client, query: &str, params: &[&(dyn ToSql + Sync)]) -> Vec<i32> {
     conn.query(query, params)
         .await
@@ -79,15 +62,15 @@ async fn enum_text_param_fills_then_hits() {
     let (conn, _handle, shutdown_tx) = setup(&[EQ, IN]).await;
 
     assert_eq!(ids(&conn, EQ, &[&TextParam("happy")]).await, vec![1, 3]);
-    assert_filled(&conn).await;
+    assert_shallow_miss(&conn).await;
     assert_eq!(ids(&conn, EQ, &[&TextParam("happy")]).await, vec![1, 3]);
-    assert_hit(&conn).await;
+    assert_shallow_hit(&conn).await;
 
     let params: [&(dyn ToSql + Sync); 2] = [&TextParam("happy"), &TextParam("sad")];
     assert_eq!(ids(&conn, IN, &params).await, vec![1, 2, 3]);
-    assert_filled(&conn).await;
+    assert_shallow_miss(&conn).await;
     assert_eq!(ids(&conn, IN, &params).await, vec![1, 2, 3]);
-    assert_hit(&conn).await;
+    assert_shallow_hit(&conn).await;
 
     shutdown_tx.shutdown().await;
 }
@@ -102,9 +85,9 @@ async fn cidr_text_param_fills_then_hits() {
 
     let params: [&(dyn ToSql + Sync); 2] = [&TextParam("192.168.1.0/24"), &1i32];
     assert_eq!(eq(&conn, CIDR_EQ, &params).await, vec![true]);
-    assert_filled(&conn).await;
+    assert_shallow_miss(&conn).await;
     assert_eq!(eq(&conn, CIDR_EQ, &params).await, vec![true]);
-    assert_hit(&conn).await;
+    assert_shallow_hit(&conn).await;
 
     shutdown_tx.shutdown().await;
 }
@@ -119,9 +102,9 @@ async fn cidr_binary_param_fills_then_hits() {
     let cidr = BinaryParam(&[2, 24, 1, 4, 192, 168, 1, 0]);
     let params: [&(dyn ToSql + Sync); 2] = [&cidr, &1i32];
     assert_eq!(eq(&conn, CIDR_EQ, &params).await, vec![true]);
-    assert_filled(&conn).await;
+    assert_shallow_miss(&conn).await;
     assert_eq!(eq(&conn, CIDR_EQ, &params).await, vec![true]);
-    assert_hit(&conn).await;
+    assert_shallow_hit(&conn).await;
 
     shutdown_tx.shutdown().await;
 }
