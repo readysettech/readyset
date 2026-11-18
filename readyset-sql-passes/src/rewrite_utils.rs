@@ -37,6 +37,8 @@ use std::mem;
 /// `cond` must be false only when the pass has nothing to do for the query. Debug builds check
 /// that: they still run a skipped pass on a copy of the query, and panic if the pass would have
 /// changed or refused it.
+///
+/// The pass's end is also marked for benchmarking via [`crate::pass_timing`].
 macro_rules! trace_pass {
     // Runs and traces a pass, and evaluates to its result, which then names the logged field.
     (@run $dialect:expr, $name:ident, $query:ident . $pass:ident $args:tt $($try:tt)?) => {{
@@ -91,13 +93,14 @@ macro_rules! trace_pass {
             assert!(copy == *$query, "{} was skipped but changes the query", stringify!($pass));
         }
     };
-    (@trace $dialect:expr, $query:ident, $pass:ident $(, $($field:tt)*)?) => {
+    (@trace $dialect:expr, $query:ident, $pass:ident $(, $($field:tt)*)?) => {{
+        $crate::pass_timing::mark(stringify!($pass));
         tracing::trace!(
             pass = stringify!($pass),
             query = %$query.display($dialect)
             $(, $($field)*)?
         )
-    };
+    }};
     ($dialect:expr, if $cond:expr, let $name:ident = $($pass:tt)*) => {
         let $name = if $cond {
             trace_pass!(@run $dialect, $name, $($pass)*)

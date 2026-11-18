@@ -24,6 +24,7 @@ mod normalize_right_join;
 mod normalize_subquery_positions;
 mod normalize_topk_with_aggregate;
 mod order_limit_removal;
+pub mod pass_timing;
 pub mod query_optimization_rewrite;
 mod remove_numeric_field_references;
 mod resolve_schemas;

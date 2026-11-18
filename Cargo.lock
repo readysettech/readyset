@@ -7217,6 +7217,7 @@ dependencies = [
  "readyset-post-lookup",
  "readyset-sql",
  "readyset-sql-parsing",
+ "readyset-sql-passes",
  "serde",
  "sqlparser 0.63.0",
  "strum",

@@ -331,8 +331,8 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
     }
     trace!(parent: &span, query = %query.display(flags.dialect), "Going to rewrite for deep caching");
 
-    flags.features = query_features(query)?;
-    trace!(parent: &span, features = ?flags.features, "Collected query features");
+    pass!(let features = query_features(query)?);
+    flags.features = features;
     // Settle the placeholder spelling before any pass below reads one, counting the client's
     // parameters first so that count is over the spelling they sent.
     pass!(if flags.features.client_params > 0, standardize_placeholders(query)?);
