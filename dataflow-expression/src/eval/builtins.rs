@@ -882,25 +882,35 @@ fn greatest_or_least<F, D>(
     record: &[D],
     compare_as: &DfType,
     ty: &DfType,
+    dialect: &Dialect,
     mut compare: F,
 ) -> ReadySetResult<DfValue>
 where
     F: FnMut(&DfValue, &DfValue) -> bool,
     D: Borrow<DfValue>,
 {
-    let arg1 = args.first();
-    let mut res = non_null!(arg1.eval(record)?);
-    let mut res_ty = arg1.ty();
-    let mut res_compare = try_cast_or_none!(res, compare_as, arg1.ty());
-    for arg in args.iter().skip(1) {
-        let val = non_null!(arg.eval(record)?);
+    // MySQL returns NULL if any argument is NULL, and Postgres skips NULL arguments.
+    let skip_nulls = dialect.engine() == SqlEngine::PostgreSQL;
+    let mut best: Option<(DfValue, &DfType, DfValue)> = None;
+    for arg in args.iter() {
+        let val = arg.eval(record)?;
+        if val.is_none() {
+            if skip_nulls {
+                continue;
+            }
+            return Ok(DfValue::None);
+        }
         let val_compare = try_cast_or_none!(val, compare_as, arg.ty());
-        if compare(&val_compare, &res_compare) {
-            res = val;
-            res_ty = arg.ty();
-            res_compare = val_compare;
+        if best
+            .as_ref()
+            .is_none_or(|(_, _, best_compare)| compare(&val_compare, best_compare))
+        {
+            best = Some((val, arg.ty(), val_compare));
         }
     }
+    let Some((res, res_ty, _)) = best else {
+        return Ok(DfValue::None);
+    };
     Ok(try_cast_or_none!(res, ty, res_ty))
 }
 
@@ -1459,12 +1469,16 @@ impl BuiltinFunction {
                     ),
                 }
             }
-            BuiltinFunction::Greatest { args, compare_as } => {
-                greatest_or_least(args, record, compare_as, ty, |v1, v2| v1 > v2)
-            }
-            BuiltinFunction::Least { args, compare_as } => {
-                greatest_or_least(args, record, compare_as, ty, |v1, v2| v1 < v2)
-            }
+            BuiltinFunction::Greatest {
+                args,
+                compare_as,
+                dialect,
+            } => greatest_or_least(args, record, compare_as, ty, dialect, |v1, v2| v1 > v2),
+            BuiltinFunction::Least {
+                args,
+                compare_as,
+                dialect,
+            } => greatest_or_least(args, record, compare_as, ty, dialect, |v1, v2| v1 < v2),
             BuiltinFunction::ArrayToString(array, delimiter, null_string) => {
                 let elem_type = match array.ty() {
                     DfType::Array(t) => t.as_ref(),
@@ -4397,5 +4411,16 @@ mod tests {
                 "{precision:?}"
             );
         }
+    }
+
+    #[test]
+    fn greatest_skips_nulls_in_postgres_only() {
+        let eval = |dialect| {
+            parse_and_lower("greatest(NULL, 1)", dialect)
+                .eval::<DfValue>(&[])
+                .unwrap()
+        };
+        assert_eq!(eval(PostgreSQL), DfValue::from(1));
+        assert_eq!(eval(MySQL), DfValue::None);
     }
 }

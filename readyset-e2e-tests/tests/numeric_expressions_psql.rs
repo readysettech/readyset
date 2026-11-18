@@ -148,3 +148,20 @@ async fn round_of_a_float_matches_postgres() {
     )
     .await;
 }
+
+#[tokio::test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn greatest_and_least_skip_nulls_and_order_nan_as_postgres_does() {
+    compare(
+        &[
+            "1, NULL, 3, 'NaN', -2.25, NULL, 0.25, 2.5",
+            "NULL, -2, NULL, 1.5, NULL, 0.0625, NULL, 0.5",
+            "1, -2, 3, 'NaN', 'NaN', NULL, 'NaN', -1",
+        ],
+        pairs()
+            .map(|(a, b)| vec![format!("GREATEST({a}, {b})"), format!("LEAST({a}, {b})")])
+            .collect(),
+    )
+    .await;
+}

@@ -116,6 +116,7 @@ pub enum BuiltinFunction {
         /// Which type to coerce the arguments to *for comparison*. This might be distinct from the
         /// actual return type of the function call.
         compare_as: DfType,
+        dialect: Dialect,
     },
 
     /// `least`:
@@ -127,6 +128,7 @@ pub enum BuiltinFunction {
         /// Which type to coerce the arguments to *for comparison*. This might be distinct from the
         /// actual return type of the function call.
         compare_as: DfType,
+        dialect: Dialect,
     },
 
     /// [`array_to_string`](https://www.postgresql.org/docs/current/functions-array.html)

@@ -918,9 +918,17 @@ impl BuiltinFunction {
 
                 (
                     if name == "greatest" {
-                        Self::Greatest { args, compare_as }
+                        Self::Greatest {
+                            args,
+                            compare_as,
+                            dialect,
+                        }
                     } else {
-                        Self::Least { args, compare_as }
+                        Self::Least {
+                            args,
+                            compare_as,
+                            dialect,
+                        }
                     },
                     ty,
                 )

@@ -231,6 +231,8 @@ pub(crate) fn coerce_decimal(
         details: "out of bounds".to_string(),
     };
 
+    let is_number = matches!(val, Decimal::Number(_));
+
     // When converting a decimal to an integer, MySQL and Postgres both round halves away from zero:
     // 2.5 becomes 3.
     let val = if to_ty.is_any_int() {
@@ -279,13 +281,27 @@ pub(crate) fn coerce_decimal(
             },
         },
 
+        // A Postgres numeric NaN or infinity converts to the same float, and only a number too big
+        // for the float fails.
         DfType::Float => f32::try_from(val)
             .map_err(Into::into)
-            .and_then(|v| if v.is_finite() { Ok(v) } else { Err(err()) })
+            .and_then(|v| {
+                if v.is_finite() || !is_number {
+                    Ok(v)
+                } else {
+                    Err(err())
+                }
+            })
             .map(DfValue::Float),
         DfType::Double => f64::try_from(val)
             .map_err(Into::into)
-            .and_then(|v| if v.is_finite() { Ok(v) } else { Err(err()) })
+            .and_then(|v| {
+                if v.is_finite() || !is_number {
+                    Ok(v)
+                } else {
+                    Err(err())
+                }
+            })
             .map(DfValue::Double),
 
         DfType::Enum { ref variants, .. } => {
