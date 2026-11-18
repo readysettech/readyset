@@ -128,3 +128,23 @@ async fn arithmetic_on_integers_and_floats_matches_postgres() {
     )
     .await;
 }
+
+#[tokio::test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn round_of_a_float_matches_postgres() {
+    compare(
+        &[
+            "0, 0, 0, 0, 0, 0, 2.5, 2.5",
+            "0, 0, 0, 0, 0, 0, -0.5, -0.5",
+            "0, 0, 0, 0, 0, 0, -0.4, -0.4",
+            "0, 0, 0, 0, 0, 0, 1.5, 1.5",
+        ],
+        COLUMNS
+            .iter()
+            .filter(|(column, _)| is_float(column))
+            .map(|(column, _)| vec![format!("round({column})")])
+            .collect(),
+    )
+    .await;
+}

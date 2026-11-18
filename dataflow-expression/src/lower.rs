@@ -18,7 +18,7 @@ use readyset_sql::{DialectDisplay, TryIntoDialect as _};
 use readyset_util::redacted::Sensitive;
 use vec1::Vec1;
 
-use crate::eval::builtins::convert_tz_zone_depends_on_mysql_version;
+use crate::eval::builtins::{convert_tz_zone_depends_on_mysql_version, round_digits};
 use crate::{
     BinaryOperator, BuiltinFunction, CaseWhenBranch, Dialect, Expr, NullValueTreatmentArg,
 };
@@ -320,11 +320,11 @@ impl BuiltinFunction {
                 // adds one before the point, since rounding can carry into it, as 9.95 rounds to
                 // 10.0.
                 Numeric { prec, scale } => match precision {
-                    Expr::Literal {
-                        val: DfValue::Int(digits),
-                        ..
-                    } if dialect.engine() == SqlEngine::MySQL => {
-                        let kept = (*digits).clamp(0, i64::from(scale)) as u8;
+                    Expr::Literal { val, .. }
+                        if dialect.engine() == SqlEngine::MySQL && !val.is_none() =>
+                    {
+                        let kept = round_digits(val.clone())
+                            .map_or(scale, |digits| digits.clamp(0, i32::from(scale)) as u8);
                         Numeric {
                             prec: prec.saturating_sub(u16::from(scale))
                                 + u16::from(kept)
@@ -513,7 +513,11 @@ impl BuiltinFunction {
                 antithesis_sdk::assert_reachable!(
                     r#"{"id":"Built-in function","sub":"round","tags":["exclude-nightly"]}"#
                 );
-                let expr = next_arg()?;
+                let mut expr = next_arg()?;
+                // MySQL reads a string as a double, by its leading digits.
+                if expr.ty().is_any_text() {
+                    expr = cast(expr, DfType::Double);
+                }
                 let prec = args.next().unwrap_or(Expr::Literal {
                     val: DfValue::Int(0),
                     ty: DfType::Int,

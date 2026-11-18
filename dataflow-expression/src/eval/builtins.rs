@@ -954,6 +954,30 @@ fn ascii(val: &DfValue, dialect: &Dialect, _ty: &DfType) -> ReadySetResult<DfVal
     }
 }
 
+/// The number of digits ROUND keeps for a precision of `value`, read as MySQL reads it: a decimal
+/// rounds half away from zero, and a string takes its leading integer digits.
+pub(crate) fn round_digits(value: DfValue) -> ReadySetResult<i32> {
+    let saturate = |digits: i128| digits.clamp(i32::MIN.into(), i32::MAX.into()) as i32;
+    Ok(match value {
+        DfValue::Int(digits) => saturate(digits.into()),
+        DfValue::UnsignedInt(digits) => saturate(digits.into()),
+        DfValue::Float(f) => f.round_ties_even() as i32,
+        DfValue::Double(f) => f.round_ties_even() as i32,
+        // XXX(mvzink): Yes, MySQL does round the second argument (up) if it's a decimal
+        // before using that to round the first argument. However, Postgres throws an
+        // error, so we are not matching that.
+        DfValue::Numeric(d) => d
+            .round_dp_with_strategy(0, RoundingMode::HalfUp)
+            .try_into()?,
+        value => {
+            let s = value.as_str().unwrap_or_default().trim_start();
+            let sign = usize::from(s.starts_with(['-', '+']));
+            let end = sign + s[sign..].bytes().take_while(u8::is_ascii_digit).count();
+            s[..end].parse::<i128>().map_or(0, saturate)
+        }
+    })
+}
+
 impl BuiltinFunction {
     pub(crate) fn eval<D>(&self, ty: &DfType, record: &[D]) -> ReadySetResult<DfValue>
     where
@@ -1051,64 +1075,25 @@ impl BuiltinFunction {
             }
             BuiltinFunction::Round(arg1, arg2) => {
                 let expr = arg1.eval(record)?;
-                let param2 = arg2.eval(record)?;
-                let rnd_prec = match non_null!(param2) {
-                    DfValue::Int(inner) => inner as i32,
-                    DfValue::UnsignedInt(inner) => inner as i32,
-                    DfValue::Float(f) => f.round_ties_even() as i32,
-                    DfValue::Double(f) => f.round_ties_even() as i32,
-                    // XXX(mvzink): Yes, MySQL does round the second argument (up) if it's a decimal
-                    // before using that to round the first argument. However, Postgres throws an
-                    // error, so we are not matching that.
-                    DfValue::Numeric(d) => d
-                        .round_dp_with_strategy(0, RoundingMode::HalfUp)
-                        .try_into()?,
-                    _ => 0,
-                };
-
-                macro_rules! round {
-                    ($real:expr, $real_type:ty) => {{
-                        let base: $real_type = 10.0;
-                        if rnd_prec > 0 {
-                            // If rounding precision is positive, than we keep the returned
-                            // type as a float. We never return greater precision than was
-                            // stored so we choose the minimum of stored precision or rounded
-                            // precision.
-                            let rounded_float = ($real * base.powf(rnd_prec as $real_type))
-                                .round_ties_even()
-                                / base.powf(rnd_prec as $real_type);
-                            let real = DfValue::try_from(rounded_float).unwrap();
-                            Ok(real)
-                        } else {
-                            // Rounding precision is negative, so we need to zero out some
-                            // digits.
-                            let rounded_float = (($real / base.powf(-rnd_prec as $real_type))
-                                .round_ties_even()
-                                * base.powf(-rnd_prec as $real_type));
-                            let real = DfValue::try_from(rounded_float).unwrap();
-                            Ok(real)
-                        }
-                    }};
-                }
-
-                match non_null!(expr) {
-                    DfValue::Float(float) => round!(float, f32),
-                    DfValue::Double(double) => round!(double, f64),
+                let rnd_prec = round_digits(non_null!(arg2.eval(record)?))?;
+                let value = match non_null!(expr) {
                     DfValue::Int(val) => {
-                        let rounded = integer_rnd(val as i128, rnd_prec);
-                        Ok(DfValue::Int(rounded as _))
+                        return Ok(DfValue::Int(integer_rnd(val.into(), rnd_prec) as _));
                     }
                     DfValue::UnsignedInt(val) => {
-                        let rounded = integer_rnd(val as i128, rnd_prec);
-                        Ok(DfValue::Int(rounded as _))
+                        return Ok(DfValue::Int(integer_rnd(val.into(), rnd_prec) as _));
                     }
+                    // Postgres keeps at most 2000 digits on either side of the point, and so
+                    // does Readyset, so a huge precision doesn't pad a value with as many zeros.
                     DfValue::Numeric(d) => {
-                        let rounded_dec = d.round_dp_with_strategy(
-                            rnd_prec as _,
-                            readyset_decimal::RoundingMode::HalfUp,
-                        );
-                        Ok(DfValue::Numeric(rounded_dec.into()))
+                        let digits = rnd_prec.clamp(-2000, 2000).into();
+                        return Ok(DfValue::Numeric(
+                            d.round_dp_with_strategy(digits, RoundingMode::HalfUp)
+                                .into(),
+                        ));
                     }
+                    DfValue::Float(f) => f.into(),
+                    DfValue::Double(f) => f,
                     dt => {
                         let dt_str = dt.to_string();
                         // MySQL will parse as many characters as it possibly can from a string
@@ -1118,7 +1103,7 @@ impl BuiltinFunction {
                         if dt_str.starts_with('-') {
                             chars += 1;
                         }
-                        while chars < dt_str.len() {
+                        while chars <= dt_str.len() {
                             // This is very sad that Rust doesn't tell us how many characters of
                             // a string it was able to parse, but for now we just try to parse
                             // incrementally more characters until we fail
@@ -1130,9 +1115,25 @@ impl BuiltinFunction {
                                 Err(_) => break,
                             }
                         }
-                        round!(double, f64)
+                        double
                     }
-                }
+                };
+                // MySQL and Postgres round anything else as a double. Like MySQL, rounding to more
+                // digits than a double holds leaves it as it is, and rounding off more leaves zero.
+                let factor = 10f64.powf(f64::from(rnd_prec).abs());
+                let rounded = if rnd_prec > 0 {
+                    let scaled = value * factor;
+                    if scaled.is_infinite() {
+                        value
+                    } else {
+                        scaled.round_ties_even() / factor
+                    }
+                } else if factor.is_infinite() {
+                    0.0
+                } else {
+                    (value / factor).round_ties_even() * factor
+                };
+                Ok(DfValue::Double(rounded))
             }
             BuiltinFunction::JsonValid(expr) => {
                 let value = expr.eval(record)?;
@@ -2380,15 +2381,15 @@ mod tests {
         let precision = 3;
         let param1 = DfValue::try_from(number).unwrap();
         let param2 = DfValue::Int(precision);
-        let want = DfValue::try_from(4.123_f64).unwrap();
+        let want = DfValue::Double(4.123);
         assert_eq!(
             expr.eval::<DfValue>(&[param1, param2.clone()]).unwrap(),
             want
         );
 
+        // MySQL rounds a FLOAT as a DOUBLE.
         let number: f32 = 4.12345;
         let param1 = DfValue::try_from(number).unwrap();
-        let want = DfValue::try_from(4.123_f32).unwrap();
         assert_eq!(expr.eval::<DfValue>(&[param1, param2]).unwrap(), want);
     }
 
@@ -4371,5 +4372,30 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2025, 3, 15).unwrap();
         let res = expr.eval::<DfValue>(&[DfValue::from(date)]).unwrap();
         assert_eq!(res, "2025".into());
+    }
+    #[test]
+    fn round_digits_reads_a_precision_as_mysql_does() {
+        for (precision, digits) in [
+            (DfValue::from("1.5"), 1),
+            (DfValue::from("-0.5"), 0),
+            (DfValue::from(" 2abc"), 2),
+            (DfValue::from("abc"), 0),
+            (DfValue::Int(4294967296), i32::MAX),
+            (DfValue::Int(-4294967296), i32::MIN),
+            (
+                DfValue::Numeric(Decimal::from_str("1.5").unwrap().into()),
+                2,
+            ),
+            (
+                DfValue::Numeric(Decimal::from_str("-0.5").unwrap().into()),
+                -1,
+            ),
+        ] {
+            assert_eq!(
+                round_digits(precision.clone()).unwrap(),
+                digits,
+                "{precision:?}"
+            );
+        }
     }
 }

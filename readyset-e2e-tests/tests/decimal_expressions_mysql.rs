@@ -69,6 +69,16 @@ const STRING_ROWS: &[&str] = &[
     "1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.5, 0.5, '0x10'",
 ];
 
+/// Rows of halves and small negatives, which round away from or towards zero.
+const ROUND_ROWS: &[&str] = &[
+    "-7, 8, -7, 8, -7, 8, -7, 8, -7, 8, 2.5, -2.25, 0.0625, 3, 0.5, 2.5, 2.5, '3.5'",
+    "1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -0.5, 0.05, -0.0005, -3, -0.5, -0.5, -0.5, '-0.5'",
+    "1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -0.4, -0.45, 0.4, 0, -0.4, -0.4, -0.4, '2.5'",
+    "1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.5, 1.55, 1.5, 0, 1.5, 1.5, 1.5, '-2.5abc'",
+    "NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, \
+     NULL, NULL, NULL",
+];
+
 fn is_integer(column: &str) -> bool {
     COLUMNS[..10].iter().any(|(name, _)| *name == column)
 }
@@ -227,6 +237,33 @@ async fn arithmetic_on_a_string_matches_mysql() {
                 ["+", "-", "*", "/", "%"]
                     .map(|op| format!("{a} {op} {b}"))
                     .into()
+            })
+            .collect(),
+    )
+    .await;
+}
+
+// TODO(REA-7267): MySQL 5.7 keeps up to 30 digits after the point of a rounded decimal, and gives a
+// rounded double as many decimals as it asks for, so the test skips 5.7.
+#[tokio::test]
+#[tags(serial)]
+#[upstream(mysql, modern)]
+async fn round_of_any_number_or_string_matches_mysql() {
+    compare(
+        ROUND_ROWS,
+        COLUMNS
+            .iter()
+            .map(|(column, _)| {
+                let mut exprs: Vec<String> = ["", ", 0", ", 1", ", -1"]
+                    .map(|digits| format!("ROUND({column}{digits})"))
+                    .into();
+                if is_decimal(column) {
+                    exprs.push(format!("ROUND({column}, '1')"));
+                    exprs.push(format!("ROUND({column}, 4294967296)"));
+                    exprs.push(format!("ROUND({column}, 2147483647)"));
+                    exprs.push(format!("ROUND({column}, -2147483648)"));
+                }
+                exprs
             })
             .collect(),
     )
