@@ -71,8 +71,14 @@ async fn test(
         unsigned = false;
     }
 
+    // A table stores an integer result in the smallest type that fits, but MySQL sends it to the
+    // client as a BIGINT.
     let out = if let Some(ty) = type_map.get(ty) {
-        ty.to_string()
+        if ty.ends_with("Int") {
+            "BigInt".to_string()
+        } else {
+            ty.to_string()
+        }
     } else if ty.starts_with("decimal") {
         unsigned = false;
         let ty = &ty[8..ty.len() - 1]; // remove leading "decimal(" and trailing ")"

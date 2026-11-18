@@ -146,6 +146,15 @@ fn apply_collation_coercion(
     )
 }
 
+/// The type of a comparison or a logical operator's result: a boolean in Postgres, and in MySQL a
+/// BIGINT 0 or 1, as MySQL sends it to the client.
+fn truth_type(dialect: Dialect) -> DfType {
+    match dialect.engine() {
+        SqlEngine::MySQL => DfType::BigInt,
+        SqlEngine::PostgreSQL => DfType::Bool,
+    }
+}
+
 /// Unify the given list of types according to PostgreSQL's [type unification rules][pg-docs]
 ///
 /// [pg-docs]: https://www.postgresql.org/docs/current/typeconv-union-case.html
@@ -1721,7 +1730,6 @@ impl BinaryOperator {
         }
 
         // TODO: Maybe consider `right_type` in some cases too.
-        // TODO: What is the correct return type for `And` and `Or`?
         match self {
             Self::Like
             | Self::ILike
@@ -1731,7 +1739,9 @@ impl BinaryOperator {
             | Self::Less
             | Self::LessOrEqual
             | Self::Is
-            | Self::JsonExists
+            | Self::And
+            | Self::Or => Ok(truth_type(dialect)),
+            Self::JsonExists
             | Self::JsonAnyExists
             | Self::JsonAllExists
             | Self::JsonContains
@@ -2157,7 +2167,7 @@ impl Expr {
                 if negated {
                     Ok(Self::Not {
                         expr: Box::new(op_node),
-                        ty: DfType::Bool,
+                        ty: truth_type(dialect),
                     })
                 } else {
                     Ok(op_node)
@@ -2191,7 +2201,7 @@ impl Expr {
                 rhs,
             } => Ok(Self::Not {
                 expr: Box::new(Self::lower(*rhs, dialect, context)?),
-                ty: DfType::Bool, // type of NOT is always bool
+                ty: truth_type(dialect),
             }),
             AstExpr::Cast { array: true, .. } => {
                 unsupported!("CAST with ARRAY syntax is not supported")
@@ -2338,12 +2348,12 @@ impl Expr {
                             left,
                             op: BinaryOperator::Equal,
                             right,
-                            ty: DfType::Bool, // type of = is always bool
+                            ty: truth_type(dialect),
                         };
                         if negated {
                             Ok(Self::Not {
                                 expr: Box::new(equal),
-                                ty: DfType::Bool,
+                                ty: truth_type(dialect),
                             })
                         } else {
                             Ok(equal)
@@ -2355,20 +2365,20 @@ impl Expr {
                             left: Box::new(acc),
                             op: logical_op,
                             right: Box::new(make_comparison(rhs)?),
-                            ty: DfType::Bool, // type of and/or is always bool
+                            ty: truth_type(dialect),
                         })
                     })
                 } else if negated {
                     // x IN () is always false
                     Ok(Self::Literal {
                         val: DfValue::None,
-                        ty: DfType::Bool,
+                        ty: truth_type(dialect),
                     })
                 } else {
                     // x NOT IN () is always false
                     Ok(Self::Literal {
                         val: DfValue::from(1),
-                        ty: DfType::Bool,
+                        ty: truth_type(dialect),
                     })
                 }
             }
@@ -3329,21 +3339,30 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn eq_returns_bool() {
-        let input = parse_expr(ParserDialect::MySQL, "x = 1").unwrap();
-        let result = Expr::lower(
-            input,
-            Dialect::DEFAULT_MYSQL,
-            &resolve_columns(|c| {
-                if c.name == "x" {
-                    Ok((0, DfType::DEFAULT_TEXT))
-                } else {
-                    internal!("what's this column?")
-                }
-            }),
-        )
-        .unwrap();
-        assert_eq!(*result.ty(), DfType::Bool);
+    fn eq_returns_a_bigint_in_mysql_and_a_bool_in_postgres() {
+        for (parser_dialect, dialect, ty) in [
+            (ParserDialect::MySQL, Dialect::DEFAULT_MYSQL, DfType::BigInt),
+            (
+                ParserDialect::PostgreSQL,
+                Dialect::DEFAULT_POSTGRESQL,
+                DfType::Bool,
+            ),
+        ] {
+            let input = parse_expr(parser_dialect, "x = 1").unwrap();
+            let result = Expr::lower(
+                input,
+                dialect,
+                &resolve_columns(|c| {
+                    if c.name == "x" {
+                        Ok((0, DfType::DEFAULT_TEXT))
+                    } else {
+                        internal!("what's this column?")
+                    }
+                }),
+            )
+            .unwrap();
+            assert_eq!(*result.ty(), ty);
+        }
     }
 
     #[test]

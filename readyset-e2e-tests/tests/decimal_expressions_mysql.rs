@@ -1,7 +1,6 @@
-//! Compares Readyset with MySQL for expressions over a DECIMAL and another number or a string. Each
-//! test caches a statement of the expressions it checks for each pair of column types, or each
-//! column, then reads it through Readyset and from MySQL and compares each expression's type and
-//! values.
+//! Compares Readyset with MySQL for expressions over numbers and strings. Each test caches a
+//! statement of the expressions it checks for each pair of column types, or each column, then reads
+//! it through Readyset and from MySQL and compares each expression's type and values.
 
 use mysql_async::Conn;
 use readyset_client_test_helpers::mysql_helpers;
@@ -49,6 +48,20 @@ const ROWS: &[&str] = &[
      NULL, NULL, NULL",
 ];
 
+/// Rows of small integers, where a signed column holds -7 and 2 and an unsigned one 8 and 3, so
+/// that mixing them gives a result of either sign.
+const INTEGER_ROWS: &[&str] = &[
+    "-7, 8, -7, 8, -7, 8, -7, 8, -7, 8, 0, 0, 0, 0, 0, 0, 0, '0'",
+    "2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 0, 0, 0, 0, 0, 0, 0, '0'",
+    "0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '0'",
+    "NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, \
+     NULL, NULL, NULL",
+];
+
+fn is_integer(column: &str) -> bool {
+    COLUMNS[..10].iter().any(|(name, _)| *name == column)
+}
+
 fn is_decimal(column: &str) -> bool {
     column.starts_with('d') && column != "dbl"
 }
@@ -61,10 +74,10 @@ fn decimal_pairs() -> impl Iterator<Item = (&'static str, &'static str)> {
         .filter(|(a, b)| is_decimal(a) || is_decimal(b))
 }
 
-/// Fills the table `m` of [`COLUMNS`] with [`ROWS`], and compares each list of expressions selected
+/// Fills the table `m` of [`COLUMNS`] with `rows`, and compares each list of expressions selected
 /// from it with MySQL.
-async fn compare(statements: Vec<Vec<String>>) {
-    oracle::mysql::compare(COLUMNS, ROWS, "m", statements).await
+async fn compare(rows: &[&str], statements: Vec<Vec<String>>) {
+    oracle::mysql::compare(COLUMNS, rows, "m", statements).await
 }
 
 #[tokio::test]
@@ -72,6 +85,7 @@ async fn compare(statements: Vec<Vec<String>>) {
 #[upstream(mysql)]
 async fn arithmetic_on_a_decimal_matches_mysql() {
     compare(
+        ROWS,
         decimal_pairs()
             .map(|(a, b)| {
                 ["+", "-", "*", "/", "%"]
@@ -89,6 +103,7 @@ async fn arithmetic_on_a_decimal_matches_mysql() {
 async fn choosing_among_decimals_matches_mysql() {
     // MySQL chooses among a DECIMAL and a string as strings, so the test covers numbers only.
     compare(
+        ROWS,
         decimal_pairs()
             .filter(|(a, b)| *a != "v" && *b != "v")
             .map(|(a, b)| {
@@ -115,6 +130,7 @@ async fn round_of_a_decimal_matches_mysql() {
     let upstream = Conn::new(mysql_helpers::upstream_config()).await.unwrap();
     let mysql57 = upstream.server_version() < (8, 0, 0);
     compare(
+        ROWS,
         COLUMNS
             .iter()
             .filter(|(column, _)| is_decimal(column))
@@ -132,6 +148,39 @@ async fn round_of_a_decimal_matches_mysql() {
                     .map(|digits| format!("ROUND({column}{digits})"))
                     .collect()
             })
+            .collect(),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn arithmetic_on_integers_matches_mysql() {
+    let integers = || {
+        COLUMNS
+            .iter()
+            .map(|(name, _)| *name)
+            .filter(|c| is_integer(c))
+    };
+    let unsigned = |column: &str| column.starts_with('u');
+    compare(
+        INTEGER_ROWS,
+        integers()
+            .flat_map(|a| integers().map(move |b| (a, b)))
+            .filter(|(a, b)| unsigned(a) == unsigned(b))
+            .map(|(a, b)| {
+                ["+", "-", "*", "%", "<", "=", "AND", "OR"]
+                    .map(|op| format!("{a} {op} {b}"))
+                    .into()
+            })
+            .chain(integers().map(|a| {
+                vec![
+                    format!("NOT {a}"),
+                    format!("{a} IN (2, 3)"),
+                    format!("{a} BETWEEN 1 AND 5"),
+                ]
+            }))
             .collect(),
     )
     .await;
