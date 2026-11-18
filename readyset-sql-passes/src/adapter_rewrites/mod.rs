@@ -385,7 +385,7 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
     } else {
         pass!(
             if flags.features.has_nested_select || flags.features.joins_or_groups(),
-            query.validate_query_semantics(flags.dialect)?
+            validate_query_semantics_on_enter(query, flags.dialect)?
         );
         let nonnull_schema = NonNullSchemaImpl::from(&context);
         // Scoped to subqueries and HAVING: elsewhere, derived_tables_rewrite normalizes the
@@ -453,16 +453,28 @@ pub fn rewrite_equivalent_deep<C: AdapterRewriteContext>(
         // Refusing here applies the same contract as the entry check above: a statement
         // this validator rejects is one the pipeline has no agreed reading of, so the
         // rewrite is declined rather than handed on.
-        if has_nested_select || flags.features.joins_or_groups() {
-            query.validate_query_semantics(flags.dialect)?;
-        } else {
-            debug_assert!(query.validate_query_semantics(flags.dialect).is_ok());
-        }
-        trace!(parent: &span, pass="validate_query_semantics_on_exit", query = %query.display(flags.dialect));
+        pass!(
+            if has_nested_select || flags.features.joins_or_groups(),
+            validate_query_semantics_on_exit(query, flags.dialect)?
+        );
     }
     pass!(if flags.features.has_limit, query.order_limit_removal(&context)?);
 
     rewrite_equivalent_parameters(query, flags)
+}
+
+fn validate_query_semantics_on_enter(
+    query: &SelectStatement,
+    dialect: Dialect,
+) -> ReadySetResult<()> {
+    query.validate_query_semantics(dialect)
+}
+
+fn validate_query_semantics_on_exit(
+    query: &SelectStatement,
+    dialect: Dialect,
+) -> ReadySetResult<()> {
+    query.validate_query_semantics(dialect)
 }
 
 /// Returns true if the query's WHERE clause will produce a range-based index
