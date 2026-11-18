@@ -1533,8 +1533,12 @@ impl BinaryOperator {
         let (left_coerce, right_coerce) = match self {
             Add | Subtract | Multiply | Divide | Modulo | And | Or => match dialect.engine() {
                 // Postgres computes a numeric with an integer as two numerics, and with a float as
-                // two doubles.
+                // two doubles. It computes a real with an integer as two doubles too.
                 SqlEngine::PostgreSQL => psql_numeric_output_type(left_type, self, right_type)
+                    .or_else(|| {
+                        crate::promotion::psql::output_type(left_type, self, right_type)
+                            .filter(DfType::is_any_float)
+                    })
                     .map_or((None, None), |ty| (Some(ty.clone()), Some(ty))),
                 // MySQL computes arithmetic on a string as doubles.
                 SqlEngine::MySQL

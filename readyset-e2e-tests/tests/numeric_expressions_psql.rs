@@ -44,10 +44,10 @@ fn pairs() -> impl Iterator<Item = (&'static str, &'static str)> {
         .flat_map(|(a, _)| COLUMNS.iter().map(move |(b, _)| (*a, *b)))
 }
 
-/// Fills the table `m` of [`COLUMNS`] with [`ROWS`], and compares each list of expressions selected
+/// Fills the table `m` of [`COLUMNS`] with `rows`, and compares each list of expressions selected
 /// from it with Postgres.
-async fn compare(statements: Vec<Vec<String>>) {
-    oracle::postgres::compare(COLUMNS, ROWS, "m", statements).await
+async fn compare(rows: &[&str], statements: Vec<Vec<String>>) {
+    oracle::postgres::compare(COLUMNS, rows, "m", statements).await
 }
 
 #[tokio::test]
@@ -55,6 +55,7 @@ async fn compare(statements: Vec<Vec<String>>) {
 #[upstream(postgres)]
 async fn arithmetic_on_a_numeric_matches_postgres() {
     compare(
+        ROWS,
         pairs()
             .filter(|(a, b)| is_numeric(a) || is_numeric(b))
             .map(|(a, b)| {
@@ -79,6 +80,7 @@ async fn arithmetic_on_a_numeric_matches_postgres() {
 #[upstream(postgres)]
 async fn greatest_and_least_of_numbers_match_postgres() {
     compare(
+        ROWS,
         pairs()
             .map(|(a, b)| vec![format!("GREATEST({a}, {b})"), format!("LEAST({a}, {b})")])
             .collect(),
@@ -91,6 +93,7 @@ async fn greatest_and_least_of_numbers_match_postgres() {
 #[upstream(postgres)]
 async fn round_of_a_numeric_matches_postgres() {
     compare(
+        ROWS,
         COLUMNS
             .iter()
             .filter(|(column, _)| is_numeric(column))
@@ -98,6 +101,28 @@ async fn round_of_a_numeric_matches_postgres() {
                 ["", ", -1", ", 0", ", 1", ", 2", ", 5", ", id"]
                     .map(|digits| format!("round({column}{digits})"))
                     .into()
+            })
+            .collect(),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[tags(serial)]
+#[upstream(postgres)]
+async fn arithmetic_on_integers_and_floats_matches_postgres() {
+    compare(
+        &ROWS[2..],
+        pairs()
+            .filter(|(a, b)| !is_numeric(a) && !is_numeric(b))
+            .map(|(a, b)| {
+                // Postgres has no remainder of a float.
+                let ops: &[&str] = if is_float(a) || is_float(b) {
+                    &["+", "-", "*", "/"]
+                } else {
+                    &["+", "-", "*", "/", "%"]
+                };
+                ops.iter().map(|op| format!("{a} {op} {b}")).collect()
             })
             .collect(),
     )
