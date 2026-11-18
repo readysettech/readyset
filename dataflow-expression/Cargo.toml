@@ -8,7 +8,7 @@ autotests = false
 
 [[test]]
 name = "tests"
-path = "tests.rs"
+path = "tests/main.rs"
 
 [[bench]]
 name = "json_object_agg"

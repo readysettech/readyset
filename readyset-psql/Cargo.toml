@@ -8,7 +8,7 @@ autotests = false
 
 [[test]]
 name = "tests"
-path = "tests.rs"
+path = "tests/main.rs"
 
 [build-dependencies]
 test-discovery = { path = "../test-discovery" }

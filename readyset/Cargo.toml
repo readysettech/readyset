@@ -85,7 +85,7 @@ test-utils = { path = "../test-utils" }
 
 [[test]]
 name = "tests"
-path = "tests.rs"
+path = "tests/main.rs"
 
 [[bench]]
 name = "query_logger"
