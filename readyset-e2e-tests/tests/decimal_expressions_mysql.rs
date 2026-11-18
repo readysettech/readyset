@@ -58,6 +58,17 @@ const INTEGER_ROWS: &[&str] = &[
      NULL, NULL, NULL",
 ];
 
+/// Rows of ones, with a string that MySQL reads as a number by its leading digits, if any.
+const STRING_ROWS: &[&str] = &[
+    "1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.5, 0.5, 'abc'",
+    "1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.5, 0.5, '12abc'",
+    "1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.5, 0.5, ' 3'",
+    "1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.5, 0.5, '1e2'",
+    "1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.5, 0.5, ''",
+    "1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.5, 0.5, '-0.5x'",
+    "1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.5, 0.5, '0x10'",
+];
+
 fn is_integer(column: &str) -> bool {
     COLUMNS[..10].iter().any(|(name, _)| *name == column)
 }
@@ -190,6 +201,33 @@ async fn arithmetic_on_integers_matches_mysql() {
                     format!("{a} BETWEEN -1 AND 1"),
                 ]
             }))
+            .collect(),
+    )
+    .await;
+}
+
+#[tokio::test]
+#[tags(serial)]
+#[upstream(mysql)]
+async fn arithmetic_on_a_string_matches_mysql() {
+    // MySQL computes arithmetic on a string as doubles.
+    let names = || {
+        COLUMNS
+            .iter()
+            .map(|(name, _)| *name)
+            .filter(|c| !is_decimal(c))
+    };
+    let rows: Vec<&str> = ROWS[2..].iter().chain(STRING_ROWS).copied().collect();
+    compare(
+        &rows,
+        names()
+            .flat_map(|a| names().map(move |b| (a, b)))
+            .filter(|(a, b)| *a == "v" || *b == "v")
+            .map(|(a, b)| {
+                ["+", "-", "*", "/", "%"]
+                    .map(|op| format!("{a} {op} {b}"))
+                    .into()
+            })
             .collect(),
     )
     .await;

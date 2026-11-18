@@ -1273,20 +1273,27 @@ fn mysql_decimal_digits(ty: &DfType) -> Option<(u16, u16)> {
     }
 }
 
-/// Returns the type MySQL gives arithmetic on a DECIMAL. If the other side is a float or a string,
-/// the result is a DOUBLE. Otherwise MySQL sizes the result from the digits of both sides, up to 65
-/// digits with at most 30 after the point.
-fn mysql_decimal_output_type(left: &DfType, op: &BinaryOperator, right: &DfType) -> Option<DfType> {
+/// Returns the type MySQL gives arithmetic that isn't in the promotion table. On a float or a
+/// string, the result is a DOUBLE. On a DECIMAL, MySQL sizes the result from the digits of both
+/// sides, up to 65 digits with at most 30 after the point.
+fn mysql_arithmetic_output_type(
+    left: &DfType,
+    op: &BinaryOperator,
+    right: &DfType,
+) -> Option<DfType> {
     use BinaryOperator::*;
+    let is_arithmetic = matches!(op, Add | Subtract | Multiply | Divide | Modulo);
+    let is_double = |ty: &DfType| ty.is_any_float() || ty.is_any_text();
+    if is_arithmetic && (is_double(left) || is_double(right)) {
+        return Some(DfType::Double);
+    }
     if !left.is_numeric() && !right.is_numeric() {
         return None;
     }
-    let is_arithmetic = matches!(op, Add | Subtract | Multiply | Divide | Modulo);
     let (Some((left_prec, left_scale)), Some((right_prec, right_scale))) =
         (mysql_decimal_digits(left), mysql_decimal_digits(right))
     else {
-        let is_double = |ty: &DfType| ty.is_any_float() || ty.is_any_text();
-        return (is_arithmetic && (is_double(left) || is_double(right))).then_some(DfType::Double);
+        return None;
     };
     let (prec, scale) = match op {
         Add | Subtract => {
@@ -1529,6 +1536,13 @@ impl BinaryOperator {
                 // two doubles.
                 SqlEngine::PostgreSQL => psql_numeric_output_type(left_type, self, right_type)
                     .map_or((None, None), |ty| (Some(ty.clone()), Some(ty))),
+                // MySQL computes arithmetic on a string as doubles.
+                SqlEngine::MySQL
+                    if !matches!(self, And | Or)
+                        && (left_type.is_any_text() || right_type.is_any_text()) =>
+                {
+                    (Some(DfType::Double), Some(DfType::Double))
+                }
                 SqlEngine::MySQL => mysql_type_conversion(left_type, right_type)
                     .map_or((None, None), |ty| (Some(ty.clone()), Some(ty))),
             },
@@ -1707,7 +1721,7 @@ impl BinaryOperator {
     ) -> ReadySetResult<DfType> {
         if let Some(ty) = match dialect.engine() {
             SqlEngine::MySQL => crate::promotion::mysql::output_type(left_type, self, right_type)
-                .or_else(|| mysql_decimal_output_type(left_type, self, right_type)),
+                .or_else(|| mysql_arithmetic_output_type(left_type, self, right_type)),
             SqlEngine::PostgreSQL => {
                 crate::promotion::psql::output_type(left_type, self, right_type)
                     .or_else(|| psql_numeric_output_type(left_type, self, right_type))
