@@ -168,17 +168,26 @@ async fn arithmetic_on_integers_matches_mysql() {
         INTEGER_ROWS,
         integers()
             .flat_map(|a| integers().map(move |b| (a, b)))
-            .filter(|(a, b)| unsigned(a) == unsigned(b))
             .map(|(a, b)| {
                 ["+", "-", "*", "%", "<", "=", "AND", "OR"]
+                    .into_iter()
+                    // MySQL fails when a result with an unsigned side is negative, so the test
+                    // leaves out a signed minus an unsigned value, and a product of mixed signs.
+                    .filter(|op| match *op {
+                        "-" => unsigned(a) || !unsigned(b),
+                        "*" => unsigned(a) == unsigned(b),
+                        _ => true,
+                    })
                     .map(|op| format!("{a} {op} {b}"))
-                    .into()
+                    .collect()
             })
             .chain(integers().map(|a| {
                 vec![
                     format!("NOT {a}"),
                     format!("{a} IN (2, 3)"),
                     format!("{a} BETWEEN 1 AND 5"),
+                    format!("{a} > -1"),
+                    format!("{a} BETWEEN -1 AND 1"),
                 ]
             }))
             .collect(),

@@ -2114,9 +2114,14 @@ impl Expr {
                     op.argument_type_coercions(&left, &right, dialect)?;
 
                 // Cast each operand to the type the operator works in, unless both it and the result
-                // already have that type.
+                // already have that type. An integer is never cast to another integer type: the
+                // operators handle a mix of signed and unsigned values, and a negative value
+                // doesn't fit an unsigned type.
+                let needs_cast = |ty: &DfType, operand: &DfType| {
+                    (*ty != out || ty != operand) && !(ty.is_any_int() && operand.is_any_int())
+                };
                 if let Some(ty) = left_coerce_target {
-                    if ty != out || ty != *left.ty() {
+                    if needs_cast(&ty, left.ty()) {
                         left = Box::new(Self::Cast {
                             expr: left,
                             ty,
@@ -2126,7 +2131,7 @@ impl Expr {
                     }
                 }
                 if let Some(ty) = right_coerce_target {
-                    if ty != out || ty != *right.ty() {
+                    if needs_cast(&ty, right.ty()) {
                         right = Box::new(Self::Cast {
                             expr: right,
                             ty,
