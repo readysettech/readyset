@@ -5,9 +5,9 @@
 use mysql_async::Row;
 use mysql_async::prelude::Queryable;
 use readyset_client::consensus::AuthorityControl;
-use readyset_client_test_helpers::{Adapter, TestBuilder, derive_test_name};
 use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
 use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
+use readyset_client_test_helpers::{Adapter, TestBuilder, derive_test_name};
 use readyset_util::eventually;
 use replication_offset::ReplicationOffset;
 use replication_offset::postgres::PostgresPosition;
@@ -168,9 +168,9 @@ async fn view_cache_survives_controller_restart_after_unrelated_ddl() {
     // view's DDL even though the view is compiled by this point.
     let entries = handle.authority().schema_catalog_entries().await.unwrap();
     assert!(
-        entries
-            .iter()
-            .any(|e| e.unparsed_stmt.contains(&format!("CREATE VIEW `{db_name}`.`v`"))),
+        entries.iter().any(|e| e
+            .unparsed_stmt
+            .contains(&format!("CREATE VIEW `{db_name}`.`v`"))),
         "view DDL missing from persisted schema catalog: {entries:?}"
     );
 
@@ -235,7 +235,10 @@ async fn a_cache_on_a_dropped_table_leaves_the_others_restored() {
     ] {
         rs_conn.query_drop(create).await.unwrap();
     }
-    upstream_conn.query_drop("DROP TABLE dropped").await.unwrap();
+    upstream_conn
+        .query_drop("DROP TABLE dropped")
+        .await
+        .unwrap();
     eventually!(run_test: {
         cache_names(&mut rs_conn).await
     }, then_assert: |names| {

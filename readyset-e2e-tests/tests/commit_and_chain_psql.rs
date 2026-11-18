@@ -18,7 +18,14 @@ const QUERY: &str = "SELECT v FROM t WHERE id = 1";
 /// Start a shallow cache adapter for `db` with table `t` on the upstream. Return a connection to
 /// the adapter, a direct connection to the upstream, and the handles, which the caller must keep
 /// for the test's duration.
-async fn setup(db: &str) -> (Client, Client, Handle, TestShutdownSender<PostgreSQLAdapter>) {
+async fn setup(
+    db: &str,
+) -> (
+    Client,
+    Client,
+    Handle,
+    TestShutdownSender<PostgreSQLAdapter>,
+) {
     let backend = BackendBuilder::new().require_authentication(false);
     let (rs_opts, handle, shutdown_tx) = TestBuilder::new(backend)
         .cache_mode(CacheMode::Shallow)
@@ -72,16 +79,24 @@ async fn chain_starts_upstream_transaction() {
     let (conn, upstream, _handle, shutdown_tx) = setup(&db).await;
 
     conn.simple_query("BEGIN").await.unwrap();
-    conn.simple_query("INSERT INTO t VALUES (2, 0)").await.unwrap();
+    conn.simple_query("INSERT INTO t VALUES (2, 0)")
+        .await
+        .unwrap();
     conn.simple_query("COMMIT AND CHAIN").await.unwrap();
-    conn.simple_query("INSERT INTO t VALUES (3, 0)").await.unwrap();
+    conn.simple_query("INSERT INTO t VALUES (3, 0)")
+        .await
+        .unwrap();
     conn.simple_query("ROLLBACK").await.unwrap();
     assert_eq!(inserted_ids(&upstream).await, ["2"]);
 
     conn.simple_query("BEGIN").await.unwrap();
-    conn.simple_query("INSERT INTO t VALUES (4, 0)").await.unwrap();
+    conn.simple_query("INSERT INTO t VALUES (4, 0)")
+        .await
+        .unwrap();
     conn.simple_query("ROLLBACK AND CHAIN").await.unwrap();
-    conn.simple_query("INSERT INTO t VALUES (5, 0)").await.unwrap();
+    conn.simple_query("INSERT INTO t VALUES (5, 0)")
+        .await
+        .unwrap();
     conn.simple_query("ROLLBACK").await.unwrap();
     assert_eq!(inserted_ids(&upstream).await, ["2"]);
 
@@ -99,9 +114,11 @@ async fn chain_reads_go_upstream() {
     let db = derive_test_name();
     let (conn, _upstream, _handle, shutdown_tx) = setup(&db).await;
 
-    conn.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 600 SECONDS FROM {QUERY}"))
-        .await
-        .unwrap();
+    conn.simple_query(&format!(
+        "CREATE SHALLOW CACHE POLICY TTL 600 SECONDS FROM {QUERY}"
+    ))
+    .await
+    .unwrap();
     eventually! {
         matches!(destination(&conn, QUERY).await, QueryDestination::ReadysetShallow(_))
     }
@@ -140,16 +157,20 @@ async fn chain_after_failed_transaction() {
     let db = derive_test_name();
     let (conn, upstream, _handle, shutdown_tx) = setup(&db).await;
 
-    conn.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 600 SECONDS FROM {QUERY}"))
-        .await
-        .unwrap();
+    conn.simple_query(&format!(
+        "CREATE SHALLOW CACHE POLICY TTL 600 SECONDS FROM {QUERY}"
+    ))
+    .await
+    .unwrap();
     eventually! {
         matches!(destination(&conn, QUERY).await, QueryDestination::ReadysetShallow(_))
     }
 
     for prepared in [false, true] {
         conn.simple_query("BEGIN").await.unwrap();
-        conn.simple_query("INSERT INTO t VALUES (2, 0)").await.unwrap();
+        conn.simple_query("INSERT INTO t VALUES (2, 0)")
+            .await
+            .unwrap();
         conn.simple_query("SELECT 1 / 0").await.unwrap_err();
         if prepared {
             conn.execute("COMMIT AND CHAIN", &[]).await.unwrap();
@@ -161,9 +182,14 @@ async fn chain_after_failed_transaction() {
             QueryDestination::Upstream,
             "prepared: {prepared}"
         );
-        conn.simple_query("INSERT INTO t VALUES (3, 0)").await.unwrap();
+        conn.simple_query("INSERT INTO t VALUES (3, 0)")
+            .await
+            .unwrap();
         conn.simple_query("ROLLBACK").await.unwrap();
-        assert!(inserted_ids(&upstream).await.is_empty(), "prepared: {prepared}");
+        assert!(
+            inserted_ids(&upstream).await.is_empty(),
+            "prepared: {prepared}"
+        );
         assert_matches!(
             destination(&conn, QUERY).await,
             QueryDestination::ReadysetShallow(_)

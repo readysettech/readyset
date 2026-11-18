@@ -122,7 +122,10 @@ async fn create_table_if_not_exists_unsupported_engine_stays_replicated() {
         .iter()
         .find(|(table, _, _)| *table == format!("`{db}`.`t`"))
         .unwrap_or_else(|| panic!("t is missing from {statuses:?}"));
-    assert_ne!(status, "Not replicated", "a rejected replay marked t not replicated");
+    assert_ne!(
+        status, "Not replicated",
+        "a rejected replay marked t not replicated"
+    );
 
     teardown(upstream, shutdown_tx, db).await;
 }

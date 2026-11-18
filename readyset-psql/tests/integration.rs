@@ -8,6 +8,7 @@ use database_utils::tls::ServerCertVerification;
 use database_utils::{DatabaseURL, QueryableConnection};
 use readyset_adapter::backend::QueryDestination;
 use readyset_client::consensus::{AuthorityControl, CacheDDLRequest};
+use readyset_client_test_helpers::TestShutdownSender;
 use readyset_client_test_helpers::psql_helpers::{PostgreSQLAdapter, connect};
 use readyset_client_test_helpers::{
     TestBuilder, explain_create_cache, explain_last_statement, sleep,
@@ -15,11 +16,14 @@ use readyset_client_test_helpers::{
 use readyset_data::Dialect;
 use readyset_server::Handle;
 use readyset_util::eventually;
-use readyset_client_test_helpers::TestShutdownSender;
 
 use crate::common::setup_standalone_with_authority;
 
-async fn setup() -> (tokio_postgres::Config, Handle, TestShutdownSender<PostgreSQLAdapter>) {
+async fn setup() -> (
+    tokio_postgres::Config,
+    Handle,
+    TestShutdownSender<PostgreSQLAdapter>,
+) {
     readyset_tracing::init_test_logging();
     TestBuilder::default()
         .replicate(false)
@@ -1627,7 +1631,10 @@ async fn dropping_cache_removes_authority_entry() {
     }
 
     let reqs = authority.cache_ddl_requests().await.unwrap();
-    assert!(reqs.is_empty(), "drop should leave no stored entry: {reqs:?}");
+    assert!(
+        reqs.is_empty(),
+        "drop should leave no stored entry: {reqs:?}"
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -1694,7 +1701,9 @@ async fn dropping_shallow_cache_removes_entry() {
         "creating a shallow cache must not write to the deep list",
     );
 
-    conn.simple_query("DROP CACHE q").await.expect("drop failed");
+    conn.simple_query("DROP CACHE q")
+        .await
+        .expect("drop failed");
     sleep().await;
 
     assert!(
@@ -1746,13 +1755,17 @@ async fn dropped_shallow_cache_does_not_resurrect_after_restart() {
         let info = explain_last_statement(&mut conn).await;
         assert_matches!(info.destination, QueryDestination::ReadysetShallow(_));
 
-        conn.simple_query("DROP CACHE q").await.expect("drop failed");
-        sleep().await;
-        assert!(authority
-            .shallow_cache_ddl_requests()
+        conn.simple_query("DROP CACHE q")
             .await
-            .unwrap()
-            .is_empty());
+            .expect("drop failed");
+        sleep().await;
+        assert!(
+            authority
+                .shallow_cache_ddl_requests()
+                .await
+                .unwrap()
+                .is_empty()
+        );
 
         drop(conn);
         shutdown_tx.shutdown().await;

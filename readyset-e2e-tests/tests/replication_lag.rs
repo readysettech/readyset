@@ -1,12 +1,12 @@
 use std::time::Duration;
 
-use mysql_async::prelude::Queryable;
 use mysql_async::Row;
+use mysql_async::prelude::Queryable;
+use readyset_client_test_helpers::TestShutdownSender;
 use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
 use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter};
 use readyset_client_test_helpers::{Adapter, TestBuilder};
 use readyset_util::eventually;
-use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 use tokio_postgres::SimpleQueryMessage;
 
@@ -18,7 +18,11 @@ async fn setup_mysql(
     db_name: &str,
     require_gtid: bool,
     heartbeat: bool,
-) -> (mysql_async::Conn, Box<dyn std::any::Any>, TestShutdownSender<MySQLAdapter>) {
+) -> (
+    mysql_async::Conn,
+    Box<dyn std::any::Any>,
+    TestShutdownSender<MySQLAdapter>,
+) {
     mysql_helpers::recreate_database(db_name).await;
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(db_name));
@@ -66,7 +70,11 @@ async fn setup_mysql(
 async fn setup_psql(
     db_name: &str,
     heartbeat: bool,
-) -> (tokio_postgres::Client, Box<dyn std::any::Any>, TestShutdownSender<PostgreSQLAdapter>) {
+) -> (
+    tokio_postgres::Client,
+    Box<dyn std::any::Any>,
+    TestShutdownSender<PostgreSQLAdapter>,
+) {
     PostgreSQLAdapter::recreate_database(db_name).await;
 
     let mut upstream_config = psql_helpers::upstream_config();
@@ -164,7 +172,8 @@ async fn psql_staleness(conn: &tokio_postgres::Client) -> Option<f64> {
     rows.iter().find_map(|msg| {
         if let SimpleQueryMessage::Row(row) = msg {
             // Column index 6 = heartbeat_staleness_seconds
-            row.get(6).map(|s| s.parse::<f64>().expect("staleness should be a float"))
+            row.get(6)
+                .map(|s| s.parse::<f64>().expect("staleness should be a float"))
         } else {
             None
         }
@@ -188,18 +197,33 @@ async fn mysql_replication_status_vrel() {
     );
 
     let upstream_offset: String = row.get("upstream_offset").expect("upstream_offset");
-    assert!(!upstream_offset.is_empty(), "upstream_offset should not be empty");
+    assert!(
+        !upstream_offset.is_empty(),
+        "upstream_offset should not be empty"
+    );
 
     let replicator_offset: String = row.get("replicator_offset").expect("replicator_offset");
-    assert!(!replicator_offset.is_empty(), "replicator_offset should not be empty");
+    assert!(
+        !replicator_offset.is_empty(),
+        "replicator_offset should not be empty"
+    );
 
     let persisted_offset: String = row.get("persisted_offset").expect("persisted_offset");
-    assert!(!persisted_offset.is_empty(), "persisted_offset should not be empty");
+    assert!(
+        !persisted_offset.is_empty(),
+        "persisted_offset should not be empty"
+    );
 
     let consume_lag: u64 = row.get("consume_lag").expect("consume_lag");
     let persist_lag: u64 = row.get("persist_lag").expect("persist_lag");
-    assert!(consume_lag < 10_000_000, "consume_lag unexpectedly large: {consume_lag}");
-    assert!(persist_lag < 10_000_000, "persist_lag unexpectedly large: {persist_lag}");
+    assert!(
+        consume_lag < 10_000_000,
+        "consume_lag unexpectedly large: {consume_lag}"
+    );
+    assert!(
+        persist_lag < 10_000_000,
+        "persist_lag unexpectedly large: {persist_lag}"
+    );
     // Invariant: persist_lag >= consume_lag. The replicator publishes both the stream
     // position and the persist frontier together after each applied action, and the
     // persist frontier is always <= the stream position (it's the max offset applied,
@@ -258,12 +282,21 @@ async fn mysql_gtid_replication_status_vrel() {
     assert_eq!(mode, "mysql_gtid", "expected GTID mode with --require-gtid");
 
     let upstream_offset: String = row.get("upstream_offset").expect("upstream_offset");
-    assert!(!upstream_offset.is_empty(), "upstream_offset should not be empty");
+    assert!(
+        !upstream_offset.is_empty(),
+        "upstream_offset should not be empty"
+    );
 
     let consume_lag: u64 = row.get("consume_lag").expect("consume_lag");
     let persist_lag: u64 = row.get("persist_lag").expect("persist_lag");
-    assert!(consume_lag < 100, "consume_lag unexpectedly large: {consume_lag}");
-    assert!(persist_lag < 100, "persist_lag unexpectedly large: {persist_lag}");
+    assert!(
+        consume_lag < 100,
+        "consume_lag unexpectedly large: {consume_lag}"
+    );
+    assert!(
+        persist_lag < 100,
+        "persist_lag unexpectedly large: {persist_lag}"
+    );
     assert!(
         persist_lag >= consume_lag,
         "persist_lag ({persist_lag}) must be >= consume_lag ({consume_lag})"
@@ -295,13 +328,22 @@ async fn psql_replication_status_vrel() {
     assert_eq!(row.get(0).expect("replication_mode"), "postgres");
 
     let upstream_offset = row.get(1).expect("upstream_offset");
-    assert!(!upstream_offset.is_empty(), "upstream_offset should not be empty");
+    assert!(
+        !upstream_offset.is_empty(),
+        "upstream_offset should not be empty"
+    );
 
     let replicator_offset = row.get(2).expect("replicator_offset");
-    assert!(!replicator_offset.is_empty(), "replicator_offset should not be empty");
+    assert!(
+        !replicator_offset.is_empty(),
+        "replicator_offset should not be empty"
+    );
 
     let persisted_offset = row.get(3).expect("persisted_offset");
-    assert!(!persisted_offset.is_empty(), "persisted_offset should not be empty");
+    assert!(
+        !persisted_offset.is_empty(),
+        "persisted_offset should not be empty"
+    );
 
     // Column index 4 = consume_lag, 5 = persist_lag. The replicator publishes
     // stream_position and persist_frontier together after each applied action, so
@@ -417,8 +459,7 @@ async fn mysql_gtid_heartbeat_staleness() {
 #[upstream(postgres)]
 async fn psql_heartbeat_staleness() {
     readyset_tracing::init_test_logging();
-    let (rs_conn, _handle, shutdown_tx) =
-        setup_psql("replication_lag_psql_heartbeat", true).await;
+    let (rs_conn, _handle, shutdown_tx) = setup_psql("replication_lag_psql_heartbeat", true).await;
 
     // With a 2s poll interval, staleness should populate after ~4s (2 cycles).
     eventually!(
@@ -446,8 +487,7 @@ async fn psql_heartbeat_staleness() {
 #[upstream(postgres)]
 async fn psql_heartbeat_staleness_stays_bounded() {
     readyset_tracing::init_test_logging();
-    let (rs_conn, _handle, shutdown_tx) =
-        setup_psql("replication_lag_psql_hb_bounded", true).await;
+    let (rs_conn, _handle, shutdown_tx) = setup_psql("replication_lag_psql_hb_bounded", true).await;
 
     // Wait for staleness to appear (2 poll cycles at 2s each).
     eventually!(

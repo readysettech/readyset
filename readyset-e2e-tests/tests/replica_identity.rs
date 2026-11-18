@@ -56,9 +56,7 @@ async fn replica_identity_different_from_pk() {
         .expect("create table");
 
     upstream_conn
-        .simple_query(
-            "CREATE UNIQUE INDEX users_id_email_unique ON users USING btree (id, email)",
-        )
+        .simple_query("CREATE UNIQUE INDEX users_id_email_unique ON users USING btree (id, email)")
         .await
         .expect("create unique index");
 

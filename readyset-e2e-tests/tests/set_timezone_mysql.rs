@@ -6,10 +6,10 @@ use readyset_adapter::BackendBuilder;
 use readyset_adapter::backend::UnsupportedSetMode;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::TestBuilder;
+use readyset_client_test_helpers::TestShutdownSender;
 use readyset_client_test_helpers::mysql_helpers::{MySQLAdapter, last_query_info};
 use readyset_server::Handle;
 use readyset_util::eventually;
-use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 
 async fn setup_with(
@@ -56,9 +56,7 @@ async fn lowercase_iana_timezone_stays_on_readyset() {
         "cached query should be served by Readyset before the SET"
     );
 
-    conn.query_drop("SET time_zone = 'etc/utc'")
-        .await
-        .unwrap();
+    conn.query_drop("SET time_zone = 'etc/utc'").await.unwrap();
 
     conn.query_drop("SELECT x FROM t").await.unwrap();
     assert_matches!(

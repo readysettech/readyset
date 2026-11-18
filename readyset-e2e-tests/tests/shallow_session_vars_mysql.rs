@@ -129,7 +129,9 @@ async fn sql_select_limit_partitions_entries() {
     assert_eq!(ids, vec![1, 2, 3]);
     assert_filled(&mut a).await;
 
-    b.query_drop("SET sql_select_limit = DEFAULT").await.unwrap();
+    b.query_drop("SET sql_select_limit = DEFAULT")
+        .await
+        .unwrap();
     let ids: Vec<i64> = b.query(QUERY).await.unwrap();
     assert_eq!(ids, vec![1, 2, 3]);
     assert_hit(&mut b).await;
@@ -198,7 +200,9 @@ async fn group_concat_max_len_expression_shares_entry() {
     assert_filled(&mut a).await;
 
     let mut b = mysql_async::Conn::new(opts).await.unwrap();
-    b.query_drop("SET group_concat_max_len = 2 * 2").await.unwrap();
+    b.query_drop("SET group_concat_max_len = 2 * 2")
+        .await
+        .unwrap();
     let joined: String = b.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(joined, "1,1,");
     assert_hit(&mut b).await;
@@ -251,7 +255,9 @@ async fn div_precision_increment_partitions_entries() {
     assert_filled(&mut a).await;
 
     let mut b = mysql_async::Conn::new(opts).await.unwrap();
-    b.query_drop("SET div_precision_increment = 1").await.unwrap();
+    b.query_drop("SET div_precision_increment = 1")
+        .await
+        .unwrap();
     let quotient: String = b.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(quotient, "0.3");
     assert_filled(&mut b).await;
@@ -305,7 +311,9 @@ async fn block_encryption_mode_partitions_entries() {
     assert_filled(&mut a).await;
 
     let mut b = mysql_async::Conn::new(opts.clone()).await.unwrap();
-    b.query_drop("SET block_encryption_mode = 'aes-256-cbc'").await.unwrap();
+    b.query_drop("SET block_encryption_mode = 'aes-256-cbc'")
+        .await
+        .unwrap();
     let ciphertext: String = b.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(ciphertext, "ED8EC86B20144BB08F1DD23B3BABAA40");
     assert_filled(&mut b).await;
@@ -314,7 +322,9 @@ async fn block_encryption_mode_partitions_entries() {
     assert_hit(&mut b).await;
 
     let mut c = mysql_async::Conn::new(opts).await.unwrap();
-    c.query_drop("SET block_encryption_mode = 'AES-256-CBC'").await.unwrap();
+    c.query_drop("SET block_encryption_mode = 'AES-256-CBC'")
+        .await
+        .unwrap();
     let ciphertext: String = c.query_first(QUERY).await.unwrap().unwrap();
     assert_eq!(ciphertext, "ED8EC86B20144BB08F1DD23B3BABAA40");
     assert_hit(&mut c).await;
@@ -341,7 +351,9 @@ async fn windowing_use_high_precision_partitions_entries() {
     assert_filled(&mut a).await;
 
     let mut b = mysql_async::Conn::new(opts.clone()).await.unwrap();
-    b.query_drop("SET windowing_use_high_precision = OFF").await.unwrap();
+    b.query_drop("SET windowing_use_high_precision = OFF")
+        .await
+        .unwrap();
     let sums: Vec<f64> = b.query(QUERY).await.unwrap();
     assert_eq!(sums, vec![1e20, 1e20, 1.0]);
     assert_filled(&mut b).await;
@@ -350,7 +362,9 @@ async fn windowing_use_high_precision_partitions_entries() {
     assert_hit(&mut b).await;
 
     let mut c = mysql_async::Conn::new(opts).await.unwrap();
-    c.query_drop("SET windowing_use_high_precision = 0").await.unwrap();
+    c.query_drop("SET windowing_use_high_precision = 0")
+        .await
+        .unwrap();
     let sums: Vec<f64> = c.query(QUERY).await.unwrap();
     assert_eq!(sums, vec![1e20, 1e20, 1.0]);
     assert_hit(&mut c).await;

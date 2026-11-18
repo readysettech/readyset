@@ -7,17 +7,17 @@ use std::sync::Arc;
 use database_utils::UpstreamConfig;
 use mysql_async::prelude::Queryable;
 use mysql_srv::{AuthPlugin, CachingSha2Password, MysqlNativePassword};
-use readyset_adapter::backend::AllowedUsers;
 use readyset_adapter::BackendBuilder;
+use readyset_adapter::backend::AllowedUsers;
 use readyset_client::consensus::{
     AllowedUsersMap, Authority, AuthorityControl, LocalAuthority, LocalAuthorityStore, UserStore,
 };
-use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
 use readyset_client_test_helpers::TestBuilder;
+use readyset_client_test_helpers::TestShutdownSender;
+use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
+use readyset_server::Handle;
 use readyset_sql::Dialect;
 use readyset_sql_parsing::ParsingPreset;
-use readyset_server::Handle;
-use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 use tokio::sync::RwLock;
 
@@ -91,7 +91,9 @@ async fn set_upstream_user(user: &str, password: &str) {
         .await
         .unwrap();
     upstream
-        .query_drop(format!("CREATE USER '{user}'@'%' IDENTIFIED BY '{password}'"))
+        .query_drop(format!(
+            "CREATE USER '{user}'@'%' IDENTIFIED BY '{password}'"
+        ))
         .await
         .unwrap();
     upstream
@@ -119,9 +121,11 @@ async fn e2e_retained_password_authenticates() {
         root.query_drop("ALTER READYSET ADD USER 'carol' PASSWORD 'pw1'")
             .await
             .unwrap();
-        root.query_drop("ALTER READYSET MODIFY USER 'carol' PASSWORD 'pw2' RETAIN CURRENT PASSWORD")
-            .await
-            .unwrap();
+        root.query_drop(
+            "ALTER READYSET MODIFY USER 'carol' PASSWORD 'pw2' RETAIN CURRENT PASSWORD",
+        )
+        .await
+        .unwrap();
 
         let mut carol = mysql_async::Conn::new(opts_for(&rs_opts, "carol", "pw1"))
             .await
@@ -322,15 +326,14 @@ async fn e2e_readyset_users_vrel() {
     rows.sort();
     assert_eq!(
         rows,
-        vec![
-            ("alice".to_string(), false),
-            (ROOT_USER.to_string(), false)
-        ]
+        vec![("alice".to_string(), false), (ROOT_USER.to_string(), false)]
     );
 
-    root.query_drop("ALTER READYSET MODIFY USER 'alice' PASSWORD 'rotated' RETAIN CURRENT PASSWORD")
-        .await
-        .unwrap();
+    root.query_drop(
+        "ALTER READYSET MODIFY USER 'alice' PASSWORD 'rotated' RETAIN CURRENT PASSWORD",
+    )
+    .await
+    .unwrap();
     let rows: Vec<(String, bool)> = root
         .query("SELECT user, has_old_password FROM readyset.users WHERE user = 'alice'")
         .await
@@ -389,7 +392,8 @@ async fn e2e_cannot_mutate_upstream_user() {
 
     let mut users = HashMap::new();
     users.insert(ROOT_USER.to_string(), ROOT_PASSWORD.into());
-    let upstream_config = UpstreamConfig::from_url(MySQLAdapter::url_with_db("noria")).expect("valid upstream URL");
+    let upstream_config =
+        UpstreamConfig::from_url(MySQLAdapter::url_with_db("noria")).expect("valid upstream URL");
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::new(
         BackendBuilder::new()
             .require_authentication(true)
@@ -437,7 +441,11 @@ async fn e2e_added_user_persists_across_restart() {
     // state: reusing one `Authority` instance would keep the first server's leader lease and stall
     // the second server's controller startup.
     let store = Arc::new(LocalAuthorityStore::new());
-    let authority = || Arc::new(Authority::from(LocalAuthority::new_with_store(store.clone())));
+    let authority = || {
+        Arc::new(Authority::from(LocalAuthority::new_with_store(
+            store.clone(),
+        )))
+    };
 
     // First boot: resolve the allowed-users set from the Authority, mirroring how the adapter
     // binary seeds the `allowed_users` key on startup.

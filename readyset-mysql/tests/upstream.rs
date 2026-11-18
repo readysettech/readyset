@@ -163,7 +163,10 @@ async fn connect_reuses_startup_connection_settings() {
     assert!(system_props().max_allowed_packet.is_some());
 
     let mut upstream = connect().await;
-    let QueryResult::ReadResult { stream: ReadResultStream::Text(mut rows), .. } = upstream
+    let QueryResult::ReadResult {
+        stream: ReadResultStream::Text(mut rows),
+        ..
+    } = upstream
         .query("SHOW SESSION STATUS LIKE 'Com_select'")
         .await
         .unwrap()

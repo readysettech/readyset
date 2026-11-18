@@ -1,12 +1,11 @@
 use std::time::Duration;
 
+use readyset_sql::Dialect;
 use readyset_sql::ast::{
     CacheInner, CacheType, EvictionPolicy, ReadysetHintDirective, SqlQuery, TrxCachePolicy,
 };
-use readyset_sql::Dialect;
 use readyset_sql_parsing::{
-    ParsingPreset, parse_hint_directive, parse_query, parse_query_with_config,
-    parse_shallow_query,
+    ParsingPreset, parse_hint_directive, parse_query, parse_query_with_config, parse_shallow_query,
 };
 
 #[test]
@@ -24,9 +23,8 @@ fn parse_hint_extracts_create_cache_directive() {
 
 #[test]
 fn parse_hint_returns_none_for_no_hint() {
-    let (_, directive) =
-        parse_shallow_query(Dialect::MySQL, "SELECT * FROM users WHERE id = 1")
-            .expect("should parse");
+    let (_, directive) = parse_shallow_query(Dialect::MySQL, "SELECT * FROM users WHERE id = 1")
+        .expect("should parse");
     assert!(directive.is_none());
 }
 
@@ -39,11 +37,9 @@ fn query_id_stable_with_and_without_hint() {
     .expect("should parse hinted query");
     assert!(directive.is_some());
 
-    let (without_hint, directive) = parse_shallow_query(
-        Dialect::MySQL,
-        "SELECT id, name FROM users WHERE id = 1",
-    )
-    .expect("should parse non-hinted query");
+    let (without_hint, directive) =
+        parse_shallow_query(Dialect::MySQL, "SELECT id, name FROM users WHERE id = 1")
+            .expect("should parse non-hinted query");
     assert!(directive.is_none());
 
     // The hint-stripped query should be identical to the non-hinted query.
@@ -82,11 +78,9 @@ fn parse_hint_postgresql_dialect() {
     )
     .expect("should parse hinted postgres query");
 
-    let (without_hint, _) = parse_shallow_query(
-        Dialect::PostgreSQL,
-        "SELECT id FROM users WHERE id = $1",
-    )
-    .expect("should parse non-hinted postgres query");
+    let (without_hint, _) =
+        parse_shallow_query(Dialect::PostgreSQL, "SELECT id FROM users WHERE id = $1")
+            .expect("should parse non-hinted postgres query");
 
     assert_eq!(with_hint, without_hint);
 }
@@ -106,8 +100,8 @@ fn malformed_hint_still_returns_valid_shallow_query() {
     );
 
     // The returned query should match the hint-stripped version.
-    let (plain_query, _) = parse_shallow_query(Dialect::MySQL, "SELECT RAND()")
-        .expect("should parse plain query");
+    let (plain_query, _) =
+        parse_shallow_query(Dialect::MySQL, "SELECT RAND()").expect("should parse plain query");
     assert_eq!(
         query, plain_query,
         "Hint-stripped query should equal the plain query"
@@ -155,11 +149,8 @@ fn uppercase_hint_prefix_recognized() {
         "Uppercase RS prefix should be recognized"
     );
 
-    let (plain, _) = parse_shallow_query(
-        Dialect::MySQL,
-        "SELECT id FROM users WHERE id = 1",
-    )
-    .expect("should parse plain query");
+    let (plain, _) = parse_shallow_query(Dialect::MySQL, "SELECT id FROM users WHERE id = 1")
+        .expect("should parse plain query");
     assert_eq!(
         with_hint, plain,
         "Uppercase-hinted query should equal the plain query"
@@ -180,11 +171,8 @@ fn non_rs_hint_also_stripped() {
         "Non-rs hint should not produce a directive"
     );
 
-    let (plain, _) = parse_shallow_query(
-        Dialect::MySQL,
-        "SELECT id FROM users WHERE id = 1",
-    )
-    .expect("should parse plain query");
+    let (plain, _) = parse_shallow_query(Dialect::MySQL, "SELECT id FROM users WHERE id = 1")
+        .expect("should parse plain query");
     assert_eq!(
         query, plain,
         "Non-rs hint should be stripped, matching the plain query"
@@ -212,10 +200,7 @@ fn mixed_rs_and_non_rs_hints_all_stripped() {
 
     let (plain, _) =
         parse_shallow_query(Dialect::MySQL, "SELECT RAND()").expect("should parse plain query");
-    assert_eq!(
-        query, plain,
-        "Both rs and non-rs hints should be stripped"
-    );
+    assert_eq!(query, plain, "Both rs and non-rs hints should be stripped");
     assert_eq!(
         format!("{query}"),
         format!("{plain}"),
@@ -263,11 +248,9 @@ fn nested_union_hint_stripped() {
         "Hint directive should be extracted from nested UNION"
     );
 
-    let (without_hint, _) = parse_shallow_query(
-        Dialect::MySQL,
-        "SELECT 1 UNION SELECT 2 UNION SELECT 3",
-    )
-    .expect("should parse plain nested UNION");
+    let (without_hint, _) =
+        parse_shallow_query(Dialect::MySQL, "SELECT 1 UNION SELECT 2 UNION SELECT 3")
+            .expect("should parse plain nested UNION");
     assert_eq!(
         with_hint, without_hint,
         "Nested UNION with hint should equal the plain version"
@@ -389,9 +372,11 @@ fn parse_create_cache_hint_rejects_deep() {
 
 #[test]
 fn parse_create_cache_hint_ttl() {
-    let result =
-        parse_hint_directive(Dialect::MySQL, "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS")
-            .expect("should parse");
+    let result = parse_hint_directive(
+        Dialect::MySQL,
+        "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS",
+    )
+    .expect("should parse");
     let Some(ReadysetHintDirective::CreateCache(opts)) = result else {
         panic!("Expected CreateCache directive");
     };
@@ -405,9 +390,11 @@ fn parse_create_cache_hint_ttl() {
 
 #[test]
 fn parse_create_cache_hint_ttl_refresh() {
-    let result =
-        parse_hint_directive(Dialect::MySQL, "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS REFRESH 60 SECONDS")
-            .expect("should parse");
+    let result = parse_hint_directive(
+        Dialect::MySQL,
+        "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS REFRESH 60 SECONDS",
+    )
+    .expect("should parse");
     let Some(ReadysetHintDirective::CreateCache(opts)) = result else {
         panic!("Expected CreateCache directive");
     };
@@ -423,7 +410,8 @@ fn parse_create_cache_hint_ttl_refresh() {
 
 #[test]
 fn parse_create_cache_hint_always() {
-    let result = parse_hint_directive(Dialect::MySQL, "CREATE SHALLOW CACHE ALWAYS").expect("should parse");
+    let result =
+        parse_hint_directive(Dialect::MySQL, "CREATE SHALLOW CACHE ALWAYS").expect("should parse");
     let Some(ReadysetHintDirective::CreateCache(opts)) = result else {
         panic!("Expected CreateCache directive");
     };
@@ -477,9 +465,11 @@ fn parse_create_cache_hint_always_and_until_write_rejected() {
 
 #[test]
 fn parse_create_cache_hint_case_insensitive() {
-    let result =
-        parse_hint_directive(Dialect::MySQL, "create shallow cache policy ttl 100 seconds")
-            .expect("should parse");
+    let result = parse_hint_directive(
+        Dialect::MySQL,
+        "create shallow cache policy ttl 100 seconds",
+    )
+    .expect("should parse");
     let Some(ReadysetHintDirective::CreateCache(opts)) = result else {
         panic!("Expected CreateCache directive");
     };
@@ -499,11 +489,8 @@ fn parse_unknown_directive() {
 
 #[test]
 fn parse_create_cache_hint_with_clause_flags() {
-    let result = parse_hint_directive(
-        Dialect::MySQL,
-        "CREATE CACHE WITH (ALWAYS, CONCURRENTLY)",
-    )
-    .expect("should parse");
+    let result = parse_hint_directive(Dialect::MySQL, "CREATE CACHE WITH (ALWAYS, CONCURRENTLY)")
+        .expect("should parse");
     let Some(ReadysetHintDirective::CreateCache(opts)) = result else {
         panic!("Expected CreateCache directive");
     };
@@ -538,7 +525,8 @@ fn parse_create_cache_hint_with_clause_shallow_options() {
 fn parse_create_cache_hint_with_clause_empty_allowed() {
     // `WITH ()` parses as "no options", equivalent to the bare form (no clause), so SQL
     // generators can emit `WITH (<options>)` without special-casing zero options.
-    let result = parse_hint_directive(Dialect::MySQL, "CREATE CACHE WITH ()").expect("should parse");
+    let result =
+        parse_hint_directive(Dialect::MySQL, "CREATE CACHE WITH ()").expect("should parse");
     let Some(ReadysetHintDirective::CreateCache(opts)) = result else {
         panic!("Expected CreateCache directive");
     };
@@ -595,9 +583,11 @@ fn parse_create_cache_hint_adaptive_on_deep_rejected() {
 
 #[test]
 fn parse_create_cache_hint_topk_buffer_multiplier() {
-    let result =
-        parse_hint_directive(Dialect::MySQL, "CREATE CACHE WITH (TOPK_BUFFER_MULTIPLIER = 4)")
-            .expect("should parse");
+    let result = parse_hint_directive(
+        Dialect::MySQL,
+        "CREATE CACHE WITH (TOPK_BUFFER_MULTIPLIER = 4)",
+    )
+    .expect("should parse");
     let Some(ReadysetHintDirective::CreateCache(opts)) = result else {
         panic!("Expected CreateCache directive");
     };
@@ -606,9 +596,11 @@ fn parse_create_cache_hint_topk_buffer_multiplier() {
 
 #[test]
 fn parse_create_cache_hint_topk_buffer_multiplier_zero_allowed() {
-    let result =
-        parse_hint_directive(Dialect::MySQL, "CREATE CACHE WITH (TOPK_BUFFER_MULTIPLIER = 0)")
-            .expect("should parse");
+    let result = parse_hint_directive(
+        Dialect::MySQL,
+        "CREATE CACHE WITH (TOPK_BUFFER_MULTIPLIER = 0)",
+    )
+    .expect("should parse");
     let Some(ReadysetHintDirective::CreateCache(opts)) = result else {
         panic!("Expected CreateCache directive");
     };
@@ -756,30 +748,36 @@ fn parse_skip_cache_hint_case_insensitive() {
 
 #[test]
 fn parse_skip_cache_hint_with_extra_spaces() {
-    let result =
-        parse_hint_directive(Dialect::MySQL, "  SKIP   CACHE  ").expect("should parse");
+    let result = parse_hint_directive(Dialect::MySQL, "  SKIP   CACHE  ").expect("should parse");
     assert_eq!(result, Some(ReadysetHintDirective::SkipCache));
 }
 
 #[test]
 fn parse_skip_cache_hint_trailing_garbage() {
     let result = parse_hint_directive(Dialect::MySQL, "SKIP CACHE SOMETHING");
-    assert!(result.is_err(), "SKIP CACHE with trailing tokens should error");
+    assert!(
+        result.is_err(),
+        "SKIP CACHE with trailing tokens should error"
+    );
 }
 
 #[test]
 fn parse_create_skip_cache_is_not_skip_cache() {
     // "CREATE SKIP CACHE" is invalid — it should not be parsed as SkipCache.
-    let result =
-        parse_hint_directive(Dialect::MySQL, "CREATE SKIP CACHE");
-    assert!(result.is_err(), "CREATE SKIP CACHE should be unrecognized, not SkipCache");
+    let result = parse_hint_directive(Dialect::MySQL, "CREATE SKIP CACHE");
+    assert!(
+        result.is_err(),
+        "CREATE SKIP CACHE should be unrecognized, not SkipCache"
+    );
 }
 
 #[test]
 fn parse_skip_without_cache_is_unrecognized() {
-    let result =
-        parse_hint_directive(Dialect::MySQL, "SKIP SOMETHING").expect("should parse");
-    assert!(result.is_none(), "SKIP without CACHE should be unrecognized");
+    let result = parse_hint_directive(Dialect::MySQL, "SKIP SOMETHING").expect("should parse");
+    assert!(
+        result.is_none(),
+        "SKIP without CACHE should be unrecognized"
+    );
 }
 
 #[test]
@@ -792,12 +790,12 @@ fn parse_skip_cache_in_select() {
     assert_eq!(directive, Some(ReadysetHintDirective::SkipCache));
 
     // The hint should be stripped, producing the same query as without the hint.
-    let (plain, _) = parse_shallow_query(
-        Dialect::MySQL,
-        "SELECT * FROM users WHERE id = 1",
-    )
-    .expect("should parse plain query");
-    assert_eq!(query, plain, "SKIP CACHE hint should be stripped from query");
+    let (plain, _) = parse_shallow_query(Dialect::MySQL, "SELECT * FROM users WHERE id = 1")
+        .expect("should parse plain query");
+    assert_eq!(
+        query, plain,
+        "SKIP CACHE hint should be stripped from query"
+    );
 }
 
 #[test]
@@ -822,7 +820,10 @@ fn parse_empty_hint() {
 
 #[test]
 fn parse_malformed_ttl() {
-    let result = parse_hint_directive(Dialect::MySQL, "CREATE SHALLOW CACHE POLICY TTL abc SECONDS");
+    let result = parse_hint_directive(
+        Dialect::MySQL,
+        "CREATE SHALLOW CACHE POLICY TTL abc SECONDS",
+    );
     assert!(result.is_err());
 }
 
@@ -835,9 +836,11 @@ fn parse_refresh_without_ttl() {
 
 #[test]
 fn parse_hint_with_extra_spaces() {
-    let result =
-        parse_hint_directive(Dialect::MySQL, "  CREATE   SHALLOW   CACHE   POLICY   TTL   200   SECONDS  ")
-            .expect("should parse");
+    let result = parse_hint_directive(
+        Dialect::MySQL,
+        "  CREATE   SHALLOW   CACHE   POLICY   TTL   200   SECONDS  ",
+    )
+    .expect("should parse");
     let Some(ReadysetHintDirective::CreateCache(opts)) = result else {
         panic!("Expected CreateCache directive");
     };
@@ -852,9 +855,11 @@ fn parse_hint_with_extra_spaces() {
 #[test]
 fn parse_hint_ddl_syntax_also_works() {
     // Full DDL syntax should also work in hints for consistency
-    let result =
-        parse_hint_directive(Dialect::MySQL, "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS REFRESH 60 SECONDS")
-            .expect("should parse");
+    let result = parse_hint_directive(
+        Dialect::MySQL,
+        "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS REFRESH 60 SECONDS",
+    )
+    .expect("should parse");
     let Some(ReadysetHintDirective::CreateCache(opts)) = result else {
         panic!("Expected CreateCache directive");
     };
@@ -912,9 +917,8 @@ fn parse_create_cache_hint_mixed_units() {
 
 #[test]
 fn parse_create_cache_hint_coalesce_milliseconds() {
-    let result =
-        parse_hint_directive(Dialect::MySQL, "CREATE SHALLOW CACHE COALESCE 250 MS")
-            .expect("should parse");
+    let result = parse_hint_directive(Dialect::MySQL, "CREATE SHALLOW CACHE COALESCE 250 MS")
+        .expect("should parse");
     let Some(ReadysetHintDirective::CreateCache(opts)) = result else {
         panic!("Expected CreateCache directive");
     };
@@ -936,8 +940,7 @@ fn parse_refresh_not_less_than_ttl_with_mixed_units() {
 
 #[test]
 fn parse_unknown_duration_unit_fails() {
-    let result =
-        parse_hint_directive(Dialect::MySQL, "CREATE SHALLOW CACHE POLICY TTL 10 MINUTES");
+    let result = parse_hint_directive(Dialect::MySQL, "CREATE SHALLOW CACHE POLICY TTL 10 MINUTES");
     assert!(result.is_err(), "unknown unit should fail");
 }
 
@@ -1120,9 +1123,8 @@ fn pg_malformed_hint_still_returns_valid_shallow_query() {
     .expect("should parse despite malformed hint");
     assert!(directive.is_none());
 
-    let (plain, _) =
-        parse_shallow_query(Dialect::PostgreSQL, "SELECT id FROM t WHERE id = $1")
-            .expect("should parse plain query");
+    let (plain, _) = parse_shallow_query(Dialect::PostgreSQL, "SELECT id FROM t WHERE id = $1")
+        .expect("should parse plain query");
     assert_eq!(query, plain);
 }
 

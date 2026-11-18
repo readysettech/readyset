@@ -1,8 +1,8 @@
 use mysql_async::prelude::Queryable;
 use readyset_adapter::backend::MigrationMode;
 use readyset_adapter::query_status_cache::MigrationStyle;
-use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
 use readyset_client_test_helpers::TestBuilder;
+use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
 use readyset_util::eventually;
 use test_utils::{tags, upstream};
 
@@ -82,7 +82,10 @@ async fn add_table_makes_query_cacheable() {
     let err = rs_conn
         .query_drop("CREATE CACHE FROM SELECT val FROM t2 WHERE id = ?")
         .await;
-    assert!(err.is_err(), "CREATE CACHE should fail for non-replicated t2");
+    assert!(
+        err.is_err(),
+        "CREATE CACHE should fail for non-replicated t2"
+    );
 
     // Now make t2 replicated via ALTER READYSET ADD TABLES.
     rs_conn

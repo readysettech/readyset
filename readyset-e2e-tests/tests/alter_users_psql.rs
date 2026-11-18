@@ -3,17 +3,15 @@
 
 use std::sync::Arc;
 
-use readyset_adapter::backend::AllowedUsers;
 use readyset_adapter::BackendBuilder;
-use readyset_client::consensus::{
-    AllowedUsersMap, Authority, LocalAuthority, LocalAuthorityStore,
-};
+use readyset_adapter::backend::AllowedUsers;
+use readyset_client::consensus::{AllowedUsersMap, Authority, LocalAuthority, LocalAuthorityStore};
+use readyset_client_test_helpers::TestShutdownSender;
 use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter};
 use readyset_client_test_helpers::{Adapter, TestBuilder, derive_test_name};
 use readyset_server::Handle;
 use readyset_sql_parsing::ParsingPreset;
 use readyset_tracing::init_test_logging;
-use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 use tokio::test;
 use tokio_postgres::{Config, NoTls, SimpleQueryMessage};
@@ -79,7 +77,9 @@ async fn proxy_with_users(
 
 fn client_config(rs_config: &Config, test_name: &str, user: &str, password: &str) -> Config {
     let mut cfg = rs_config.clone();
-    cfg.dbname(test_name).user(user).password(password.as_bytes());
+    cfg.dbname(test_name)
+        .user(user)
+        .password(password.as_bytes());
     cfg
 }
 
@@ -98,9 +98,13 @@ async fn e2e_add_user_then_connect() {
     let (rs_config, _handle, shutdown_tx) =
         proxy_with_users(empty_authority(), &test_name, users).await;
 
-    let admin =
-        psql_helpers::connect(client_config(&rs_config, &test_name, &admin_user, &admin_password))
-            .await;
+    let admin = psql_helpers::connect(client_config(
+        &rs_config,
+        &test_name,
+        &admin_user,
+        &admin_password,
+    ))
+    .await;
     admin
         .simple_query(&format!(
             "ALTER READYSET ADD USER '{TEST_USER}' PASSWORD 'secret'"
@@ -137,9 +141,13 @@ async fn e2e_drop_user_blocks_connect() {
     let (rs_config, _handle, shutdown_tx) =
         proxy_with_users(empty_authority(), &test_name, users).await;
 
-    let admin =
-        psql_helpers::connect(client_config(&rs_config, &test_name, &admin_user, &admin_password))
-            .await;
+    let admin = psql_helpers::connect(client_config(
+        &rs_config,
+        &test_name,
+        &admin_user,
+        &admin_password,
+    ))
+    .await;
     admin
         .simple_query(&format!(
             "ALTER READYSET ADD USER '{TEST_USER}' PASSWORD 'secret'"
@@ -180,9 +188,13 @@ async fn e2e_readyset_users_vrel() {
     let (rs_config, _handle, shutdown_tx) =
         proxy_with_users(empty_authority(), &test_name, users).await;
 
-    let admin =
-        psql_helpers::connect(client_config(&rs_config, &test_name, &admin_user, &admin_password))
-            .await;
+    let admin = psql_helpers::connect(client_config(
+        &rs_config,
+        &test_name,
+        &admin_user,
+        &admin_password,
+    ))
+    .await;
     admin
         .simple_query(&format!(
             "ALTER READYSET ADD USER '{TEST_USER}' PASSWORD 'secret'"
@@ -223,9 +235,13 @@ async fn e2e_rotation_clauses_rejected() {
     let (rs_config, _handle, shutdown_tx) =
         proxy_with_users(empty_authority(), &test_name, users).await;
 
-    let admin =
-        psql_helpers::connect(client_config(&rs_config, &test_name, &admin_user, &admin_password))
-            .await;
+    let admin = psql_helpers::connect(client_config(
+        &rs_config,
+        &test_name,
+        &admin_user,
+        &admin_password,
+    ))
+    .await;
     admin
         .simple_query(&format!(
             "ALTER READYSET ADD USER '{TEST_USER}' PASSWORD 'secret'"
@@ -240,7 +256,10 @@ async fn e2e_rotation_clauses_rejected() {
         .await
         .expect_err("RETAIN CURRENT PASSWORD must be rejected");
     let msg = err.as_db_error().expect("expected db error").message();
-    assert!(msg.contains("RETAIN CURRENT PASSWORD"), "unexpected error: {msg}");
+    assert!(
+        msg.contains("RETAIN CURRENT PASSWORD"),
+        "unexpected error: {msg}"
+    );
 
     let err = admin
         .simple_query(&format!(
@@ -249,7 +268,10 @@ async fn e2e_rotation_clauses_rejected() {
         .await
         .expect_err("DISCARD OLD PASSWORD must be rejected");
     let msg = err.as_db_error().expect("expected db error").message();
-    assert!(msg.contains("DISCARD OLD PASSWORD"), "unexpected error: {msg}");
+    assert!(
+        msg.contains("DISCARD OLD PASSWORD"),
+        "unexpected error: {msg}"
+    );
 
     admin
         .simple_query(&format!(

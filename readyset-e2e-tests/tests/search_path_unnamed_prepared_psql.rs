@@ -22,12 +22,12 @@ use postgres_protocol::IsNull;
 use postgres_protocol::message::{backend, frontend};
 use readyset_adapter::backend::{BackendBuilder, MigrationMode};
 use readyset_client_metrics::QueryDestination;
+use readyset_client_test_helpers::TestShutdownSender;
 use readyset_client_test_helpers::{
     Adapter, TestBuilder, derive_test_name, psql_helpers::PostgreSQLAdapter,
 };
 use readyset_server::Handle;
 use readyset_tracing::init_test_logging;
-use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -66,7 +66,11 @@ impl RawPgConn {
             if let Some(msg) = backend::Message::parse(&mut self.read_buf).expect("parse message") {
                 return msg;
             }
-            let n = self.stream.read_buf(&mut self.read_buf).await.expect("read");
+            let n = self
+                .stream
+                .read_buf(&mut self.read_buf)
+                .await
+                .expect("read");
             assert!(n != 0, "server closed connection unexpectedly");
         }
     }
@@ -115,7 +119,8 @@ impl RawPgConn {
             .next()
             .and_then(|cols| cols.into_iter().next())
             .expect("EXPLAIN LAST STATEMENT row");
-        dest.parse::<QueryDestination>().expect("valid query destination")
+        dest.parse::<QueryDestination>()
+            .expect("valid query destination")
     }
 
     /// Parse/Bind/Execute `query` as an unnamed prepared statement with a single
@@ -179,7 +184,10 @@ fn columns(row: &backend::DataRowBody) -> Vec<String> {
 
 /// Decode the first column of a `DataRow` as UTF-8.
 fn first_column(row: &backend::DataRowBody) -> String {
-    columns(row).into_iter().next().expect("data row has a column")
+    columns(row)
+        .into_iter()
+        .next()
+        .expect("data row has a column")
 }
 
 fn error_text(err: &backend::ErrorResponseBody) -> String {
@@ -206,9 +214,10 @@ async fn seed_upstream(test_name: &str, stmts: &[&str]) {
 
 /// Build a Readyset PostgreSQL backend replicating `test_name` and connect a raw
 /// pgwire client to it. The returned handles keep the server alive for the test.
-async fn connect_backend(test_name: &str) -> (RawPgConn, Handle, TestShutdownSender<PostgreSQLAdapter>) {
-    let backend_builder = BackendBuilder::default()
-        .require_authentication(false);
+async fn connect_backend(
+    test_name: &str,
+) -> (RawPgConn, Handle, TestShutdownSender<PostgreSQLAdapter>) {
+    let backend_builder = BackendBuilder::default().require_authentication(false);
 
     let (rs_opts, handle, shutdown_tx) = TestBuilder::new(backend_builder)
         .recreate_database(false)
@@ -255,7 +264,8 @@ async fn unnamed_prepared_reresolves_after_set_search_path() {
 
     // Register the shallow cache while search_path resolves `items` to schema_a,
     // so the cache's query id carries the schema_a context.
-    conn.simple_query("SET search_path = schema_a, public").await;
+    conn.simple_query("SET search_path = schema_a, public")
+        .await;
     conn.simple_query(
         "CREATE SHALLOW CACHE POLICY TTL 60 SECONDS \
          FROM SELECT label FROM items WHERE 1 = $1 ORDER BY id",
@@ -277,7 +287,8 @@ async fn unnamed_prepared_reresolves_after_set_search_path() {
         QueryDestination::ReadysetShallow(_)
     );
 
-    conn.simple_query("SET search_path = schema_b, public").await;
+    conn.simple_query("SET search_path = schema_b, public")
+        .await;
     let rows_b = conn.unnamed_query(query, "1").await;
     assert_eq!(
         rows_b,
@@ -324,7 +335,10 @@ async fn unnamed_prepared_recovers_cache_after_transaction() {
     conn.simple_query("BEGIN").await;
     let rows = conn.unnamed_query(query, "1").await;
     assert_eq!(rows, vec!["0"], "in-transaction rows");
-    assert_eq!(conn.last_query_destination().await, QueryDestination::Upstream);
+    assert_eq!(
+        conn.last_query_destination().await,
+        QueryDestination::Upstream
+    );
     conn.simple_query("COMMIT").await;
 
     // After COMMIT the connection is transaction-free. The first read re-plans and

@@ -1,7 +1,7 @@
 use std::assert_matches;
 
-use mysql_async::prelude::Queryable;
 use mysql_async::Row;
+use mysql_async::prelude::Queryable;
 use tokio::test;
 use tokio_postgres::SimpleQueryMessage;
 
@@ -59,19 +59,13 @@ async fn cache_mode_shallow() {
         .await
         .unwrap();
 
-    readyset
-        .query_drop("SELECT a FROM foo")
-        .await
-        .unwrap();
+    readyset.query_drop("SELECT a FROM foo").await.unwrap();
     assert_matches!(
         last_query_info(&mut readyset).await.destination,
         QueryDestination::ReadysetThenUpstream(_)
     );
 
-    readyset
-        .query_drop("SELECT a FROM foo")
-        .await
-        .unwrap();
+    readyset.query_drop("SELECT a FROM foo").await.unwrap();
     assert_matches!(
         last_query_info(&mut readyset).await.destination,
         QueryDestination::ReadysetShallow(_)
@@ -123,10 +117,7 @@ async fn cache_mode_deep() {
             .is_ok()
     };
 
-    readyset
-        .query_drop("SELECT a FROM foo")
-        .await
-        .unwrap();
+    readyset.query_drop("SELECT a FROM foo").await.unwrap();
     assert_matches!(
         last_query_info(&mut readyset).await.destination,
         QueryDestination::Readyset(..)
@@ -241,20 +232,14 @@ async fn cache_mode_shallow_auto_create_in_request_path() {
     // cache because we are in MigrationMode::InRequestPath with
     // CacheMode::Shallow. First execution is a miss and populates the
     // cache via upstream.
-    readyset
-        .query_drop("SELECT a FROM foo")
-        .await
-        .unwrap();
+    readyset.query_drop("SELECT a FROM foo").await.unwrap();
     assert_matches!(
         last_query_info(&mut readyset).await.destination,
         QueryDestination::ReadysetThenUpstream(_)
     );
 
     // Second execution should be served from the auto-created shallow cache.
-    readyset
-        .query_drop("SELECT a FROM foo")
-        .await
-        .unwrap();
+    readyset.query_drop("SELECT a FROM foo").await.unwrap();
     assert_matches!(
         last_query_info(&mut readyset).await.destination,
         QueryDestination::ReadysetShallow(_)
@@ -387,7 +372,9 @@ async fn cache_mode_shallow_auto_create_skips_ineligible_pg() {
     let rs = psql_helpers::connect(rs_opts).await;
 
     rs.simple_query("CREATE TABLE foo (a INT)").await.unwrap();
-    rs.simple_query("INSERT INTO foo VALUES (42)").await.unwrap();
+    rs.simple_query("INSERT INTO foo VALUES (42)")
+        .await
+        .unwrap();
 
     // Control: a plain SELECT auto-caches on the second execution.
     rs.simple_query("SELECT a FROM foo").await.unwrap();
@@ -417,7 +404,9 @@ async fn cache_mode_shallow_auto_create_skips_ineligible_pg() {
         .unwrap()
         .into_iter()
         .filter_map(|message| match message {
-            SimpleQueryMessage::Row(row) => Some((row.get(1)?.to_string(), row.get(2)?.to_string())),
+            SimpleQueryMessage::Row(row) => {
+                Some((row.get(1)?.to_string(), row.get(2)?.to_string()))
+            }
             _ => None,
         })
         .collect();
@@ -513,7 +502,10 @@ async fn cache_mode_shallow_allowlist_alter_takes_effect() {
             .query_drop("SELECT a, NOW() FROM foo")
             .await
             .unwrap();
-        if matches!(last_query_info(&mut readyset).await.destination, QueryDestination::ReadysetShallow(_)) {
+        if matches!(
+            last_query_info(&mut readyset).await.destination,
+            QueryDestination::ReadysetShallow(_)
+        ) {
             cached = true;
             break;
         }
@@ -555,7 +547,10 @@ async fn cache_mode_shallow_allowlist_alter_takes_effect() {
         .query("SHOW SHALLOW CACHE ALLOWED FUNCTIONS")
         .await
         .unwrap();
-    assert!(funcs.is_empty(), "SHOW should be empty after DROP: {funcs:?}");
+    assert!(
+        funcs.is_empty(),
+        "SHOW should be empty after DROP: {funcs:?}"
+    );
 
     for _ in 0..3 {
         readyset
@@ -699,7 +694,9 @@ async fn cache_mode_shallow_allowlist_alter_takes_effect_pg() {
     let rs = psql_helpers::connect(rs_opts).await;
 
     rs.simple_query("CREATE TABLE foo (a INT)").await.unwrap();
-    rs.simple_query("INSERT INTO foo VALUES (42)").await.unwrap();
+    rs.simple_query("INSERT INTO foo VALUES (42)")
+        .await
+        .unwrap();
 
     // now() is ineligible until allowlisted.
     for _ in 0..2 {
@@ -718,7 +715,10 @@ async fn cache_mode_shallow_allowlist_alter_takes_effect_pg() {
     let mut cached = false;
     for _ in 0..5 {
         rs.simple_query("SELECT a, now() FROM foo").await.unwrap();
-        if matches!(psql_helpers::last_query_info(&rs).await.destination, QueryDestination::ReadysetShallow(_)) {
+        if matches!(
+            psql_helpers::last_query_info(&rs).await.destination,
+            QueryDestination::ReadysetShallow(_)
+        ) {
             cached = true;
             break;
         }
@@ -730,7 +730,9 @@ async fn cache_mode_shallow_allowlist_alter_takes_effect_pg() {
 
     // random() stays blocked: the allowlist is per-function, not per-category.
     for _ in 0..3 {
-        rs.simple_query("SELECT a, random() FROM foo").await.unwrap();
+        rs.simple_query("SELECT a, random() FROM foo")
+            .await
+            .unwrap();
         assert_eq!(
             psql_helpers::last_query_info(&rs).await.destination,
             QueryDestination::Upstream,
@@ -808,7 +810,9 @@ async fn create_cache_returns_deep_type() {
     assert_eq!(cache_type, "deep");
 
     let row: Row = readyset
-        .query_first("SELECT query_id, name, always FROM readyset.deep_caches WHERE name = 'my_deep'")
+        .query_first(
+            "SELECT query_id, name, always FROM readyset.deep_caches WHERE name = 'my_deep'",
+        )
         .await
         .unwrap()
         .expect("expected one row in readyset.deep_caches");

@@ -251,8 +251,12 @@ fn limit_offset_quoted_bounds() {
             format!("SELECT * FROM t LIMIT {value}"),
             format!("SELECT * FROM t LIMIT 5 OFFSET {value}"),
         ] {
-            parse_query_with_config(ParsingPreset::OnlySqlparser, Dialect::PostgreSQL, &statement)
-                .unwrap_or_else(|e| panic!("Failed to parse PostgreSQL query: {statement}: {e}"));
+            parse_query_with_config(
+                ParsingPreset::OnlySqlparser,
+                Dialect::PostgreSQL,
+                &statement,
+            )
+            .unwrap_or_else(|e| panic!("Failed to parse PostgreSQL query: {statement}: {e}"));
             check_parse_fails!(Dialect::MySQL, &statement, "");
         }
         check_parse_fails!(
@@ -878,12 +882,8 @@ fn explain_materialization_roundtrip() {
 
 #[test]
 fn values_clause_in_join() {
-    check_parse_postgres!(
-        "SELECT v.a FROM (VALUES (1), (2)) AS v(a) CROSS JOIN categories c"
-    );
-    check_parse_mysql!(
-        "SELECT v.a FROM (VALUES ROW(1), ROW(2)) AS v(a) CROSS JOIN categories c"
-    );
+    check_parse_postgres!("SELECT v.a FROM (VALUES (1), (2)) AS v(a) CROSS JOIN categories c");
+    check_parse_mysql!("SELECT v.a FROM (VALUES ROW(1), ROW(2)) AS v(a) CROSS JOIN categories c");
     check_parse_postgres!(
         "SELECT v.a, v.b FROM (VALUES (1, 'x'), (2, 'y')) AS v(a, b) CROSS JOIN categories c"
     );
@@ -894,12 +894,8 @@ fn values_clause_in_join() {
 
 #[test]
 fn values_clause_roundtrip() {
-    check_rt_postgres!(
-        "SELECT v.a FROM (VALUES (1), (2)) AS v(a) CROSS JOIN categories c"
-    );
-    check_rt_mysql!(
-        "SELECT v.a FROM (VALUES ROW(1), ROW(2)) AS v(a) CROSS JOIN categories c"
-    );
+    check_rt_postgres!("SELECT v.a FROM (VALUES (1), (2)) AS v(a) CROSS JOIN categories c");
+    check_rt_mysql!("SELECT v.a FROM (VALUES ROW(1), ROW(2)) AS v(a) CROSS JOIN categories c");
     check_rt_postgres!(
         "SELECT v.a, v.b FROM (VALUES (1, 'x'), (2, 'y')) AS v(a, b) CROSS JOIN categories c"
     );
@@ -1134,9 +1130,7 @@ fn create_shallow_cache_milliseconds() {
     check_parse_both!(
         "CREATE SHALLOW CACHE POLICY TTL 500 MILLISECONDS FROM SELECT * FROM t WHERE id = $1"
     );
-    check_parse_both!(
-        "CREATE SHALLOW CACHE POLICY TTL 500 MS FROM SELECT * FROM t WHERE id = $1"
-    );
+    check_parse_both!("CREATE SHALLOW CACHE POLICY TTL 500 MS FROM SELECT * FROM t WHERE id = $1");
     check_parse_both!(
         "CREATE SHALLOW CACHE POLICY TTL 500 MS REFRESH 100 MS FROM SELECT * FROM t WHERE id = $1"
     );
@@ -1144,9 +1138,7 @@ fn create_shallow_cache_milliseconds() {
     check_parse_both!(
         "CREATE SHALLOW CACHE POLICY TTL 5 SECONDS REFRESH 500 MS FROM SELECT * FROM t WHERE id = $1"
     );
-    check_parse_both!(
-        "CREATE SHALLOW CACHE COALESCE 250 MS FROM SELECT * FROM t WHERE id = $1"
-    );
+    check_parse_both!("CREATE SHALLOW CACHE COALESCE 250 MS FROM SELECT * FROM t WHERE id = $1");
 }
 
 #[test]
@@ -1796,10 +1788,7 @@ fn table_alias_with_column_renaming() {
         };
 
         let table_expr = select.tables.first().expect("Expected at least one table");
-        assert_eq!(
-            table_expr.alias.as_ref().map(|a| a.as_str()),
-            Some("u"),
-        );
+        assert_eq!(table_expr.alias.as_ref().map(|a| a.as_str()), Some("u"),);
 
         let aliases: Vec<&str> = table_expr
             .column_aliases

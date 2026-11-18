@@ -6,8 +6,8 @@
 use readyset_adapter::BackendBuilder;
 use readyset_client_test_helpers::TestBuilder;
 use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter};
-use tokio_postgres::{Client, SimpleQueryMessage};
 use test_utils::{tags, upstream};
+use tokio_postgres::{Client, SimpleQueryMessage};
 
 /// First column of the first row of a simple query.
 async fn scalar(conn: &Client, query: &str) -> String {

@@ -115,9 +115,7 @@ fn check_query(dialect: Dialect, sql: &str) -> Result<(), String> {
     let ast2 = parse_query_with_config(config, dialect, &displayed)
         .map_err(|e| format!("round-trip reparse failed: {e}\n  displayed: {displayed}"))?;
     if ast != ast2 {
-        return Err(format!(
-            "round-trip AST mismatch\n  displayed: {displayed}"
-        ));
+        return Err(format!("round-trip AST mismatch\n  displayed: {displayed}"));
     }
     Ok(())
 }

@@ -73,16 +73,24 @@ async fn chain_starts_upstream_transaction() {
     let (mut conn, mut upstream, _handle, shutdown_tx) = setup(&db).await;
 
     conn.query_drop("BEGIN").await.unwrap();
-    conn.query_drop("INSERT INTO t VALUES (2, 0)").await.unwrap();
+    conn.query_drop("INSERT INTO t VALUES (2, 0)")
+        .await
+        .unwrap();
     conn.query_drop("COMMIT AND CHAIN").await.unwrap();
-    conn.query_drop("INSERT INTO t VALUES (3, 0)").await.unwrap();
+    conn.query_drop("INSERT INTO t VALUES (3, 0)")
+        .await
+        .unwrap();
     conn.query_drop("ROLLBACK").await.unwrap();
     assert_eq!(inserted_ids(&mut upstream).await, [2]);
 
     conn.query_drop("BEGIN").await.unwrap();
-    conn.query_drop("INSERT INTO t VALUES (4, 0)").await.unwrap();
+    conn.query_drop("INSERT INTO t VALUES (4, 0)")
+        .await
+        .unwrap();
     conn.query_drop("ROLLBACK AND CHAIN").await.unwrap();
-    conn.query_drop("INSERT INTO t VALUES (5, 0)").await.unwrap();
+    conn.query_drop("INSERT INTO t VALUES (5, 0)")
+        .await
+        .unwrap();
     conn.query_drop("ROLLBACK").await.unwrap();
     assert_eq!(inserted_ids(&mut upstream).await, [2]);
 
@@ -100,9 +108,11 @@ async fn chain_reads_go_upstream() {
     let db = derive_test_name();
     let (mut conn, _upstream, _handle, shutdown_tx) = setup(&db).await;
 
-    conn.query_drop(format!("CREATE SHALLOW CACHE POLICY TTL 600 SECONDS FROM {QUERY}"))
-        .await
-        .unwrap();
+    conn.query_drop(format!(
+        "CREATE SHALLOW CACHE POLICY TTL 600 SECONDS FROM {QUERY}"
+    ))
+    .await
+    .unwrap();
     eventually! {
         matches!(destination(&mut conn, QUERY).await, QueryDestination::ReadysetShallow(_))
     }
@@ -110,7 +120,10 @@ async fn chain_reads_go_upstream() {
     for chain in ["COMMIT AND CHAIN", "ROLLBACK AND CHAIN"] {
         for prepared in [false, true] {
             conn.query_drop("BEGIN").await.unwrap();
-            assert_eq!(destination(&mut conn, QUERY).await, QueryDestination::Upstream);
+            assert_eq!(
+                destination(&mut conn, QUERY).await,
+                QueryDestination::Upstream
+            );
             if prepared {
                 conn.exec_drop(chain, ()).await.unwrap();
             } else {

@@ -3,17 +3,16 @@
 
 use std::collections::{HashMap, HashSet};
 use std::ops::RangeInclusive;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use mysql_async::prelude::Queryable;
 use rand::RngExt;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::{
-    derive_test_name,
-    mysql_helpers::{self, last_query_info, MySQLAdapter},
-    TestBuilder,
+    TestBuilder, derive_test_name,
+    mysql_helpers::{self, MySQLAdapter, last_query_info},
 };
 use readyset_tracing::init_test_logging;
 use readyset_util::eventually;
@@ -250,7 +249,12 @@ fn staleness_summary(samples: &[u64]) -> (u64, u64, u64, u64) {
     let mut v = samples.to_vec();
     v.sort_unstable();
     let mean = v.iter().sum::<u64>() / v.len() as u64;
-    (mean, v[v.len() / 2], v[v.len() * 95 / 100], *v.last().unwrap())
+    (
+        mean,
+        v[v.len() / 2],
+        v[v.len() * 95 / 100],
+        *v.last().unwrap(),
+    )
 }
 
 fn print_staleness_stats(
@@ -376,9 +380,7 @@ async fn adaptive_mixed_churn_differentiates_periods() {
     let periods = entry_periods(&mut readyset, &adaptive_id).await;
     assert_eq!(periods.len(), N_KEYS as usize);
     assert!(
-        periods
-            .values()
-            .all(|p| *p == Some(CONFIGURED_PERIOD_MS)),
+        periods.values().all(|p| *p == Some(CONFIGURED_PERIOD_MS)),
         "all entries should start at the configured period"
     );
 

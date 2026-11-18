@@ -5,8 +5,8 @@ use std::time::Duration;
 use tokio::test;
 use tokio_postgres::Client;
 
-use readyset_adapter::backend::AllowedUsers;
 use readyset_adapter::BackendBuilder;
+use readyset_adapter::backend::AllowedUsers;
 use readyset_client::CacheMode;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter, last_query_info};
@@ -166,7 +166,10 @@ async fn authenticated_upstream_uses_client_user() {
     .await;
 
     let mut user_cfg = rs_opts.clone();
-    user_cfg.dbname(&test_name).user("alice").password(b"secret");
+    user_cfg
+        .dbname(&test_name)
+        .user("alice")
+        .password(b"secret");
     let conn = psql_helpers::connect(user_cfg).await;
     let user: String = conn
         .query_one("SELECT current_user", &[])

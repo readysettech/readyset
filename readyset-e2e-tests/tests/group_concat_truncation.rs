@@ -36,9 +36,7 @@ async fn group_concat_truncation_matches_upstream() {
         .unwrap();
 
     // 200 rows x 9-char values + 199 commas = 1999 bytes, well over 1024.
-    let values: Vec<String> = (0..200)
-        .map(|i| format!("(1, 'val_{i:05}')"))
-        .collect();
+    let values: Vec<String> = (0..200).map(|i| format!("(1, 'val_{i:05}')")).collect();
     upstream_conn
         .query_drop(format!(
             "INSERT INTO gc_trunc (grp, val) VALUES {}",
@@ -49,8 +47,7 @@ async fn group_concat_truncation_matches_upstream() {
 
     // ORDER BY makes the concatenation order deterministic so we can compare
     // the exact truncated prefix between upstream and Readyset.
-    let query =
-        "SELECT GROUP_CONCAT(val ORDER BY val SEPARATOR ',') FROM gc_trunc WHERE grp = 1";
+    let query = "SELECT GROUP_CONCAT(val ORDER BY val SEPARATOR ',') FROM gc_trunc WHERE grp = 1";
 
     // Upstream MySQL truncates at group_concat_max_len (default 1024).
     let upstream_rows: Vec<Row> = upstream_conn.query(query).await.unwrap();

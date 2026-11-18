@@ -49,11 +49,11 @@ use proptest_stateful::{
 use readyset_client::SingleKeyEviction;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
+use readyset_client_test_helpers::TestShutdownSender;
 use readyset_data::{Collation, DfValue};
 use readyset_server::Handle;
 use readyset_util::arbitrary::arbitrary_collatable_string;
 use readyset_util::eventually;
-use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 
 static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);

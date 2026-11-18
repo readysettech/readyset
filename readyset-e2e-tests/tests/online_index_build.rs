@@ -11,8 +11,8 @@
 
 use std::time::Duration;
 
-use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter};
 use readyset_client_test_helpers::TestBuilder;
+use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter};
 use readyset_util::eventually;
 use test_utils::{tags, upstream};
 use tokio_postgres::SimpleQueryMessage;
@@ -167,14 +167,14 @@ async fn oib_happy_path_cache_serves_correct_data() {
 mod failpoint_tests {
     use std::time::Duration;
 
-    use fail::FailScenario;
-    use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter};
-    use readyset_client_test_helpers::TestBuilder;
-    use readyset_util::failpoints;
-    use readyset_client_test_helpers::TestShutdownSender;
-    use readyset_util::eventually;
-    use test_utils::{tags, upstream};
     use super::row_count;
+    use fail::FailScenario;
+    use readyset_client_test_helpers::TestBuilder;
+    use readyset_client_test_helpers::TestShutdownSender;
+    use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter};
+    use readyset_util::eventually;
+    use readyset_util::failpoints;
+    use test_utils::{tags, upstream};
 
     /// Shared test harness for OIB failpoint tests.
     ///
@@ -344,9 +344,7 @@ mod failpoint_tests {
         // The query should still work against upstream via fallback.
         let rows = harness
             .rs_conn
-            .simple_query(
-                "SELECT id, label FROM oib_fp_postscan WHERE category = 20 ORDER BY id",
-            )
+            .simple_query("SELECT id, label FROM oib_fp_postscan WHERE category = 20 ORDER BY id")
             .await
             .unwrap();
 
@@ -399,9 +397,7 @@ mod failpoint_tests {
         // The query should still work against upstream via fallback.
         let rows = harness
             .rs_conn
-            .simple_query(
-                "SELECT id, label FROM oib_fp_preact WHERE category = 30 ORDER BY id",
-            )
+            .simple_query("SELECT id, label FROM oib_fp_preact WHERE category = 30 ORDER BY id")
             .await
             .unwrap();
 
@@ -480,5 +476,4 @@ mod failpoint_tests {
 
         harness.teardown().await;
     }
-
 } // mod failpoint_tests

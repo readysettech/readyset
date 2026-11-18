@@ -14,17 +14,19 @@ use readyset_adapter::BackendBuilder;
 use readyset_client::status::CurrentStatus;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter};
+use readyset_client_test_helpers::TestShutdownSender;
 use readyset_client_test_helpers::{sleep, TestBuilder};
 use readyset_errors::ReadySetError;
 use readyset_server::Handle;
 use readyset_telemetry_reporter::{TelemetryEvent, TelemetryInitializer, TelemetryReporter};
-use readyset_client_test_helpers::TestShutdownSender;
 use readyset_util::{eventually, retry_with_exponential_backoff};
 use regex::Regex;
 use test_utils::skip_flaky_finder;
 use test_utils::{tags, upstream};
 
-async fn setup_with_mysql_flags<F>(set: F) -> (mysql_async::Opts, Handle, TestShutdownSender<MySQLAdapter>)
+async fn setup_with_mysql_flags<F>(
+    set: F,
+) -> (mysql_async::Opts, Handle, TestShutdownSender<MySQLAdapter>)
 where
     F: Fn(TestBuilder) -> TestBuilder,
 {
@@ -53,7 +55,12 @@ async fn setup() -> (mysql_async::Opts, Handle, TestShutdownSender<MySQLAdapter>
         .await
 }
 
-async fn setup_telemetry() -> (TelemetryReporter, mysql_async::Opts, Handle, TestShutdownSender<MySQLAdapter>) {
+async fn setup_telemetry() -> (
+    TelemetryReporter,
+    mysql_async::Opts,
+    Handle,
+    TestShutdownSender<MySQLAdapter>,
+) {
     let (sender, reporter) = TelemetryInitializer::test_init();
 
     let backend = BackendBuilder::new()
@@ -2495,8 +2502,7 @@ async fn timestamp_client_timezone_binary() {
         .await
         .unwrap();
 
-    let (opts, _handle, shutdown_tx) =
-        setup_with_mysql_flags(|b| b.recreate_database(false)).await;
+    let (opts, _handle, shutdown_tx) = setup_with_mysql_flags(|b| b.recreate_database(false)).await;
     let mut conn = Conn::new(opts).await.unwrap();
     sleep().await;
 
@@ -2552,8 +2558,7 @@ async fn timestamp_client_timezone_text() {
         .await
         .unwrap();
 
-    let (opts, _handle, shutdown_tx) =
-        setup_with_mysql_flags(|b| b.recreate_database(false)).await;
+    let (opts, _handle, shutdown_tx) = setup_with_mysql_flags(|b| b.recreate_database(false)).await;
     let mut conn = Conn::new(opts).await.unwrap();
     sleep().await;
 
@@ -2605,8 +2610,7 @@ async fn timestamp_client_timezone_system_reset() {
         .await
         .unwrap();
 
-    let (opts, _handle, shutdown_tx) =
-        setup_with_mysql_flags(|b| b.recreate_database(false)).await;
+    let (opts, _handle, shutdown_tx) = setup_with_mysql_flags(|b| b.recreate_database(false)).await;
     let mut conn = Conn::new(opts).await.unwrap();
     sleep().await;
 
@@ -2617,10 +2621,14 @@ async fn timestamp_client_timezone_system_reset() {
 
     // Set a fixed offset first, then reset to SYSTEM on both connections.
     for c in [&mut direct_mysql, &mut conn] {
-        c.query_drop("SET SESSION time_zone = '+05:00'").await.unwrap();
+        c.query_drop("SET SESSION time_zone = '+05:00'")
+            .await
+            .unwrap();
     }
     for c in [&mut direct_mysql, &mut conn] {
-        c.query_drop("SET SESSION time_zone = 'SYSTEM'").await.unwrap();
+        c.query_drop("SET SESSION time_zone = 'SYSTEM'")
+            .await
+            .unwrap();
     }
 
     eventually!(run_test: {
@@ -2660,8 +2668,7 @@ async fn timestamp_client_named_timezone_binary() {
         .await
         .unwrap();
 
-    let (opts, _handle, shutdown_tx) =
-        setup_with_mysql_flags(|b| b.recreate_database(false)).await;
+    let (opts, _handle, shutdown_tx) = setup_with_mysql_flags(|b| b.recreate_database(false)).await;
     let mut conn = Conn::new(opts).await.unwrap();
     sleep().await;
 
@@ -2717,8 +2724,7 @@ async fn timestamp_client_named_timezone_text() {
         .await
         .unwrap();
 
-    let (opts, _handle, shutdown_tx) =
-        setup_with_mysql_flags(|b| b.recreate_database(false)).await;
+    let (opts, _handle, shutdown_tx) = setup_with_mysql_flags(|b| b.recreate_database(false)).await;
     let mut conn = Conn::new(opts).await.unwrap();
     sleep().await;
 
@@ -2762,8 +2768,7 @@ async fn timestamp_client_named_timezone_text() {
 #[tags(serial)]
 #[upstream(mysql, modern)]
 async fn set_time_zone_non_utc_errors() {
-    let (opts, _handle, shutdown_tx) =
-        setup_with_mysql_flags(|b| b.recreate_database(false)).await;
+    let (opts, _handle, shutdown_tx) = setup_with_mysql_flags(|b| b.recreate_database(false)).await;
     let mut conn = Conn::new(opts).await.unwrap();
     sleep().await;
 

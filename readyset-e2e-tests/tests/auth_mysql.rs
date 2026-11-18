@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use mysql_async::prelude::Queryable;
 use mysql_srv::{AuthPlugin, CachingSha2Password, MysqlNativePassword};
-use readyset_adapter::backend::AllowedUsers;
 use readyset_adapter::BackendBuilder;
-use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
+use readyset_adapter::backend::AllowedUsers;
 use readyset_client_test_helpers::TestBuilder;
+use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
 use rsa::RsaPublicKey;
 use rsa::pkcs8::DecodePublicKey;
 use test_utils::{tags, upstream};
@@ -48,10 +48,9 @@ fn with_auth(rs_opts: mysql_async::Opts) -> mysql_async::Opts {
 async fn e2e_sha2_connect_via_readyset() {
     readyset_tracing::init_test_logging();
 
-    let (rs_opts, _handle, shutdown_tx) =
-        auth_test_builder(AuthPlugin::Sha2(CachingSha2Password))
-            .build::<MySQLAdapter>()
-            .await;
+    let (rs_opts, _handle, shutdown_tx) = auth_test_builder(AuthPlugin::Sha2(CachingSha2Password))
+        .build::<MySQLAdapter>()
+        .await;
 
     let mut conn = mysql_async::Conn::new(with_auth(rs_opts)).await.unwrap();
     let row: Option<(u32,)> = conn.query_first("SELECT 1").await.unwrap();
@@ -88,10 +87,9 @@ async fn e2e_native_connect_via_readyset() {
 async fn e2e_sha2_wrong_password() {
     readyset_tracing::init_test_logging();
 
-    let (rs_opts, _handle, shutdown_tx) =
-        auth_test_builder(AuthPlugin::Sha2(CachingSha2Password))
-            .build::<MySQLAdapter>()
-            .await;
+    let (rs_opts, _handle, shutdown_tx) = auth_test_builder(AuthPlugin::Sha2(CachingSha2Password))
+        .build::<MySQLAdapter>()
+        .await;
 
     let opts = mysql_async::OptsBuilder::from_opts(rs_opts)
         .user(Some(TEST_USER))
@@ -113,10 +111,9 @@ async fn e2e_sha2_wrong_password() {
 async fn e2e_show_rsa_public_key() {
     readyset_tracing::init_test_logging();
 
-    let (rs_opts, _handle, shutdown_tx) =
-        auth_test_builder(AuthPlugin::Sha2(CachingSha2Password))
-            .build::<MySQLAdapter>()
-            .await;
+    let (rs_opts, _handle, shutdown_tx) = auth_test_builder(AuthPlugin::Sha2(CachingSha2Password))
+        .build::<MySQLAdapter>()
+        .await;
 
     let mut conn = mysql_async::Conn::new(with_auth(rs_opts)).await.unwrap();
     let row: Option<(String,)> = conn
@@ -144,10 +141,9 @@ async fn e2e_sha2_prepopulated_cache_skips_full_auth() {
     readyset_tracing::init_test_logging();
     let _scenario = FailScenario::setup();
 
-    let (rs_opts, _handle, shutdown_tx) =
-        auth_test_builder(AuthPlugin::Sha2(CachingSha2Password))
-            .build::<MySQLAdapter>()
-            .await;
+    let (rs_opts, _handle, shutdown_tx) = auth_test_builder(AuthPlugin::Sha2(CachingSha2Password))
+        .build::<MySQLAdapter>()
+        .await;
     let opts = with_auth(rs_opts);
 
     // Panic if any connection ever reaches the full-auth branch.

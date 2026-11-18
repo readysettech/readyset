@@ -233,10 +233,7 @@ async fn array_agg_int_literal_type_postgres() {
     let upstream_conn = psql_helpers::connect(upstream_config).await;
 
     upstream_conn
-        .execute(
-            "CREATE TABLE agg_nums (id int, grp int, val int)",
-            &[],
-        )
+        .execute("CREATE TABLE agg_nums (id int, grp int, val int)", &[])
         .await
         .unwrap();
 

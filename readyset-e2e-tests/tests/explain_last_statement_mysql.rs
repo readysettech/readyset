@@ -28,7 +28,9 @@ async fn explain_last_statement_is_repeatable() {
     conn.query_drop("CREATE TABLE t (x INT)").await.unwrap();
     sleep().await;
 
-    conn.query_drop("INSERT INTO t (x) VALUES (1)").await.unwrap();
+    conn.query_drop("INSERT INTO t (x) VALUES (1)")
+        .await
+        .unwrap();
 
     let first = explain_last_statement(&mut conn).await;
     assert_eq!(first.destination, QueryDestination::Upstream);

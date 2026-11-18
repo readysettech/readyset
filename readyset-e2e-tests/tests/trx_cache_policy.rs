@@ -8,13 +8,13 @@ use std::assert_matches;
 use mysql_async::prelude::Queryable;
 use readyset_adapter::backend::BackendBuilder;
 use readyset_client_metrics::QueryDestination;
+use readyset_client_test_helpers::TestShutdownSender;
 use readyset_client_test_helpers::{
     TestBuilder, derive_test_name,
     mysql_helpers::{self, MySQLAdapter, last_query_info},
 };
 use readyset_server::{CacheMode, Handle};
 use readyset_tracing::init_test_logging;
-use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 use tokio::test;
 
@@ -193,7 +193,10 @@ async fn manual_until_write() {
         .await
         .unwrap()
         .expect("shallow_caches must surface the manual UNTIL WRITE cache");
-    assert!(until_write, "until_write must be true for UNTIL WRITE caches");
+    assert!(
+        until_write,
+        "until_write must be true for UNTIL WRITE caches"
+    );
     assert!(!always, "always must be false for UNTIL WRITE caches");
 
     // Same dance: serve from cache before the write, upstream after.

@@ -1,8 +1,6 @@
 //! Parse tests for the dual-password `ALTER READYSET MODIFY USER` forms.
 
-use readyset_sql::ast::{
-    AlterReadysetStatement, ModifyUserAction, ModifyUserStatement, SqlQuery,
-};
+use readyset_sql::ast::{AlterReadysetStatement, ModifyUserAction, ModifyUserStatement, SqlQuery};
 use readyset_sql::{Dialect, DialectDisplay};
 use readyset_sql_parsing::{ParsingPreset, parse_query_with_config};
 
@@ -39,7 +37,10 @@ fn modify_user_retain_current_password() {
 #[test]
 fn modify_user_discard_old_password() {
     for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
-        let q = parse(dialect, "ALTER READYSET MODIFY USER 'alice' DISCARD OLD PASSWORD");
+        let q = parse(
+            dialect,
+            "ALTER READYSET MODIFY USER 'alice' DISCARD OLD PASSWORD",
+        );
         assert_eq!(
             q,
             SqlQuery::AlterReadySet(AlterReadysetStatement::ModifyUser(ModifyUserStatement {
@@ -53,7 +54,10 @@ fn modify_user_discard_old_password() {
 #[test]
 fn modify_user_plain_password() {
     for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
-        let q = parse(dialect, "ALTER READYSET MODIFY USER 'alice' PASSWORD 'newsecret'");
+        let q = parse(
+            dialect,
+            "ALTER READYSET MODIFY USER 'alice' PASSWORD 'newsecret'",
+        );
         assert_eq!(
             q,
             SqlQuery::AlterReadySet(AlterReadysetStatement::ModifyUser(ModifyUserStatement {
@@ -91,8 +95,14 @@ fn roundtrips_through_display() {
 fn rejects_malformed_statements() {
     for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
         // DISCARD requires both OLD and PASSWORD.
-        assert!(rejects(dialect, "ALTER READYSET MODIFY USER 'alice' DISCARD PASSWORD"));
-        assert!(rejects(dialect, "ALTER READYSET MODIFY USER 'alice' DISCARD OLD"));
+        assert!(rejects(
+            dialect,
+            "ALTER READYSET MODIFY USER 'alice' DISCARD PASSWORD"
+        ));
+        assert!(rejects(
+            dialect,
+            "ALTER READYSET MODIFY USER 'alice' DISCARD OLD"
+        ));
         // A partial RETAIN clause leaves unconsumed tokens.
         assert!(rejects(
             dialect,

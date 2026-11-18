@@ -306,8 +306,20 @@ test_aggregation_type!(postgres, sum_int8, "sum(x)", SqlType::Int8);
 
 // Postgres has no varchar MIN/MAX: a varchar resolves to the text aggregate, which returns text.
 // A char keeps its own bpchar aggregate.
-test_aggregation_type!(postgres, max_varchar, "max(x)", SqlType::VarChar(Some(10)), ["'b'", "'a'"]);
-test_aggregation_type!(postgres, max_char, "max(x)", SqlType::Char(Some(3)), ["'b'", "'a'"]);
+test_aggregation_type!(
+    postgres,
+    max_varchar,
+    "max(x)",
+    SqlType::VarChar(Some(10)),
+    ["'b'", "'a'"]
+);
+test_aggregation_type!(
+    postgres,
+    max_char,
+    "max(x)",
+    SqlType::Char(Some(3)),
+    ["'b'", "'a'"]
+);
 
 test_aggregation_type!(postgres, count_bigint, "count(x)", SqlType::BigInt(None));
 test_aggregation_type!(postgres, count_text, "count(x)", SqlType::Text);
@@ -327,8 +339,20 @@ test_aggregation_type!(mysql, sum_decimal, "sum(x)", SqlType::Decimal(43, 16));
 test_aggregation_type!(mysql, sum_int, "sum(x)", SqlType::Int(None));
 test_aggregation_type!(mysql, sum_bigint, "sum(x)", SqlType::BigInt(None));
 
-test_aggregation_type!(mysql, sum_text, "sum(x)", SqlType::Text, ["'5'", "'hello'", "'3'"]);
-test_aggregation_type!(mysql, avg_text, "avg(x)", SqlType::Text, ["'5'", "'hello'", "'3'"]);
+test_aggregation_type!(
+    mysql,
+    sum_text,
+    "sum(x)",
+    SqlType::Text,
+    ["'5'", "'hello'", "'3'"]
+);
+test_aggregation_type!(
+    mysql,
+    avg_text,
+    "avg(x)",
+    SqlType::Text,
+    ["'5'", "'hello'", "'3'"]
+);
 
 test_aggregation_type!(mysql, count_bigint, "count(x)", SqlType::BigInt(None));
 test_aggregation_type!(mysql, count_text, "count(x)", SqlType::Text);
@@ -337,31 +361,133 @@ test_aggregation_type!(mysql, count_float, "count(x)", SqlType::Float);
 // --- Value-based AVG tests: verify output scale/precision matches upstream byte-for-byte ---
 
 // Postgres AVG on integer types — dynamic scale (~16 significant digits)
-test_aggregation_type!(postgres, avg_int_values, "avg(x)", SqlType::Int(None), ["5", "3"]);
-test_aggregation_type!(postgres, avg_bigint_values, "avg(x)", SqlType::BigInt(None), ["5", "3"]);
-test_aggregation_type!(postgres, avg_int2_values, "avg(x)", SqlType::Int2, ["5", "3"]);
-test_aggregation_type!(postgres, avg_int8_values, "avg(x)", SqlType::Int8, ["5", "3"]);
+test_aggregation_type!(
+    postgres,
+    avg_int_values,
+    "avg(x)",
+    SqlType::Int(None),
+    ["5", "3"]
+);
+test_aggregation_type!(
+    postgres,
+    avg_bigint_values,
+    "avg(x)",
+    SqlType::BigInt(None),
+    ["5", "3"]
+);
+test_aggregation_type!(
+    postgres,
+    avg_int2_values,
+    "avg(x)",
+    SqlType::Int2,
+    ["5", "3"]
+);
+test_aggregation_type!(
+    postgres,
+    avg_int8_values,
+    "avg(x)",
+    SqlType::Int8,
+    ["5", "3"]
+);
 // Larger magnitudes exercise the dynamic scale decrease
-test_aggregation_type!(postgres, avg_int_large, "avg(x)", SqlType::Int(None), ["50000", "30000"]);
-test_aggregation_type!(postgres, avg_bigint_large, "avg(x)", SqlType::BigInt(None), ["5000000000", "3000000000"]);
+test_aggregation_type!(
+    postgres,
+    avg_int_large,
+    "avg(x)",
+    SqlType::Int(None),
+    ["50000", "30000"]
+);
+test_aggregation_type!(
+    postgres,
+    avg_bigint_large,
+    "avg(x)",
+    SqlType::BigInt(None),
+    ["5000000000", "3000000000"]
+);
 // NUMERIC/DECIMAL with explicit scale
-test_aggregation_type!(postgres, avg_numeric_values, "avg(x)", SqlType::Numeric(None), ["5.5", "3.3"]);
-test_aggregation_type!(postgres, avg_numeric_prec_scale_values, "avg(x)", SqlType::Numeric(Some((10, Some(2)))), ["5.50", "3.30"]);
+test_aggregation_type!(
+    postgres,
+    avg_numeric_values,
+    "avg(x)",
+    SqlType::Numeric(None),
+    ["5.5", "3.3"]
+);
+test_aggregation_type!(
+    postgres,
+    avg_numeric_prec_scale_values,
+    "avg(x)",
+    SqlType::Numeric(Some((10, Some(2)))),
+    ["5.50", "3.30"]
+);
 
 // MySQL AVG on integer types — fixed scale (input_scale + 4)
-test_aggregation_type!(mysql, avg_int_values, "avg(x)", SqlType::Int(None), ["5", "3"]);
-test_aggregation_type!(mysql, avg_bigint_values, "avg(x)", SqlType::BigInt(None), ["5", "3"]);
-test_aggregation_type!(mysql, avg_decimal_values, "avg(x)", SqlType::Decimal(10, 2), ["5.50", "3.30"]);
+test_aggregation_type!(
+    mysql,
+    avg_int_values,
+    "avg(x)",
+    SqlType::Int(None),
+    ["5", "3"]
+);
+test_aggregation_type!(
+    mysql,
+    avg_bigint_values,
+    "avg(x)",
+    SqlType::BigInt(None),
+    ["5", "3"]
+);
+test_aggregation_type!(
+    mysql,
+    avg_decimal_values,
+    "avg(x)",
+    SqlType::Decimal(10, 2),
+    ["5.50", "3.30"]
+);
 
 // Postgres SUM on integer types — verifies return type (bigint for int, numeric for bigint)
-test_aggregation_type!(postgres, sum_int_values, "sum(x)", SqlType::Int(None), ["5", "3"]);
-test_aggregation_type!(postgres, sum_bigint_values, "sum(x)", SqlType::BigInt(None), ["5", "3"]);
-test_aggregation_type!(postgres, sum_numeric_values, "sum(x)", SqlType::Numeric(Some((10, Some(2)))), ["5.50", "3.30"]);
+test_aggregation_type!(
+    postgres,
+    sum_int_values,
+    "sum(x)",
+    SqlType::Int(None),
+    ["5", "3"]
+);
+test_aggregation_type!(
+    postgres,
+    sum_bigint_values,
+    "sum(x)",
+    SqlType::BigInt(None),
+    ["5", "3"]
+);
+test_aggregation_type!(
+    postgres,
+    sum_numeric_values,
+    "sum(x)",
+    SqlType::Numeric(Some((10, Some(2)))),
+    ["5.50", "3.30"]
+);
 
 // MySQL SUM on integer types
-test_aggregation_type!(mysql, sum_int_values, "sum(x)", SqlType::Int(None), ["5", "3"]);
-test_aggregation_type!(mysql, sum_bigint_values, "sum(x)", SqlType::BigInt(None), ["5", "3"]);
-test_aggregation_type!(mysql, sum_decimal_values, "sum(x)", SqlType::Decimal(10, 2), ["5.50", "3.30"]);
+test_aggregation_type!(
+    mysql,
+    sum_int_values,
+    "sum(x)",
+    SqlType::Int(None),
+    ["5", "3"]
+);
+test_aggregation_type!(
+    mysql,
+    sum_bigint_values,
+    "sum(x)",
+    SqlType::BigInt(None),
+    ["5", "3"]
+);
+test_aggregation_type!(
+    mysql,
+    sum_decimal_values,
+    "sum(x)",
+    SqlType::Decimal(10, 2),
+    ["5.50", "3.30"]
+);
 
 test_window_aggregation_type!(
     postgres,
@@ -411,20 +537,98 @@ test_window_aggregation_type!(
 );
 
 // Postgres AVG of small/fractional NUMERIC values — regression tests for select_div_scale
-test_aggregation_type!(postgres, avg_numeric_small_fraction, "avg(x)", SqlType::Numeric(None), ["0.01", "0.02"]);
-test_aggregation_type!(postgres, avg_numeric_tiny_fraction, "avg(x)", SqlType::Numeric(None), ["0.0001", "0.0002"]);
-test_aggregation_type!(postgres, avg_numeric_mixed_fraction, "avg(x)", SqlType::Numeric(None), ["33437.314618", "12345.678901"]);
-test_aggregation_type!(postgres, avg_numeric_single_small, "avg(x)", SqlType::Numeric(None), ["0.01"]);
-test_aggregation_type!(postgres, avg_numeric_negative_fraction, "avg(x)", SqlType::Numeric(None), ["-0.01", "0.03"]);
+test_aggregation_type!(
+    postgres,
+    avg_numeric_small_fraction,
+    "avg(x)",
+    SqlType::Numeric(None),
+    ["0.01", "0.02"]
+);
+test_aggregation_type!(
+    postgres,
+    avg_numeric_tiny_fraction,
+    "avg(x)",
+    SqlType::Numeric(None),
+    ["0.0001", "0.0002"]
+);
+test_aggregation_type!(
+    postgres,
+    avg_numeric_mixed_fraction,
+    "avg(x)",
+    SqlType::Numeric(None),
+    ["33437.314618", "12345.678901"]
+);
+test_aggregation_type!(
+    postgres,
+    avg_numeric_single_small,
+    "avg(x)",
+    SqlType::Numeric(None),
+    ["0.01"]
+);
+test_aggregation_type!(
+    postgres,
+    avg_numeric_negative_fraction,
+    "avg(x)",
+    SqlType::Numeric(None),
+    ["-0.01", "0.03"]
+);
 
 // SUM/AVG on all-NULL input should return NULL, not 0
-test_aggregation_type!(mysql, sum_all_null_int, "sum(x)", SqlType::Int(None), ["NULL", "NULL", "NULL"]);
-test_aggregation_type!(mysql, avg_all_null_int, "avg(x)", SqlType::Int(None), ["NULL", "NULL", "NULL"]);
-test_aggregation_type!(postgres, sum_all_null_int, "sum(x)", SqlType::Int(None), ["NULL", "NULL", "NULL"]);
-test_aggregation_type!(postgres, avg_all_null_int, "avg(x)", SqlType::Int(None), ["NULL", "NULL", "NULL"]);
+test_aggregation_type!(
+    mysql,
+    sum_all_null_int,
+    "sum(x)",
+    SqlType::Int(None),
+    ["NULL", "NULL", "NULL"]
+);
+test_aggregation_type!(
+    mysql,
+    avg_all_null_int,
+    "avg(x)",
+    SqlType::Int(None),
+    ["NULL", "NULL", "NULL"]
+);
+test_aggregation_type!(
+    postgres,
+    sum_all_null_int,
+    "sum(x)",
+    SqlType::Int(None),
+    ["NULL", "NULL", "NULL"]
+);
+test_aggregation_type!(
+    postgres,
+    avg_all_null_int,
+    "avg(x)",
+    SqlType::Int(None),
+    ["NULL", "NULL", "NULL"]
+);
 
 // SUM/AVG on mix of NULL and non-NULL should aggregate only non-NULL values
-test_aggregation_type!(mysql, sum_mix_null_int, "sum(x)", SqlType::Int(None), ["NULL", "5", "NULL", "3"]);
-test_aggregation_type!(mysql, avg_mix_null_int, "avg(x)", SqlType::Int(None), ["NULL", "5", "NULL", "3"]);
-test_aggregation_type!(postgres, sum_mix_null_int, "sum(x)", SqlType::Int(None), ["NULL", "5", "NULL", "3"]);
-test_aggregation_type!(postgres, avg_mix_null_int, "avg(x)", SqlType::Int(None), ["NULL", "5", "NULL", "3"]);
+test_aggregation_type!(
+    mysql,
+    sum_mix_null_int,
+    "sum(x)",
+    SqlType::Int(None),
+    ["NULL", "5", "NULL", "3"]
+);
+test_aggregation_type!(
+    mysql,
+    avg_mix_null_int,
+    "avg(x)",
+    SqlType::Int(None),
+    ["NULL", "5", "NULL", "3"]
+);
+test_aggregation_type!(
+    postgres,
+    sum_mix_null_int,
+    "sum(x)",
+    SqlType::Int(None),
+    ["NULL", "5", "NULL", "3"]
+);
+test_aggregation_type!(
+    postgres,
+    avg_mix_null_int,
+    "avg(x)",
+    SqlType::Int(None),
+    ["NULL", "5", "NULL", "3"]
+);

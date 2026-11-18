@@ -1,9 +1,9 @@
-use mysql_async::prelude::Queryable;
 use mysql_async::Row;
-use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
+use mysql_async::prelude::Queryable;
 use readyset_client_test_helpers::TestBuilder;
-use replication_offset::ReplicationOffset;
+use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
 use readyset_util::eventually;
+use replication_offset::ReplicationOffset;
 use test_utils::{tags, upstream};
 
 /// Helper: extract the "Status" value from SHOW READYSET STATUS rows.
@@ -111,10 +111,11 @@ async fn stop_start_replication_updates_status() {
     assert_eq!(status, "Stopped");
 
     // Stopping again should error.
-    let err = rs_conn
-        .query_drop("ALTER READYSET STOP REPLICATION")
-        .await;
-    assert!(err.is_err(), "Expected error stopping already-stopped replication");
+    let err = rs_conn.query_drop("ALTER READYSET STOP REPLICATION").await;
+    assert!(
+        err.is_err(),
+        "Expected error stopping already-stopped replication"
+    );
 
     // Start replication.
     rs_conn
@@ -130,10 +131,11 @@ async fn stop_start_replication_updates_status() {
     });
 
     // Starting again should error.
-    let err = rs_conn
-        .query_drop("ALTER READYSET START REPLICATION")
-        .await;
-    assert!(err.is_err(), "Expected error starting already-running replication");
+    let err = rs_conn.query_drop("ALTER READYSET START REPLICATION").await;
+    assert!(
+        err.is_err(),
+        "Expected error starting already-running replication"
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -207,7 +209,10 @@ async fn stop_replication_freezes_cache_data() {
         .exec_first("SELECT val FROM t1 WHERE id = ?", (2,))
         .await
         .unwrap();
-    assert_eq!(result, None, "Row inserted while stopped should NOT appear in cache");
+    assert_eq!(
+        result, None,
+        "Row inserted while stopped should NOT appear in cache"
+    );
 
     // Start replication — it should catch up and the row should appear.
     rs_conn
@@ -344,7 +349,11 @@ async fn set_replication_position_skips_missed_writes() {
         .exec_first("SELECT val FROM t1 WHERE id = ?", (1,))
         .await
         .unwrap();
-    assert_eq!(result, Some((10,)), "Pre-existing data should be unaffected");
+    assert_eq!(
+        result,
+        Some((10,)),
+        "Pre-existing data should be unaffected"
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -459,13 +468,9 @@ async fn change_cdc_url() {
         .await
         .unwrap();
 
-    let mysql_host =
-        std::env::var("MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".into());
-    let mysql_port =
-        std::env::var("MYSQL_TCP_PORT").unwrap_or_else(|_| "3306".into());
-    let bad_url = format!(
-        "mysql://bad_user:bad_pass@{mysql_host}:{mysql_port}/{db_name}"
-    );
+    let mysql_host = std::env::var("MYSQL_HOST").unwrap_or_else(|_| "127.0.0.1".into());
+    let mysql_port = std::env::var("MYSQL_TCP_PORT").unwrap_or_else(|_| "3306".into());
+    let bad_url = format!("mysql://bad_user:bad_pass@{mysql_host}:{mysql_port}/{db_name}");
 
     let position = upstream_binlog_position(&mut upstream_conn).await;
     rs_conn
@@ -580,8 +585,7 @@ async fn set_replication_position_binlog_to_gtid() {
 
     // Verify we are replicating with binlog file+pos (not GTID).
     let offset = min_replication_offset(&mut rs_conn).await;
-    let parsed: ReplicationOffset = offset.parse()
-        .expect("should parse min replication offset");
+    let parsed: ReplicationOffset = offset.parse().expect("should parse min replication offset");
     assert!(
         matches!(parsed, ReplicationOffset::MySql(_)),
         "Expected MySql (binlog file+pos) offset, got: {offset}"
@@ -623,9 +627,7 @@ async fn set_replication_position_binlog_to_gtid() {
 
     // Switch to GTID replication by setting the GTID position.
     rs_conn
-        .query_drop(format!(
-            "ALTER READYSET SET REPLICATION POSITION '{gtid}'"
-        ))
+        .query_drop(format!("ALTER READYSET SET REPLICATION POSITION '{gtid}'"))
         .await
         .expect("Switching from binlog file+pos to GTID should succeed");
 
@@ -644,8 +646,7 @@ async fn set_replication_position_binlog_to_gtid() {
 
     // Verify we are now replicating with GTID.
     let offset = min_replication_offset(&mut rs_conn).await;
-    let parsed: ReplicationOffset = offset.parse()
-        .expect("should parse min replication offset");
+    let parsed: ReplicationOffset = offset.parse().expect("should parse min replication offset");
     assert!(
         matches!(parsed, ReplicationOffset::Gtid(_)),
         "Expected Gtid offset, got: {offset}"

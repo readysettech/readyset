@@ -15,6 +15,7 @@ use tokio::net::TcpStream;
 
 use readyset_adapter::backend::MigrationMode;
 use readyset_client_metrics::QueryDestination;
+use readyset_client_test_helpers::TestShutdownSender;
 use readyset_client_test_helpers::{
     TestBuilder,
     mysql_helpers::{self, MySQLAdapter, last_query_info},
@@ -22,7 +23,6 @@ use readyset_client_test_helpers::{
 use readyset_server::Handle;
 use readyset_sql_parsing::ParsingPreset;
 use readyset_util::eventually;
-use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 
 /// Case pairs plus a distinct high value so ORDER BY and MIN/MAX have a spread.
@@ -32,8 +32,7 @@ const ACCENT_ROWS: &str = "(4, 'resume'), (5, 'Resume'), (6, 'résumé'), (7, 'R
 /// The same prefix with and without a trailing space.
 const PAD_ROWS: &str = "(1, 'abc'), (3, 'abc ')";
 /// Case and accent rows together, giving every LIKE pattern a potential match.
-const LIKE_ROWS: &str =
-    "(1, 'abc'), (2, 'ABC'), (8, 'zzz'), (4, 'resume'), (5, 'Resume'), (6, 'résumé'), (7, 'RÉSUMÉ')";
+const LIKE_ROWS: &str = "(1, 'abc'), (2, 'ABC'), (8, 'zzz'), (4, 'resume'), (5, 'Resume'), (6, 'résumé'), (7, 'RÉSUMÉ')";
 
 /// A replicating adapter plus a direct upstream connection over the shared `coll_t` fixture.
 struct Harness {
@@ -664,7 +663,10 @@ async fn test_shallow_column_def_collation_ids_not_shared_across_collations() {
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(opts.db_name());
     let mut upstream_general_ci = mysql_async::Conn::new(upstream_opts.clone()).await.unwrap();
-    upstream_general_ci.query_drop(SET_GENERAL_CI).await.unwrap();
+    upstream_general_ci
+        .query_drop(SET_GENERAL_CI)
+        .await
+        .unwrap();
     let mut upstream_bin = mysql_async::Conn::new(upstream_opts).await.unwrap();
     upstream_bin.query_drop(SET_BIN).await.unwrap();
 
@@ -1195,7 +1197,10 @@ async fn test_set_names_unknown_collation_keeps_connection() {
     let expected = server_error_code(upstream_conn.query_drop(SET_NAMES).await);
 
     let mut conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
-    assert_eq!(server_error_code(conn.query_drop(SET_NAMES).await), expected);
+    assert_eq!(
+        server_error_code(conn.query_drop(SET_NAMES).await),
+        expected
+    );
     let one: i64 = conn.query_first("SELECT 1").await.unwrap().unwrap();
     assert_eq!(one, 1);
 
@@ -1266,8 +1271,8 @@ async fn test_handshake_utf8mb3_converts_results_on_both_paths() {
     conn.query_drop(
         "CREATE TABLE mb3_handshake (id INT PRIMARY KEY, t VARCHAR(32) CHARACTER SET utf8mb4)",
     )
-        .await
-        .unwrap();
+    .await
+    .unwrap();
     // U+1F600 GRINNING FACE, a supplementary character utf8mb3 cannot represent.
     conn.query_drop("INSERT INTO mb3_handshake (id, t) VALUES (1, 'a\u{1F600}b')")
         .await
@@ -1337,8 +1342,8 @@ async fn test_set_names_utf8mb3_converts_cached_results() {
     conn.query_drop(
         "CREATE TABLE mb3_names (id INT PRIMARY KEY, t VARCHAR(32) CHARACTER SET utf8mb4)",
     )
-        .await
-        .unwrap();
+    .await
+    .unwrap();
     // U+1F600 GRINNING FACE, inserted while the session is still utf8mb4.
     conn.query_drop("INSERT INTO mb3_names (id, t) VALUES (1, 'a\u{1F600}b')")
         .await
@@ -1505,8 +1510,7 @@ async fn test_shallow_order_by_not_shared_across_collations() {
         .fallback(true)
         .build::<MySQLAdapter>()
         .await;
-    const QUERY: &str =
-        "SELECT id FROM coll_order ORDER BY CASE n WHEN 1 THEN 'c' WHEN 2 THEN 'a' WHEN 3 THEN 'B' END";
+    const QUERY: &str = "SELECT id FROM coll_order ORDER BY CASE n WHEN 1 THEN 'c' WHEN 2 THEN 'a' WHEN 3 THEN 'B' END";
 
     let mut ai_ci_conn = mysql_async::Conn::new(opts.clone()).await.unwrap();
     ai_ci_conn

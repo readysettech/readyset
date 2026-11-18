@@ -5,8 +5,8 @@ use mysql_async::prelude::{Protocol, Queryable};
 use mysql_async::{Conn, QueryResult, Row};
 use readyset_adapter::backend::MigrationMode;
 use readyset_client_metrics::QueryDestination;
-use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter, last_query_info};
 use readyset_client_test_helpers::TestBuilder;
+use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter, last_query_info};
 use readyset_util::eventually;
 use test_utils::{tags, upstream};
 

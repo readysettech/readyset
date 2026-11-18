@@ -42,6 +42,7 @@ use proptest_stateful::{
 };
 use readyset_client::SingleKeyEviction;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
+use readyset_client_test_helpers::TestShutdownSender;
 use readyset_client_test_helpers::{mysql_helpers, TestBuilder};
 use readyset_data::DfValue;
 use readyset_server::Handle;
@@ -49,7 +50,6 @@ use readyset_sql::ast::SqlType;
 use readyset_sql::DialectDisplay;
 use readyset_util::arbitrary::arbitrary_timestamp_naive_date_time;
 use readyset_util::eventually;
-use readyset_client_test_helpers::TestShutdownSender;
 
 static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
 

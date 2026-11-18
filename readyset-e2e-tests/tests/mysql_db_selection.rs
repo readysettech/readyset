@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use mysql_async::prelude::Queryable;
 use mysql_async::{ChangeUserOpts, Conn};
-use readyset_adapter::backend::AllowedUsers;
 use readyset_adapter::BackendBuilder;
+use readyset_adapter::backend::AllowedUsers;
 use readyset_client_test_helpers::TestBuilder;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
 use test_utils::{tags, upstream};
@@ -16,8 +16,7 @@ use test_utils::{tags, upstream};
 async fn non_default_db_in_connection_opts() {
     readyset_tracing::init_test_logging();
 
-    let (rs_opts, _handle, shutdown_tx) =
-        TestBuilder::default().build::<MySQLAdapter>().await;
+    let (rs_opts, _handle, shutdown_tx) = TestBuilder::default().build::<MySQLAdapter>().await;
 
     let db_name = rs_opts.db_name().unwrap().to_string();
     let opts_with_db = mysql_async::OptsBuilder::from_opts(rs_opts).db_name(Some(db_name.clone()));

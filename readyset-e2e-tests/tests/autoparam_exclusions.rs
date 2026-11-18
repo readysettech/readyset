@@ -86,7 +86,11 @@ async fn autoparam_exclude_exists_end_to_end() {
         .await
         .unwrap();
     assert_eq!(result, vec![10]);
-    assert_last_target_was(&mut rs_conn, QueryDestination::Readyset(Some("excl".into()))).await;
+    assert_last_target_was(
+        &mut rs_conn,
+        QueryDestination::Readyset(Some("excl".into())),
+    )
+    .await;
 
     // A different status literal misses the cache and falls back upstream, still correct.
     let result: Vec<i32> = rs_conn

@@ -15,7 +15,9 @@ use readyset_client_test_helpers::{
     TestBuilder,
     mysql_helpers::{self, MySQLAdapter, last_query_info},
 };
-use readyset_data::encoding::{Encoding, SingleByteCharset, mysql_character_set_name_to_collation_id};
+use readyset_data::encoding::{
+    Encoding, SingleByteCharset, mysql_character_set_name_to_collation_id,
+};
 use readyset_util::eventually;
 use test_utils::{tags, upstream};
 
@@ -980,8 +982,7 @@ impl RawConn {
         let (seq, server_handshake) = conn.read_packet().await;
         conn.server_handshake_collation = handshake_v10_collation(&server_handshake);
 
-        let mut capabilities =
-            CLIENT_PROTOCOL_41 | CLIENT_SECURE_CONNECTION | CLIENT_PLUGIN_AUTH;
+        let mut capabilities = CLIENT_PROTOCOL_41 | CLIENT_SECURE_CONNECTION | CLIENT_PLUGIN_AUTH;
         if opts.db_name().is_some() {
             capabilities |= CLIENT_CONNECT_WITH_DB;
         }
@@ -1081,7 +1082,11 @@ impl RawConn {
         payload.extend_from_slice(statement);
         self.write_packet(0, &payload).await;
         let (_, packet) = self.read_packet().await;
-        assert_eq!(packet.first(), Some(&0xFF), "expected ERR packet: {packet:?}");
+        assert_eq!(
+            packet.first(),
+            Some(&0xFF),
+            "expected ERR packet: {packet:?}"
+        );
         // The payload is 0xFF, a little-endian u16 error code, '#', a 5-byte sqlstate, and the
         // message.
         (
@@ -1219,7 +1224,9 @@ async fn single_byte_handshake_roundtrip() {
         // The inbound bytes were decoded in the session's charset, so the upstream received
         // well-formed UTF-8 and the column holds the charset-encoded bytes.
         let hex: String = upstream_conn
-            .query_first(format!("SELECT hex(t) FROM charset_t_{charset} WHERE id = 1"))
+            .query_first(format!(
+                "SELECT hex(t) FROM charset_t_{charset} WHERE id = 1"
+            ))
             .await
             .unwrap()
             .unwrap();
@@ -1889,7 +1896,9 @@ async fn set_names_single_byte_roundtrip() {
 
         // Proxied result rows come back in the session's charset.
         let read: Vec<u8> = conn
-            .query_first(format!("SELECT t FROM charset_names_{charset} WHERE id = 1"))
+            .query_first(format!(
+                "SELECT t FROM charset_names_{charset} WHERE id = 1"
+            ))
             .await
             .unwrap()
             .unwrap();

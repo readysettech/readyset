@@ -33,7 +33,9 @@ async fn start_transaction_preserves_read_only() {
     // The READ ONLY access-mode modifier must reach upstream: a write inside the
     // transaction is rejected. If it were dropped (plain START TRANSACTION), the
     // INSERT would succeed.
-    conn.query_drop("START TRANSACTION READ ONLY").await.unwrap();
+    conn.query_drop("START TRANSACTION READ ONLY")
+        .await
+        .unwrap();
     let write = conn.query_drop("INSERT INTO t (id) VALUES (1)").await;
     assert!(
         write.is_err(),

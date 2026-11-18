@@ -74,7 +74,10 @@ async fn question_mark_operators_are_not_placeholders() {
     let read = "SELECT a FROM t WHERE j ? 'k' AND a = $1";
     let err = rs.simple_query(read).await.unwrap_err();
     assert_eq!(err.code(), Some(&SqlState::UNDEFINED_PARAMETER), "{err}");
-    assert_eq!(last_query_info(&rs).await.destination, QueryDestination::Upstream);
+    assert_eq!(
+        last_query_info(&rs).await.destination,
+        QueryDestination::Upstream
+    );
     assert!(first_column(&rs, "SHOW PROXIED QUERIES").await.is_empty());
     assert_eq!(first_column(&rs, "SHOW CACHES").await.len(), 3);
 

@@ -1,7 +1,7 @@
 use mysql_async::prelude::Queryable;
 use readyset_adapter::backend::MigrationMode;
-use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
 use readyset_client_test_helpers::TestBuilder;
+use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
 use readyset_util::eventually;
 use test_utils::{tags, upstream};
 

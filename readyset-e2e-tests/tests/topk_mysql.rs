@@ -358,7 +358,11 @@ async fn test_topk_literal_limit_per_value() {
     let result: Vec<(i32, i32)> = rs_conn.query("SELECT * FROM test LIMIT 1").await.unwrap();
     assert_eq!(result.len(), 1);
 
-    assert_last_target_was(&mut rs_conn, QueryDestination::Readyset(Some("lim1".into()))).await;
+    assert_last_target_was(
+        &mut rs_conn,
+        QueryDestination::Readyset(Some("lim1".into())),
+    )
+    .await;
 
     // A different LIMIT value is a distinct query with its own TopK cache.
     rs_conn
@@ -371,7 +375,11 @@ async fn test_topk_literal_limit_per_value() {
     let result: Vec<(i32, i32)> = rs_conn.query("SELECT * FROM test LIMIT 2").await.unwrap();
     assert_eq!(result.len(), 2);
 
-    assert_last_target_was(&mut rs_conn, QueryDestination::Readyset(Some("lim2".into()))).await;
+    assert_last_target_was(
+        &mut rs_conn,
+        QueryDestination::Readyset(Some("lim2".into())),
+    )
+    .await;
 
     shutdown_tx.shutdown().await;
 

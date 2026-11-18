@@ -2,8 +2,9 @@ use mysql_async::prelude::Queryable;
 use tokio::test;
 
 use readyset_client_test_helpers::{
-    TestBuilder, derive_test_name, sleep,
+    TestBuilder, derive_test_name,
     mysql_helpers::{self, MySQLAdapter},
+    sleep,
 };
 use readyset_tracing::init_test_logging;
 use test_utils::{tags, upstream};
@@ -19,10 +20,7 @@ async fn cached_query_stats_vrel() {
 
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
     let mut upstream = mysql_async::Conn::new(upstream_opts).await.unwrap();
-    upstream
-        .query_drop("CREATE TABLE t (x INT)")
-        .await
-        .unwrap();
+    upstream.query_drop("CREATE TABLE t (x INT)").await.unwrap();
     upstream
         .query_drop("INSERT INTO t VALUES (1), (2), (3)")
         .await

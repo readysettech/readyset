@@ -172,7 +172,11 @@ async fn replication_fails_over_past_a_dead_server() {
 
     let rows: Vec<(String, String)> = rs.query("SHOW READYSET STATUS").await.unwrap();
     let cdc_server = rows.iter().find(|(name, _)| name == "CDC Server");
-    assert_eq!(cdc_server.map(|(_, value)| value.as_str()), Some(live.as_str()), "{rows:?}");
+    assert_eq!(
+        cdc_server.map(|(_, value)| value.as_str()),
+        Some(live.as_str()),
+        "{rows:?}"
+    );
 
     let servers = upstream_servers(&mut rs).await;
     assert_eq!(servers.len(), 2, "{servers:?}");
@@ -325,16 +329,23 @@ async fn stopping_replication_clears_the_active_cdc_server() {
         .await;
     let mut rs = mysql_async::Conn::new(rs_opts.clone()).await.unwrap();
     wait_online(&mut rs).await;
-    assert_eq!(upstream_servers(&mut rs).await[&live].active_cdc, Some(true));
+    assert_eq!(
+        upstream_servers(&mut rs).await[&live].active_cdc,
+        Some(true)
+    );
 
-    rs.query_drop("ALTER READYSET STOP REPLICATION").await.unwrap();
+    rs.query_drop("ALTER READYSET STOP REPLICATION")
+        .await
+        .unwrap();
     eventually!(attempts: 20, sleep: std::time::Duration::from_millis(500), run_test: {
         upstream_servers(&mut rs).await
     }, then_assert: |servers| {
         assert_eq!(servers[&live].active_cdc, Some(false), "{servers:?}");
     });
 
-    rs.query_drop("ALTER READYSET START REPLICATION").await.unwrap();
+    rs.query_drop("ALTER READYSET START REPLICATION")
+        .await
+        .unwrap();
     eventually!(attempts: 40, sleep: std::time::Duration::from_millis(500), run_test: {
         upstream_servers(&mut rs).await
     }, then_assert: |servers| {

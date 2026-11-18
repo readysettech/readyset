@@ -22,7 +22,10 @@ const IN: &str = "SELECT id FROM enum_events WHERE m IN ($1, $2) ORDER BY id";
 
 /// Build an adapter with fallback over a fresh database holding the enum table, with a deep
 /// cache on each of `queries`.
-async fn setup(db_name: &str, queries: &[&str]) -> (Client, Handle, TestShutdownSender<PostgreSQLAdapter>) {
+async fn setup(
+    db_name: &str,
+    queries: &[&str],
+) -> (Client, Handle, TestShutdownSender<PostgreSQLAdapter>) {
     readyset_tracing::init_test_logging();
     PostgreSQLAdapter::recreate_database(db_name).await;
 

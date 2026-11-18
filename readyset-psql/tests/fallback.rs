@@ -8,6 +8,7 @@ use readyset_adapter::BackendBuilder;
 use readyset_adapter::backend::{MigrationMode, UnsupportedSetMode};
 use readyset_adapter::query_status_cache::MigrationStyle;
 use readyset_client_metrics::QueryDestination;
+use readyset_client_test_helpers::TestShutdownSender;
 use readyset_client_test_helpers::psql_helpers::{PostgreSQLAdapter, connect, upstream_config};
 use readyset_client_test_helpers::{TestBuilder, sleep};
 use readyset_data::DfValue;
@@ -15,7 +16,6 @@ use readyset_server::Handle;
 use readyset_util::eventually;
 #[cfg(feature = "failure_injection")]
 use readyset_util::failpoints;
-use readyset_client_test_helpers::TestShutdownSender;
 use regex::Regex;
 use test_utils::{tags, upstream};
 
@@ -23,7 +23,11 @@ use crate::common::setup_standalone_with_authority;
 use postgres_types::{FromSql, IsNull, ToSql, Type, accepts, to_sql_checked};
 use tokio_postgres::{Client, CommandCompleteContents, SimpleQueryMessage};
 
-async fn setup() -> (tokio_postgres::Config, Handle, TestShutdownSender<PostgreSQLAdapter>) {
+async fn setup() -> (
+    tokio_postgres::Config,
+    Handle,
+    TestShutdownSender<PostgreSQLAdapter>,
+) {
     TestBuilder::default()
         .fallback(true)
         .build::<PostgreSQLAdapter>()

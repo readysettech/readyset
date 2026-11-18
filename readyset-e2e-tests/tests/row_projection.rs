@@ -15,9 +15,10 @@ use std::panic::AssertUnwindSafe;
 use mysql_async::prelude::Queryable;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::{
-    TestBuilder, sleep,
+    TestBuilder,
     mysql_helpers::{self, MySQLAdapter},
     psql_helpers::{self, PostgreSQLAdapter},
+    sleep,
 };
 use readyset_sql_parsing::ParsingPreset;
 use readyset_util::eventually;
@@ -143,7 +144,10 @@ async fn postgres_row_projection_binary_matches_upstream_bytes() {
     let mut upstream_config = psql_helpers::upstream_config();
     upstream_config.dbname("noria");
     let upstream_conn = psql_helpers::connect(upstream_config).await;
-    upstream_conn.simple_query(CREATE_TYPED_TABLE).await.unwrap();
+    upstream_conn
+        .simple_query(CREATE_TYPED_TABLE)
+        .await
+        .unwrap();
 
     let rs_conn = psql_helpers::connect(rs_opts).await;
 
@@ -201,7 +205,10 @@ async fn postgres_row_projection_text_matches_upstream_bytes() {
     let mut upstream_config = psql_helpers::upstream_config();
     upstream_config.dbname("noria");
     let upstream_conn = psql_helpers::connect(upstream_config).await;
-    upstream_conn.simple_query(CREATE_TYPED_TABLE).await.unwrap();
+    upstream_conn
+        .simple_query(CREATE_TYPED_TABLE)
+        .await
+        .unwrap();
 
     let rs_conn = psql_helpers::connect(rs_opts).await;
 
@@ -255,7 +262,10 @@ async fn postgres_row_in_other_positions() {
     let mut upstream_config = psql_helpers::upstream_config();
     upstream_config.dbname("noria");
     let upstream_conn = psql_helpers::connect(upstream_config).await;
-    upstream_conn.simple_query(CREATE_TYPED_TABLE).await.unwrap();
+    upstream_conn
+        .simple_query(CREATE_TYPED_TABLE)
+        .await
+        .unwrap();
 
     let rs_conn = psql_helpers::connect(rs_opts).await;
 

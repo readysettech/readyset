@@ -9,12 +9,12 @@ use readyset_adapter::BackendBuilder;
 use readyset_client::query::QueryId;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter};
+use readyset_client_test_helpers::TestShutdownSender;
 use readyset_client_test_helpers::{self, sleep, wait_for_schema_generation_change, TestBuilder};
 use readyset_server::Handle;
 use readyset_server::NodeIndex;
 use readyset_sql::ast::Relation;
 use readyset_util::eventually;
-use readyset_client_test_helpers::TestShutdownSender;
 use regex::Regex;
 use test_utils::skip_flaky_finder;
 use test_utils::{tags, upstream};
@@ -1183,7 +1183,10 @@ async fn resnapshot_table_command() {
     ) -> Option<NodeIndex> {
         let tables = handle.tables().await.unwrap();
         tables
-            .get(&Relation::new(Some(schema.as_ref().into()), name.as_ref().into()))
+            .get(&Relation::new(
+                Some(schema.as_ref().into()),
+                name.as_ref().into(),
+            ))
             .cloned()
     }
 

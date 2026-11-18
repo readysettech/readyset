@@ -61,7 +61,9 @@ fn alter_add_constraint_converts_to_add_key() {
         TableKey::ForeignKey { .. }
     );
     assert_matches!(
-        add_key(check_parse_postgres!("ALTER TABLE t ADD CONSTRAINT c CHECK (a > 0)")),
+        add_key(check_parse_postgres!(
+            "ALTER TABLE t ADD CONSTRAINT c CHECK (a > 0)"
+        )),
         TableKey::CheckConstraint { .. }
     );
 }
@@ -1175,11 +1177,7 @@ fn string_literals_mysql() {
         check_parse_mysql!(format!("SELECT {literal}"));
     }
 
-    check_parse_fails!(
-        Dialect::MySQL,
-        "SELECT 0x123",
-        "Odd number of digits"
-    );
+    check_parse_fails!(Dialect::MySQL, "SELECT 0x123", "Odd number of digits");
 }
 
 #[test]
@@ -1332,8 +1330,9 @@ fn having_subquery() {
                     AND n_name = 'Germany') \
                ORDER BY ordercount DESC";
     for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
-        parse_query_with_config(ParsingPreset::OnlySqlparser, dialect, sql)
-            .unwrap_or_else(|e| panic!("sqlparser should parse chbenchmark Q11 in {dialect:?}: {e}"));
+        parse_query_with_config(ParsingPreset::OnlySqlparser, dialect, sql).unwrap_or_else(|e| {
+            panic!("sqlparser should parse chbenchmark Q11 in {dialect:?}: {e}")
+        });
     }
 }
 

@@ -11,13 +11,13 @@ use std::time::Duration;
 use mysql_async::prelude::Queryable;
 use readyset_adapter::backend::BackendBuilder;
 use readyset_client_metrics::QueryDestination;
+use readyset_client_test_helpers::TestShutdownSender;
 use readyset_client_test_helpers::{
     TestBuilder, derive_test_name,
     mysql_helpers::{self, MySQLAdapter, last_query_info},
 };
 use readyset_server::{CacheMode, Handle};
 use readyset_tracing::init_test_logging;
-use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 use tokio::test;
 use tokio::time::sleep;
@@ -71,7 +71,8 @@ async fn setup_with_opportunistic_ryw(
 async fn opportunistic_ryw_window_skips_cache_after_write() {
     init_test_logging();
     let test_name = derive_test_name();
-    let (mut conn, _handle, shutdown_tx) = setup_with_opportunistic_ryw(&test_name, Some(500)).await;
+    let (mut conn, _handle, shutdown_tx) =
+        setup_with_opportunistic_ryw(&test_name, Some(500)).await;
 
     // Warm the auto-cache.
     conn.query_drop("SELECT a FROM foo WHERE a = 1")
@@ -159,7 +160,8 @@ async fn opportunistic_ryw_disabled_does_not_skip_cache() {
 async fn opportunistic_ryw_fires_after_commit() {
     init_test_logging();
     let test_name = derive_test_name();
-    let (mut conn, _handle, shutdown_tx) = setup_with_opportunistic_ryw(&test_name, Some(500)).await;
+    let (mut conn, _handle, shutdown_tx) =
+        setup_with_opportunistic_ryw(&test_name, Some(500)).await;
 
     // Warm the auto-cache.
     conn.query_drop("SELECT a FROM foo WHERE a = 1")
@@ -197,7 +199,8 @@ async fn opportunistic_ryw_fires_after_commit() {
 async fn opportunistic_ryw_cleared_on_rollback() {
     init_test_logging();
     let test_name = derive_test_name();
-    let (mut conn, _handle, shutdown_tx) = setup_with_opportunistic_ryw(&test_name, Some(60_000)).await;
+    let (mut conn, _handle, shutdown_tx) =
+        setup_with_opportunistic_ryw(&test_name, Some(60_000)).await;
 
     // Warm the auto-cache.
     conn.query_drop("SELECT a FROM foo WHERE a = 1")

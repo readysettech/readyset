@@ -14,12 +14,15 @@ const SETUP: &str = "
 ";
 
 async fn ids_matching(conn: &Client, param: &'static str) -> Vec<i32> {
-    conn.query("SELECT id FROM bytea_text WHERE b = $1", &[&TextParam(param)])
-        .await
-        .unwrap()
-        .iter()
-        .map(|r| r.get(0))
-        .collect()
+    conn.query(
+        "SELECT id FROM bytea_text WHERE b = $1",
+        &[&TextParam(param)],
+    )
+    .await
+    .unwrap()
+    .iter()
+    .map(|r| r.get(0))
+    .collect()
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -51,7 +54,10 @@ async fn postgres_text_format_bytea_param_matches_upstream() {
         let upstream_ids = ids_matching(&upstream_conn, param).await;
         assert_eq!(upstream_ids, expected, "[{param:?}] upstream");
         let rs_ids = ids_matching(&rs_conn, param).await;
-        assert_eq!(rs_ids, upstream_ids, "[{param:?}] readyset diverged from upstream");
+        assert_eq!(
+            rs_ids, upstream_ids,
+            "[{param:?}] readyset diverged from upstream"
+        );
     }
 
     shutdown_tx.shutdown().await;

@@ -18,13 +18,13 @@ use readyset_adapter::backend::AllowedUsers;
 use readyset_client::CacheMode;
 use readyset_client::consensus::AllowedUsersMap;
 use readyset_client_metrics::QueryDestination;
+use readyset_client_test_helpers::TestShutdownSender;
 use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter, last_query_info};
 use readyset_client_test_helpers::{Adapter, TestBuilder, derive_test_name};
-use readyset_sql_parsing::ParsingPreset;
 use readyset_server::Handle;
+use readyset_sql_parsing::ParsingPreset;
 use readyset_tracing::init_test_logging;
 use readyset_util::eventually;
-use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 
 const ACL_INTERVAL: Duration = Duration::from_secs(2);
@@ -65,10 +65,20 @@ impl Roles {
 /// ACL freshness interval.
 async fn setup(
     test_name: &str,
-) -> (tokio_postgres::Config, Handle, TestShutdownSender<PostgreSQLAdapter>, Client, Roles) {
+) -> (
+    tokio_postgres::Config,
+    Handle,
+    TestShutdownSender<PostgreSQLAdapter>,
+    Client,
+    Roles,
+) {
     PostgreSQLAdapter::recreate_database(test_name).await;
     let roles = Roles::for_test(test_name);
-    let Roles { alice, bob, limited } = &roles;
+    let Roles {
+        alice,
+        bob,
+        limited,
+    } = &roles;
 
     let mut cfg = psql_helpers::upstream_config();
     cfg.dbname(test_name);
@@ -103,7 +113,11 @@ async fn start_readyset(
     test_name: &str,
     users: &[&String],
     interval: Duration,
-) -> (tokio_postgres::Config, Handle, TestShutdownSender<PostgreSQLAdapter>) {
+) -> (
+    tokio_postgres::Config,
+    Handle,
+    TestShutdownSender<PostgreSQLAdapter>,
+) {
     let users: AllowedUsersMap = users
         .iter()
         .map(|user| ((*user).clone(), "pass".into()))
@@ -360,7 +374,12 @@ async fn acl_set_role_uses_effective_identity() {
 
     // A role upstream refuses never changes the session's identity: alice
     // keeps serving as alice.
-    assert!(alice.simple_query("SET ROLE nonexistent_role").await.is_err());
+    assert!(
+        alice
+            .simple_query("SET ROLE nonexistent_role")
+            .await
+            .is_err()
+    );
     assert!(is_shallow(&destination(&alice, query).await));
 
     // The full pass discovers `limited` as assumable by alice and resolves
@@ -423,10 +442,16 @@ async fn acl_prepared_statement_sees_revocation() {
         .simple_query("CREATE SHALLOW CACHE FROM SELECT val FROM t WHERE id = $1")
         .await
         .unwrap();
-    alice.query("SELECT val FROM t WHERE id = $1", &[&1i32]).await.unwrap();
+    alice
+        .query("SELECT val FROM t WHERE id = $1", &[&1i32])
+        .await
+        .unwrap();
 
     let bob = connect_as(&rs_opts, &test_name, &roles.bob).await;
-    let stmt = bob.prepare("SELECT val FROM t WHERE id = $1").await.unwrap();
+    let stmt = bob
+        .prepare("SELECT val FROM t WHERE id = $1")
+        .await
+        .unwrap();
     eventually!(
         attempts: 40,
         sleep: Duration::from_millis(250),
@@ -598,10 +623,19 @@ async fn acl_cache_grants_relation() {
 /// interval is long enough that no periodic pass runs.
 async fn setup_unprivileged_role(
     test_name: &str,
-) -> (tokio_postgres::Config, Handle, TestShutdownSender<PostgreSQLAdapter>, Roles) {
+) -> (
+    tokio_postgres::Config,
+    Handle,
+    TestShutdownSender<PostgreSQLAdapter>,
+    Roles,
+) {
     PostgreSQLAdapter::recreate_database(test_name).await;
     let roles = Roles::for_test(test_name);
-    let Roles { alice, bob, limited } = &roles;
+    let Roles {
+        alice,
+        bob,
+        limited,
+    } = &roles;
 
     let mut cfg = psql_helpers::upstream_config();
     cfg.dbname(test_name);
@@ -674,7 +708,10 @@ async fn acl_role_creator_cannot_self_grant() {
     assert!(bob_upstream.query(query, &[]).await.is_err());
 
     let alice = connect_as(&rs_opts, &test_name, &roles.alice).await;
-    alice.simple_query("SET search_path TO public").await.unwrap();
+    alice
+        .simple_query("SET search_path TO public")
+        .await
+        .unwrap();
 
     // bob assumes the role and creates the cache. Creation only prepares the
     // statement upstream, which Postgres answers without checking table

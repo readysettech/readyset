@@ -7,7 +7,9 @@ use readyset_adapter::backend::{MigrationMode, QueryInfo};
 use readyset_adapter::query_status_cache::{MigrationStyle, QueryStatusCache};
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
-use readyset_client_test_helpers::{TestBuilder, TestShutdownSender, sleep, wait_for_schema_generation_change};
+use readyset_client_test_helpers::{
+    TestBuilder, TestShutdownSender, sleep, wait_for_schema_generation_change,
+};
 use readyset_server::Handle;
 use readyset_sql_parsing::ParsingPreset;
 use readyset_util::eventually;
@@ -89,7 +91,10 @@ async fn assert_last_target_was(rs_conn: &mut Conn, expected: QueryDestination) 
 /// Bring up an adapter over a fresh database, with `autoparameterize` deciding whether caches
 /// keep the literals their author wrote inline. Out-of-band migration keeps a plain SELECT from
 /// creating a cache of its own, so what routes a read is only ever an explicit CREATE CACHE.
-async fn adapter(db_name: &str, schema: &str) -> (Conn, Conn, Handle, TestShutdownSender<MySQLAdapter>) {
+async fn adapter(
+    db_name: &str,
+    schema: &str,
+) -> (Conn, Conn, Handle, TestShutdownSender<MySQLAdapter>) {
     adapter_with_preset(db_name, schema, ParsingPreset::for_tests()).await
 }
 
@@ -1247,7 +1252,10 @@ const TK: &str = "CREATE TABLE t (id int, status varchar(16), v int); \
 /// Like [`adapter`], but with the server building TopK nodes, the production default. A literal
 /// `LIMIT` under an `ORDER BY` then stays in the shape a read hashes to, while a placeholder
 /// `LIMIT` is stripped from it, so the two spellings of one query take different shapes.
-async fn topk_adapter(db_name: &str, schema: &str) -> (Conn, Conn, Handle, TestShutdownSender<MySQLAdapter>) {
+async fn topk_adapter(
+    db_name: &str,
+    schema: &str,
+) -> (Conn, Conn, Handle, TestShutdownSender<MySQLAdapter>) {
     readyset_tracing::init_test_logging();
     mysql_helpers::recreate_database(db_name).await;
 

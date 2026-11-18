@@ -31,12 +31,12 @@
 use std::assert_matches;
 use std::panic::AssertUnwindSafe;
 
+use mysql_async::Conn;
 use mysql_async::consts::{ColumnType, Command};
 use mysql_async::prelude::Queryable;
-use mysql_async::Conn;
 use readyset_client_metrics::QueryDestination;
-use readyset_client_test_helpers::mysql_helpers::{self, last_query_info, MySQLAdapter};
 use readyset_client_test_helpers::TestBuilder;
+use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter, last_query_info};
 use readyset_util::eventually;
 use test_utils::{tags, upstream};
 

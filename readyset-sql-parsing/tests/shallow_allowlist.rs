@@ -31,7 +31,10 @@ const KINDS: &[(ShallowCacheAllowlistKind, &str, &str)] = &[
 #[test]
 fn alter_add_single_function() {
     for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
-        let q = parse(dialect, "ALTER READYSET ADD SHALLOW CACHE ALLOWED FUNCTION now");
+        let q = parse(
+            dialect,
+            "ALTER READYSET ADD SHALLOW CACHE ALLOWED FUNCTION now",
+        );
         assert_eq!(
             q,
             SqlQuery::AlterReadySet(AlterReadysetStatement::ShallowCacheAllowlistChange(
@@ -130,8 +133,7 @@ fn alter_add_and_drop_every_kind() {
         for &(kind, singular, _) in KINDS {
             for add in [true, false] {
                 let verb = if add { "ADD" } else { "DROP" };
-                let sql =
-                    format!("ALTER READYSET {verb} SHALLOW CACHE ALLOWED {singular} a, b, c");
+                let sql = format!("ALTER READYSET {verb} SHALLOW CACHE ALLOWED {singular} a, b, c");
                 assert_eq!(
                     parse(dialect, &sql),
                     SqlQuery::AlterReadySet(AlterReadysetStatement::ShallowCacheAllowlistChange(

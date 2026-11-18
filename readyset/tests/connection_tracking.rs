@@ -20,5 +20,8 @@ fn connection_info_ordering_by_username() {
     let c1 = ConnectionInfo::new(1, addr, "alice".to_string());
     let c2 = ConnectionInfo::new(1, addr, "bob".to_string());
 
-    assert!(c1 < c2, "Same id and addr, 'alice' < 'bob' lexicographically");
+    assert!(
+        c1 < c2,
+        "Same id and addr, 'alice' < 'bob' lexicographically"
+    );
 }

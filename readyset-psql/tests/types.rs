@@ -1,10 +1,14 @@
-use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
 use readyset_client_test_helpers::TestBuilder;
-use readyset_server::{DurabilityMode, Handle};
 use readyset_client_test_helpers::TestShutdownSender;
+use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
+use readyset_server::{DurabilityMode, Handle};
 use test_utils::{tags, upstream};
 
-async fn setup() -> (tokio_postgres::Config, Handle, TestShutdownSender<PostgreSQLAdapter>) {
+async fn setup() -> (
+    tokio_postgres::Config,
+    Handle,
+    TestShutdownSender<PostgreSQLAdapter>,
+) {
     TestBuilder::default()
         .fallback(true)
         // TODO(mvzink): Switch to DeleteOnExit after fixing REA-5757
@@ -31,13 +35,14 @@ mod types {
     use proptest::string::string_regex;
     use readyset_adapter::backend::QueryDestination;
     use readyset_client_test_helpers::psql_helpers::{connect, last_query_info, upstream_config};
-    use readyset_client_test_helpers::{sleep, Adapter};
+    use readyset_client_test_helpers::{Adapter, sleep};
     use readyset_data::{DfValue, PostgresPath};
     use readyset_decimal::Decimal;
     use readyset_util::arbitrary::{
-        arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal, arbitrary_ipcidr, arbitrary_ipinet, arbitrary_json,
-        arbitrary_json_without_f64, arbitrary_mac_address, arbitrary_naive_date,
-        arbitrary_naive_time, arbitrary_postgres_box, arbitrary_postgres_point, arbitrary_systemtime, arbitrary_uuid,
+        arbitrary_bitvec, arbitrary_date_time, arbitrary_decimal, arbitrary_ipcidr,
+        arbitrary_ipinet, arbitrary_json, arbitrary_json_without_f64, arbitrary_mac_address,
+        arbitrary_naive_date, arbitrary_naive_time, arbitrary_postgres_box,
+        arbitrary_postgres_point, arbitrary_systemtime, arbitrary_uuid,
     };
     use readyset_util::eventually;
     use tokio_postgres::types::{FromSql, ToSql};

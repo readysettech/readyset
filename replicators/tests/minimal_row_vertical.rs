@@ -45,6 +45,7 @@ use proptest_stateful::{
 use rand::seq::IndexedRandom as _;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::MySQLAdapter;
+use readyset_client_test_helpers::TestShutdownSender;
 use readyset_client_test_helpers::{mysql_helpers, TestBuilder};
 use readyset_data::DfValue;
 use readyset_server::Handle;
@@ -55,7 +56,6 @@ use readyset_util::arbitrary::{
     arbitrary_timestamp_naive_date_time,
 };
 use readyset_util::eventually;
-use readyset_client_test_helpers::TestShutdownSender;
 
 /// This struct is used to generate arbitrary column specifications, both for creating tables.
 #[derive(Clone)]

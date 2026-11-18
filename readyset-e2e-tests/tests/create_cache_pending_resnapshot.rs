@@ -92,7 +92,11 @@ async fn create_cache_while_a_resnapshot_is_pending_is_kept_or_refused_postgres(
     let mut rs_config = rs_opts.clone();
     rs_config.dbname(db);
     let rs = psql_helpers::connect(rs_config).await;
-    eventually!(rs.simple_query("CREATE CACHE FROM SELECT v FROM t").await.is_ok());
+    eventually!(
+        rs.simple_query("CREATE CACHE FROM SELECT v FROM t")
+            .await
+            .is_ok()
+    );
     let generation_before = handle.schema_catalog().await.unwrap().generation;
 
     let decided = observe_resnapshot_decision();
@@ -102,7 +106,9 @@ async fn create_cache_while_a_resnapshot_is_pending_is_kept_or_refused_postgres(
         .unwrap();
     enter_wait_before_resnapshot(&mut handle, &decided).await;
     let created = rs
-        .simple_query(&format!("CREATE CACHE {CACHE} FROM SELECT id, v FROM t WHERE id = $1"))
+        .simple_query(&format!(
+            "CREATE CACHE {CACHE} FROM SELECT id, v FROM t WHERE id = $1"
+        ))
         .await
         .map(drop)
         .map_err(|error| format!("{error:?}"));

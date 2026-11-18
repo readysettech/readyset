@@ -25,6 +25,7 @@ use readyset_adapter::BackendBuilder;
 use readyset_adapter::backend::{AllowedUsers, UnsupportedSetMode};
 use readyset_client::CacheMode;
 use readyset_client_metrics::QueryDestination;
+use readyset_client_test_helpers::TestShutdownSender;
 use readyset_client_test_helpers::{
     Adapter, TestBuilder, derive_test_name,
     psql_helpers::{self, PostgreSQLAdapter},
@@ -33,7 +34,6 @@ use readyset_server::Handle;
 use readyset_sql_parsing::ParsingPreset;
 use readyset_tracing::init_test_logging;
 use readyset_util::eventually;
-use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 use tokio::test;
 use tokio_postgres::{Client, SimpleQueryMessage};
@@ -64,7 +64,9 @@ fn owner_ids(rows: &[SimpleQueryMessage]) -> Vec<String> {
 
 /// The `owner_id` of every row of an extended-protocol result.
 fn owner_ids_ext(rows: &[tokio_postgres::Row]) -> Vec<String> {
-    rows.iter().map(|r| r.get::<_, String>("owner_id")).collect()
+    rows.iter()
+        .map(|r| r.get::<_, String>("owner_id"))
+        .collect()
 }
 
 /// Read `SELECT * FROM api.todos` on `proto`, returning each row's `owner_id`
@@ -100,7 +102,10 @@ async fn set_sub_claim(client: &Client, proto: Protocol, sub: &str) {
         }
         Protocol::Extended => {
             client
-                .query("SELECT set_config('request.jwt.claims', $1, false)", &[&claims])
+                .query(
+                    "SELECT set_config('request.jwt.claims', $1, false)",
+                    &[&claims],
+                )
                 .await
                 .expect("set sub claim (extended)");
         }
@@ -202,7 +207,14 @@ async fn setup_upstream(test_name: &str) {
 /// `victim`. Authentication must be on so each client's upstream connection
 /// authenticates as them -- that is what makes upstream reject the victim's
 /// `SET ROLE service_role`.
-async fn connect_auth_rls(test_name: &str) -> (Client, Client, Handle, TestShutdownSender<PostgreSQLAdapter>) {
+async fn connect_auth_rls(
+    test_name: &str,
+) -> (
+    Client,
+    Client,
+    Handle,
+    TestShutdownSender<PostgreSQLAdapter>,
+) {
     let admin_user = std::env::var("PGUSER").unwrap_or_else(|_| "postgres".into());
     let admin_pw = std::env::var("PGPASSWORD").unwrap_or_else(|_| "noria".into());
 
@@ -264,7 +276,11 @@ async fn run_rejected_set_role_no_leak(proto: Protocol) {
         .await
         .expect("create cache");
     let all = vec!["alice", "alice", "bob"];
-    assert_eq!(read_todos(&admin, proto).await, all, "bypass role sees all rows");
+    assert_eq!(
+        read_todos(&admin, proto).await,
+        all,
+        "bypass role sees all rows"
+    );
     assert_eq!(
         eventually_shallow(&admin, proto, "bypass partition resident").await,
         all,
@@ -276,7 +292,11 @@ async fn run_rejected_set_role_no_leak(proto: Protocol) {
         .await
         .expect("victim may assume authenticated");
     set_sub_claim(&victim, proto, "bob").await;
-    assert_eq!(read_todos(&victim, proto).await, vec!["bob"], "victim scoped to bob");
+    assert_eq!(
+        read_todos(&victim, proto).await,
+        vec!["bob"],
+        "victim scoped to bob"
+    );
     assert_eq!(
         eventually_shallow(&victim, proto, "victim partition hits").await,
         vec!["bob"],

@@ -7,10 +7,10 @@ use readyset_adapter::query_status_cache::QueryStatusCache;
 use readyset_adapter::BackendBuilder;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::mysql_helpers::{last_query_info, MySQLAdapter};
+use readyset_client_test_helpers::TestShutdownSender;
 use readyset_client_test_helpers::{sleep, wait_for_table_id_change_and_leader_ready, TestBuilder};
 use readyset_server::Handle;
 use readyset_sql::ast::{CacheType, Relation};
-use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 
 pub async fn setup(
@@ -66,7 +66,10 @@ async fn in_request_path_query_with_fallback() {
     assert_eq!(query_status_cache.cached_list().len(), 1);
     assert_eq!(query_status_cache.proxied_list(CacheType::Deep).len(), 1);
     let info = last_query_info(&mut conn).await;
-    assert_eq!(info.destination, QueryDestination::ReadysetThenUpstream(None));
+    assert_eq!(
+        info.destination,
+        QueryDestination::ReadysetThenUpstream(None)
+    );
     assert!(!info.reason.is_empty());
 
     let res: Result<Vec<Row>> = conn.query("SELECT * FROM t WHERE a = NOW()").await;

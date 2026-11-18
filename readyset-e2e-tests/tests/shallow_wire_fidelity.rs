@@ -125,7 +125,9 @@ async fn formatted_row_bytes(
             .unwrap();
         collect_row_bytes(stream).await
     } else {
-        let params = params.into_iter().map(|p| (p, tokio_postgres::types::Type::INT4));
+        let params = params
+            .into_iter()
+            .map(|p| (p, tokio_postgres::types::Type::INT4));
         let stream = conn.query_typed_raw(query, params, [format]).await.unwrap();
         collect_row_bytes(stream).await
     }
@@ -160,7 +162,10 @@ async fn postgres_shallow_extended_protocol_matches_upstream_bytes() {
     let mut upstream_config = psql_helpers::upstream_config();
     upstream_config.dbname("noria");
     let upstream_conn = psql_helpers::connect(upstream_config).await;
-    upstream_conn.simple_query(CREATE_TYPED_TABLE).await.unwrap();
+    upstream_conn
+        .simple_query(CREATE_TYPED_TABLE)
+        .await
+        .unwrap();
 
     let rs_conn = psql_helpers::connect(rs_opts).await;
 
@@ -230,10 +235,16 @@ async fn postgres_shallow_fill_honors_client_result_format() {
     let mut upstream_config = psql_helpers::upstream_config();
     upstream_config.dbname("noria");
     let upstream_conn = psql_helpers::connect(upstream_config).await;
-    upstream_conn.simple_query(CREATE_TYPED_TABLE).await.unwrap();
+    upstream_conn
+        .simple_query(CREATE_TYPED_TABLE)
+        .await
+        .unwrap();
 
     // Align the session time zone so timestamptz text rendering is comparable.
-    upstream_conn.simple_query("SET TimeZone = 'UTC'").await.unwrap();
+    upstream_conn
+        .simple_query("SET TimeZone = 'UTC'")
+        .await
+        .unwrap();
 
     let rs_conn = psql_helpers::connect(rs_opts).await;
     rs_conn.simple_query("SET TimeZone = 'UTC'").await.unwrap();
@@ -394,15 +405,25 @@ async fn postgres_shallow_simple_protocol_matches_upstream() {
     let mut upstream_config = psql_helpers::upstream_config();
     upstream_config.dbname("noria");
     let upstream_conn = psql_helpers::connect(upstream_config).await;
-    upstream_conn.simple_query(CREATE_TYPED_TABLE).await.unwrap();
+    upstream_conn
+        .simple_query(CREATE_TYPED_TABLE)
+        .await
+        .unwrap();
 
     let rs_conn = psql_helpers::connect(rs_opts).await;
 
     // Align the session time zone so timestamptz text rendering is comparable.
-    upstream_conn.simple_query("SET TimeZone = 'UTC'").await.unwrap();
+    upstream_conn
+        .simple_query("SET TimeZone = 'UTC'")
+        .await
+        .unwrap();
     rs_conn.simple_query("SET TimeZone = 'UTC'").await.unwrap();
 
-    let columns = COLUMN_CASES.iter().map(|(_, col)| *col).collect::<Vec<_>>().join(", ");
+    let columns = COLUMN_CASES
+        .iter()
+        .map(|(_, col)| *col)
+        .collect::<Vec<_>>()
+        .join(", ");
     let query = format!("SELECT id, {columns} FROM shallow_wire ORDER BY id");
 
     let upstream_messages = simple_messages(&upstream_conn, &query).await;

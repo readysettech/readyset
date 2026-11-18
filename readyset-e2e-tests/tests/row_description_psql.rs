@@ -57,7 +57,15 @@ async fn simple_fields(conn: &Client, query: &str) -> Vec<(u32, i16, i32, u32, i
         .expect("query returned no rows");
     row.fields()
         .iter()
-        .map(|f| (f.type_oid(), f.type_size(), f.type_modifier(), f.table_oid(), f.column_id()))
+        .map(|f| {
+            (
+                f.type_oid(),
+                f.type_size(),
+                f.type_modifier(),
+                f.table_oid(),
+                f.column_id(),
+            )
+        })
         .collect()
 }
 
@@ -110,7 +118,11 @@ async fn row_description_matches_upstream() {
     assert_eq!(modifiers(&stmt), expected, "deep cache");
 
     let expected = simple_fields(&upstream, DEEP_SIMPLE).await;
-    assert_eq!(expected.last().unwrap().1, 4, "enum type size: {expected:?}");
+    assert_eq!(
+        expected.last().unwrap().1,
+        4,
+        "enum type size: {expected:?}"
+    );
     let actual = simple_fields(&conn, DEEP_SIMPLE).await;
     let info = last_query_info(&conn).await;
     assert_matches!(info.destination, QueryDestination::Readyset(_), "{info:?}");
@@ -127,7 +139,10 @@ async fn row_description_matches_upstream() {
     let actual = simple_fields(&conn, &left_join_simple).await;
     let info = last_query_info(&conn).await;
     assert_matches!(info.destination, QueryDestination::Readyset(_), "{info:?}");
-    assert_eq!(actual, expected, "deep cache with a LEFT JOIN, simple query");
+    assert_eq!(
+        actual, expected,
+        "deep cache with a LEFT JOIN, simple query"
+    );
 
     let expected = modifiers(&upstream.prepare(PROXIED).await.unwrap());
     let stmt = conn.prepare(PROXIED).await.unwrap();

@@ -78,9 +78,7 @@ async fn duplicate_projected_columns_mysql() {
 async fn duplicate_projected_columns_postgres() {
     init_test_logging();
 
-    let (rs_opts, _handle, shutdown_tx) = TestBuilder::default()
-        .build::<PostgreSQLAdapter>()
-        .await;
+    let (rs_opts, _handle, shutdown_tx) = TestBuilder::default().build::<PostgreSQLAdapter>().await;
     let rs_conn = psql_helpers::connect(rs_opts).await;
 
     let mut upstream_config = psql_helpers::upstream_config();
@@ -88,10 +86,7 @@ async fn duplicate_projected_columns_postgres() {
     let upstream_conn = psql_helpers::connect(upstream_config).await;
 
     upstream_conn
-        .execute(
-            "CREATE TABLE dogs (id INT PRIMARY KEY, name TEXT)",
-            &[],
-        )
+        .execute("CREATE TABLE dogs (id INT PRIMARY KEY, name TEXT)", &[])
         .await
         .unwrap();
 

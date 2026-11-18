@@ -26,16 +26,16 @@
 //! ```
 
 use std::env;
-use std::sync::{Arc, RwLock};
 #[cfg(feature = "failure_injection")]
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, RwLock};
 
 use database_utils::{DatabaseURL, UpstreamConfig as Config};
 #[cfg(feature = "failure_injection")]
 use fail::FailScenario;
 use mysql_async::prelude::Queryable;
-use readyset_client::ReadySetHandle;
 use readyset_client::consensus::{Authority, LocalAuthority, LocalAuthorityStore};
+use readyset_client::ReadySetHandle;
 use readyset_data::{DfValue, Dialect};
 use readyset_errors::ReadySetResult;
 use readyset_server::Builder;
@@ -877,12 +877,9 @@ async fn gtid_crash_recovery() {
     };
 
     // Start Readyset and wait for snapshot
-    let (mut ctx, shutdown_tx) = TestHandle::start_noria(
-        url.to_string(),
-        Some(config.clone()),
-    )
-    .await
-    .unwrap();
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), Some(config.clone()))
+        .await
+        .unwrap();
     ctx.controller_rx
         .as_mut()
         .unwrap()
@@ -950,13 +947,9 @@ async fn gtid_crash_recovery() {
     // Restart the replicator - it should recover and apply remaining events
     let telemetry_sender = TelemetrySender::new_no_op();
     ctx.replicator_tx = Some(
-        ctx.start_repl(
-            Some(config),
-            telemetry_sender,
-            ParsingPreset::for_tests(),
-        )
-        .await
-        .unwrap(),
+        ctx.start_repl(Some(config), telemetry_sender, ParsingPreset::for_tests())
+            .await
+            .unwrap(),
     );
     ctx.controller_rx
         .as_mut()
@@ -1039,12 +1032,9 @@ async fn gtid_crash_recovery_with_post_crash_transactions() {
         ..Default::default()
     };
 
-    let (mut ctx, shutdown_tx) = TestHandle::start_noria(
-        url.to_string(),
-        Some(config.clone()),
-    )
-    .await
-    .unwrap();
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), Some(config.clone()))
+        .await
+        .unwrap();
     ctx.controller_rx
         .as_mut()
         .unwrap()
@@ -1125,13 +1115,9 @@ async fn gtid_crash_recovery_with_post_crash_transactions() {
     // 2. Process GTID B: apply all 3 rows without any skipping
     let telemetry_sender = TelemetrySender::new_no_op();
     ctx.replicator_tx = Some(
-        ctx.start_repl(
-            Some(config),
-            telemetry_sender,
-            ParsingPreset::for_tests(),
-        )
-        .await
-        .unwrap(),
+        ctx.start_repl(Some(config), telemetry_sender, ParsingPreset::for_tests())
+            .await
+            .unwrap(),
     );
     ctx.controller_rx
         .as_mut()
@@ -1650,12 +1636,9 @@ async fn gtid_tag_crash_recovery() {
     };
 
     // Start Readyset and wait for snapshot
-    let (mut ctx, shutdown_tx) = TestHandle::start_noria(
-        url.to_string(),
-        Some(config.clone()),
-    )
-    .await
-    .unwrap();
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), Some(config.clone()))
+        .await
+        .unwrap();
     ctx.controller_rx
         .as_mut()
         .unwrap()
@@ -1734,13 +1717,9 @@ async fn gtid_tag_crash_recovery() {
     // Restart the replicator — it should recover and apply remaining events
     let telemetry_sender = TelemetrySender::new_no_op();
     ctx.replicator_tx = Some(
-        ctx.start_repl(
-            Some(config),
-            telemetry_sender,
-            ParsingPreset::for_tests(),
-        )
-        .await
-        .unwrap(),
+        ctx.start_repl(Some(config), telemetry_sender, ParsingPreset::for_tests())
+            .await
+            .unwrap(),
     );
     ctx.controller_rx
         .as_mut()

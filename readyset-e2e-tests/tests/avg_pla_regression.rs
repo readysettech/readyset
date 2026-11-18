@@ -114,11 +114,9 @@ async fn mysql_bigint_avg_pla_matches_upstream_text() {
         .unwrap();
 
     // MySQL AVG of BIGINT renders as DECIMAL with scale 4 (input_scale + 4).
-    let query =
-        "SELECT grp, AVG(val) FROM avg_pla_test_my WHERE grp > ? GROUP BY grp ORDER BY grp";
+    let query = "SELECT grp, AVG(val) FROM avg_pla_test_my WHERE grp > ? GROUP BY grp ORDER BY grp";
 
-    let upstream_rows: Vec<mysql_async::Row> =
-        upstream_conn.exec(query, (0_i32,)).await.unwrap();
+    let upstream_rows: Vec<mysql_async::Row> = upstream_conn.exec(query, (0_i32,)).await.unwrap();
     let upstream_values: Vec<(i32, String)> = upstream_rows
         .iter()
         .map(|row| {

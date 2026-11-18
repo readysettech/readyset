@@ -19,6 +19,7 @@ use std::time::Duration;
 
 use readyset_adapter::backend::UnsupportedSetMode;
 use readyset_client_metrics::QueryDestination;
+use readyset_client_test_helpers::TestShutdownSender;
 use readyset_client_test_helpers::{
     Adapter, TestBuilder, derive_test_name,
     psql_helpers::{self, PostgreSQLAdapter},
@@ -26,7 +27,6 @@ use readyset_client_test_helpers::{
 use readyset_server::Handle;
 use readyset_sql_parsing::ParsingPreset;
 use readyset_tracing::init_test_logging;
-use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 use tokio::test;
 use tokio_postgres::{Client, SimpleQueryMessage};
@@ -36,9 +36,7 @@ use tokio_postgres::{Client, SimpleQueryMessage};
 fn owner_ids(rows: &[SimpleQueryMessage]) -> Vec<String> {
     rows.iter()
         .filter_map(|m| match m {
-            SimpleQueryMessage::Row(row) => {
-                Some(row.get(1).expect("owner_id column").to_string())
-            }
+            SimpleQueryMessage::Row(row) => Some(row.get(1).expect("owner_id column").to_string()),
             _ => None,
         })
         .collect()
@@ -46,7 +44,9 @@ fn owner_ids(rows: &[SimpleQueryMessage]) -> Vec<String> {
 
 /// The `owner_id` of every row in an extended-protocol (`query`) result.
 fn owner_ids_ext(rows: &[tokio_postgres::Row]) -> Vec<String> {
-    rows.iter().map(|r| r.get::<_, String>("owner_id")).collect()
+    rows.iter()
+        .map(|r| r.get::<_, String>("owner_id"))
+        .collect()
 }
 
 /// Postgres wire protocol a step runs on. `Simple` is the text protocol
@@ -183,7 +183,9 @@ async fn try_read_owner_ids(
 async fn read_owner_ids(client: &Client, proto: Protocol, sql: &str) -> Vec<String> {
     let mut ids = match proto {
         Protocol::Simple => owner_ids(&client.simple_query(sql).await.expect("read (simple)")),
-        Protocol::Extended => owner_ids_ext(&client.query(sql, &[]).await.expect("read (extended)")),
+        Protocol::Extended => {
+            owner_ids_ext(&client.query(sql, &[]).await.expect("read (extended)"))
+        }
     };
     ids.sort();
     ids
@@ -222,7 +224,10 @@ async fn set_claims(client: &Client, proto: Protocol, claims: &str) {
         }
         Protocol::Extended => {
             client
-                .query("SELECT set_config('request.jwt.claims', $1, false)", &[&claims])
+                .query(
+                    "SELECT set_config('request.jwt.claims', $1, false)",
+                    &[&claims],
+                )
                 .await
                 .expect("set claims (extended)");
         }
@@ -286,7 +291,13 @@ async fn assert_served_from_cache(client: &Client, proto: Protocol, expected: &[
 }
 
 /// Prove the cached count of `sql` is served from the shallow cache.
-async fn assert_count_cached(client: &Client, proto: Protocol, sql: &str, expected: i64, ctx: &str) {
+async fn assert_count_cached(
+    client: &Client,
+    proto: Protocol,
+    sql: &str,
+    expected: i64,
+    ctx: &str,
+) {
     read_count(client, proto, sql).await;
     let n = read_count(client, proto, sql).await;
     assert_eq!(n, expected, "{ctx}: cached count");
@@ -299,7 +310,12 @@ async fn assert_count_cached(client: &Client, proto: Protocol, sql: &str, expect
 /// session is genuinely off-cache (e.g. marked untrusted).
 async fn assert_fails_closed(client: &Client, proto: Protocol, ctx: &str) {
     read_todos(client, proto).await;
-    assert_dest(client, QueryDestination::Upstream, &format!("{ctx} (first read)")).await;
+    assert_dest(
+        client,
+        QueryDestination::Upstream,
+        &format!("{ctx} (first read)"),
+    )
+    .await;
     read_todos(client, proto).await;
     assert_dest(
         client,
@@ -426,7 +442,9 @@ async fn pg_rls_shallow_cache_partitions_by_session() {
     // the filled partition resident for the whole test, so the later
     // "served from cache" assertions can't flake on eviction.
     let rows = rs
-        .simple_query("SELECT /*rs+ CREATE SHALLOW CACHE POLICY TTL 300 SECONDS */ * FROM api.todos")
+        .simple_query(
+            "SELECT /*rs+ CREATE SHALLOW CACHE POLICY TTL 300 SECONDS */ * FROM api.todos",
+        )
         .await
         .expect("bob first read");
     assert_eq!(owner_ids(&rows), vec!["bob"], "upstream RLS scopes to bob");
@@ -629,8 +647,8 @@ async fn run_cross_tenant_pk(proto: Protocol) {
     rs.simple_query(
         "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM SELECT * FROM api.todos WHERE id = $1",
     )
-        .await
-        .expect("create parameterized cache");
+    .await
+    .expect("create parameterized cache");
 
     // id 3 is bob's row; ids 1 and 2 are alice's.
     set_sub_claim(&rs, proto, "bob").await;
@@ -639,9 +657,19 @@ async fn run_cross_tenant_pk(proto: Protocol) {
         vec!["bob"],
         "bob sees his own row by id",
     );
-    assert_dest(&rs, QueryDestination::ReadysetThenUpstream(None), "bob id=3 fills").await;
+    assert_dest(
+        &rs,
+        QueryDestination::ReadysetThenUpstream(None),
+        "bob id=3 fills",
+    )
+    .await;
     assert_eq!(read_todo_by_id(&rs, proto, 3).await, vec!["bob"]);
-    assert_dest(&rs, QueryDestination::ReadysetShallow(None), "bob id=3 hits").await;
+    assert_dest(
+        &rs,
+        QueryDestination::ReadysetShallow(None),
+        "bob id=3 hits",
+    )
+    .await;
 
     // Cross-tenant probe: bob asks for alice's row by primary key -> zero rows.
     // The no-leak invariant: bob's partition never serves alice's row.
@@ -651,7 +679,12 @@ async fn run_cross_tenant_pk(proto: Protocol) {
         empty,
         "bob cannot see alice's row by id",
     );
-    assert_dest(&rs, QueryDestination::ReadysetThenUpstream(None), "bob id=1 fills empty").await;
+    assert_dest(
+        &rs,
+        QueryDestination::ReadysetThenUpstream(None),
+        "bob id=1 fills empty",
+    )
+    .await;
 
     // The same key under alice's context returns alice's row from alice's
     // partition, not bob's cached empty result -- and repeats hit her partition.
@@ -661,9 +694,19 @@ async fn run_cross_tenant_pk(proto: Protocol) {
         vec!["alice"],
         "alice sees her own row by id, not bob's cached empty result",
     );
-    assert_dest(&rs, QueryDestination::ReadysetThenUpstream(None), "alice id=1 fills").await;
+    assert_dest(
+        &rs,
+        QueryDestination::ReadysetThenUpstream(None),
+        "alice id=1 fills",
+    )
+    .await;
     assert_eq!(read_todo_by_id(&rs, proto, 1).await, vec!["alice"]);
-    assert_dest(&rs, QueryDestination::ReadysetShallow(None), "alice id=1 hits").await;
+    assert_dest(
+        &rs,
+        QueryDestination::ReadysetShallow(None),
+        "alice id=1 hits",
+    )
+    .await;
 
     shutdown_tx.shutdown().await;
 }
@@ -701,8 +744,17 @@ async fn run_bypass_role(proto: Protocol) {
         .expect("create cache");
 
     let all = vec!["alice", "alice", "bob"];
-    assert_eq!(read_todos(&rs, proto).await, all, "bypass role sees all rows");
-    assert_dest(&rs, QueryDestination::ReadysetThenUpstream(None), "bypass fills").await;
+    assert_eq!(
+        read_todos(&rs, proto).await,
+        all,
+        "bypass role sees all rows"
+    );
+    assert_dest(
+        &rs,
+        QueryDestination::ReadysetThenUpstream(None),
+        "bypass fills",
+    )
+    .await;
     assert_eq!(read_todos(&rs, proto).await, all);
     assert_dest(&rs, QueryDestination::ReadysetShallow(None), "bypass hits").await;
 
@@ -742,7 +794,12 @@ async fn run_anon_no_claims(proto: Protocol) {
     rs.simple_query("SET ROLE anon").await.expect("set anon");
     let empty: Vec<String> = vec![];
     assert_eq!(read_todos(&rs, proto).await, empty, "anon sees no rows");
-    assert_dest(&rs, QueryDestination::ReadysetThenUpstream(None), "anon fills empty").await;
+    assert_dest(
+        &rs,
+        QueryDestination::ReadysetThenUpstream(None),
+        "anon fills empty",
+    )
+    .await;
 
     // An authenticated tenant is a distinct partition and sees its own rows,
     // never served anon's (or anyone else's) result.
@@ -755,7 +812,12 @@ async fn run_anon_no_claims(proto: Protocol) {
         vec!["bob"],
         "authenticated bob is isolated from anon",
     );
-    assert_dest(&rs, QueryDestination::ReadysetThenUpstream(None), "bob fills").await;
+    assert_dest(
+        &rs,
+        QueryDestination::ReadysetThenUpstream(None),
+        "bob fills",
+    )
+    .await;
     assert_eq!(read_todos(&rs, proto).await, vec!["bob"]);
     assert_dest(&rs, QueryDestination::ReadysetShallow(None), "bob hits").await;
 
@@ -802,9 +864,19 @@ async fn pg_rls_shallow_cache_set_config_simple() {
         .expect("set_config (simple)");
 
     assert_eq!(read_todos(&rs, Protocol::Simple).await, vec!["bob"]);
-    assert_dest(&rs, QueryDestination::ReadysetThenUpstream(None), "set_config simple fills").await;
+    assert_dest(
+        &rs,
+        QueryDestination::ReadysetThenUpstream(None),
+        "set_config simple fills",
+    )
+    .await;
     assert_eq!(read_todos(&rs, Protocol::Simple).await, vec!["bob"]);
-    assert_dest(&rs, QueryDestination::ReadysetShallow(None), "set_config simple hits").await;
+    assert_dest(
+        &rs,
+        QueryDestination::ReadysetShallow(None),
+        "set_config simple hits",
+    )
+    .await;
 
     shutdown_tx.shutdown().await;
 }
@@ -835,9 +907,19 @@ async fn pg_rls_shallow_cache_set_namespaced_extended() {
         .expect("SET namespaced (extended)");
 
     assert_eq!(read_todos(&rs, Protocol::Extended).await, vec!["bob"]);
-    assert_dest(&rs, QueryDestination::ReadysetThenUpstream(None), "extended SET fills").await;
+    assert_dest(
+        &rs,
+        QueryDestination::ReadysetThenUpstream(None),
+        "extended SET fills",
+    )
+    .await;
     assert_eq!(read_todos(&rs, Protocol::Extended).await, vec!["bob"]);
-    assert_dest(&rs, QueryDestination::ReadysetShallow(None), "extended SET hits").await;
+    assert_dest(
+        &rs,
+        QueryDestination::ReadysetShallow(None),
+        "extended SET hits",
+    )
+    .await;
 
     shutdown_tx.shutdown().await;
 }
@@ -990,7 +1072,13 @@ async fn run_discard_all_in_transaction(proto: Protocol) {
     run_stmt(&rs, proto, "BEGIN").await;
     run_failing_stmt(&rs, proto, "DISCARD ALL").await;
     run_stmt(&rs, proto, "ROLLBACK").await;
-    assert_served_from_cache(&rs, proto, &["bob"], "bob scoped after rejected DISCARD ALL").await;
+    assert_served_from_cache(
+        &rs,
+        proto,
+        &["bob"],
+        "bob scoped after rejected DISCARD ALL",
+    )
+    .await;
 
     shutdown_tx.shutdown().await;
 }
@@ -1051,13 +1139,23 @@ async fn pg_rls_shallow_cache_rejected_set_config() {
     )
     .await
     .expect_err("upstream rejects an invalid statement_timeout");
-    assert_served_from_cache(&rs, Protocol::Simple, &["bob"], "bob scoped after rejected batch")
-        .await;
+    assert_served_from_cache(
+        &rs,
+        Protocol::Simple,
+        &["bob"],
+        "bob scoped after rejected batch",
+    )
+    .await;
     rs.simple_query(r#"SELECT set_config('request.jwt.claims', '{"sub":"alice"}', false)"#)
         .await
         .expect("set_config batch");
-    assert_served_from_cache(&rs, Protocol::Simple, &["alice", "alice"], "alice after batch")
-        .await;
+    assert_served_from_cache(
+        &rs,
+        Protocol::Simple,
+        &["alice", "alice"],
+        "alice after batch",
+    )
+    .await;
 
     shutdown_tx.shutdown().await;
 }
@@ -1124,7 +1222,12 @@ async fn run_set_then_set_local(proto: Protocol, end: &str, expected: &[&str]) {
 
     run_stmt(&rs, proto, "BEGIN").await;
     set_sub_claim(&rs, proto, "alice").await;
-    run_stmt(&rs, proto, r#"SET LOCAL request.jwt.claims = '{"sub":"carol"}'"#).await;
+    run_stmt(
+        &rs,
+        proto,
+        r#"SET LOCAL request.jwt.claims = '{"sub":"carol"}'"#,
+    )
+    .await;
     run_stmt(&rs, proto, end).await;
     assert_served_from_cache(&rs, proto, expected, &format!("claims after {end}")).await;
 
@@ -1261,8 +1364,11 @@ const SET_OVER_SET_LOCAL: &[&str] = &[
 ];
 
 /// A `SET LOCAL ROLE` after a savepoint reverts at ROLLBACK TO SAVEPOINT.
-const SET_LOCAL_ROLE_AFTER_SAVEPOINT: &[&str] =
-    &["SAVEPOINT s", "SET LOCAL ROLE service_role", "ROLLBACK TO SAVEPOINT s"];
+const SET_LOCAL_ROLE_AFTER_SAVEPOINT: &[&str] = &[
+    "SAVEPOINT s",
+    "SET LOCAL ROLE service_role",
+    "ROLLBACK TO SAVEPOINT s",
+];
 
 #[test]
 #[tags(serial)]
@@ -1499,12 +1605,24 @@ async fn pg_rls_shallow_cache_prepared_set_applies_at_execute() {
         .expect("prepare SET");
     assert_served_from_cache(&rs, Protocol::Simple, &["bob"], "bob scoped after prepare").await;
     rs.execute(&set_alice, &[]).await.expect("execute SET");
-    assert_served_from_cache(&rs, Protocol::Simple, &["alice", "alice"], "alice after execute")
-        .await;
+    assert_served_from_cache(
+        &rs,
+        Protocol::Simple,
+        &["alice", "alice"],
+        "alice after execute",
+    )
+    .await;
     set_sub_claim(&rs, Protocol::Simple, "bob").await;
-    rs.execute(&set_alice, &[]).await.expect("execute SET again");
-    assert_served_from_cache(&rs, Protocol::Simple, &["alice", "alice"], "alice after re-execute")
-        .await;
+    rs.execute(&set_alice, &[])
+        .await
+        .expect("execute SET again");
+    assert_served_from_cache(
+        &rs,
+        Protocol::Simple,
+        &["alice", "alice"],
+        "alice after re-execute",
+    )
+    .await;
 
     shutdown_tx.shutdown().await;
 }
@@ -1530,7 +1648,12 @@ async fn run_reset_claim(proto: Protocol) {
         .expect("create cache");
     set_sub_claim(&rs, proto, "bob").await;
     assert_eq!(read_todos(&rs, proto).await, vec!["bob"], "bob scoped");
-    assert_dest(&rs, QueryDestination::ReadysetThenUpstream(None), "bob fills").await;
+    assert_dest(
+        &rs,
+        QueryDestination::ReadysetThenUpstream(None),
+        "bob fills",
+    )
+    .await;
 
     // Clear only the claim; role stays authenticated -> NULL claim -> no rows.
     run_stmt(&rs, proto, "RESET request.jwt.claims").await;
@@ -1540,7 +1663,12 @@ async fn run_reset_claim(proto: Protocol) {
         empty,
         "cleared claim sees no rows, not bob's",
     );
-    assert_dest(&rs, QueryDestination::ReadysetThenUpstream(None), "unset partition fills").await;
+    assert_dest(
+        &rs,
+        QueryDestination::ReadysetThenUpstream(None),
+        "unset partition fills",
+    )
+    .await;
 
     shutdown_tx.shutdown().await;
 }
@@ -1737,8 +1865,13 @@ async fn pg_rls_shallow_cache_local_session_authorization_fails_closed() {
     rs.simple_query("BEGIN").await.expect("begin");
     run_stmt(&rs, Protocol::Simple, "SET LOCAL ROLE authenticated").await;
     set_sub_claim_local(&rs, Protocol::Simple, "bob").await;
-    assert_served_from_cache(&rs, Protocol::Simple, &["bob"], "bob scoped inside the transaction")
-        .await;
+    assert_served_from_cache(
+        &rs,
+        Protocol::Simple,
+        &["bob"],
+        "bob scoped inside the transaction",
+    )
+    .await;
 
     // Transaction-local identity change: marks the session transaction-untrusted,
     // so reads fail closed despite the UNTIL WRITE cache. The repeat read
@@ -1810,8 +1943,13 @@ async fn run_transaction_local_claim(proto: Protocol) {
     run_stmt(&rs, proto, "BEGIN").await;
     run_stmt(&rs, proto, "SET LOCAL ROLE authenticated").await;
     set_sub_claim_local(&rs, proto, "alice").await;
-    assert_served_from_cache(&rs, proto, &["alice", "alice"], "alice scoped inside the transaction")
-        .await;
+    assert_served_from_cache(
+        &rs,
+        proto,
+        &["alice", "alice"],
+        "alice scoped inside the transaction",
+    )
+    .await;
     run_stmt(&rs, proto, "ROLLBACK").await;
     assert_served_from_cache(
         &rs,
@@ -1862,11 +2000,7 @@ async fn run_golden_production_pattern(proto: Protocol) {
 
     // One PostgREST-shaped request: a transaction that sets role + claim locally,
     // reads, and commits. Returns the rows and where the read was served.
-    async fn request(
-        rs: &Client,
-        proto: Protocol,
-        sub: &str,
-    ) -> (Vec<String>, QueryDestination) {
+    async fn request(rs: &Client, proto: Protocol, sub: &str) -> (Vec<String>, QueryDestination) {
         rs.simple_query("BEGIN").await.expect("begin");
         run_stmt(rs, proto, "SET LOCAL ROLE authenticated").await;
         set_sub_claim_local(rs, proto, sub).await;
@@ -1890,10 +2024,10 @@ async fn run_golden_production_pattern(proto: Protocol) {
         let (rows, dest) = request(&rs, proto, sub).await;
         assert_eq!(rows, expected, "second request returns {sub}'s cached rows");
         assert_matches!(
-        dest,
-        QueryDestination::ReadysetShallow(_),
-        "second identical request must hit the shallow cache, not re-proxy upstream"
-    );
+            dest,
+            QueryDestination::ReadysetShallow(_),
+            "second identical request must hit the shallow cache, not re-proxy upstream"
+        );
     }
 
     shutdown_tx.shutdown().await;
@@ -1972,15 +2106,24 @@ async fn run_join_rls_plain(proto: Protocol) {
         .expect("set role");
     let join = "SELECT t.id, t.owner_id FROM api.todos t \
                 JOIN api.projects p ON t.owner_id = p.owner_id";
-    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {join}"))
-        .await
-        .expect("create cache");
+    rs.simple_query(&format!(
+        "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {join}"
+    ))
+    .await
+    .expect("create cache");
 
     set_sub_claim(&rs, proto, "bob").await;
     assert_owner_ids_cached(&rs, proto, join, &["bob"], "bob's join scoped by RLS").await;
 
     set_sub_claim(&rs, proto, "alice").await;
-    assert_owner_ids_cached(&rs, proto, join, &["alice", "alice"], "alice's join is isolated").await;
+    assert_owner_ids_cached(
+        &rs,
+        proto,
+        join,
+        &["alice", "alice"],
+        "alice's join is isolated",
+    )
+    .await;
 
     set_sub_claim(&rs, proto, "bob").await;
     assert_owner_ids_cached(&rs, proto, join, &["bob"], "bob's join partition intact").await;
@@ -2020,9 +2163,11 @@ async fn run_join_two_rls(proto: Protocol) {
     // Cross join: visible(todos) x visible(orders). bob:1 / alice:2 todos;
     // acme:2 / globex:1 orders.
     let join = "SELECT count(*) FROM api.todos t, api.orders o";
-    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {join}"))
-        .await
-        .expect("create cache");
+    rs.simple_query(&format!(
+        "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {join}"
+    ))
+    .await
+    .expect("create cache");
 
     set_claims(&rs, proto, r#"{"sub":"bob","tenant":"acme"}"#).await;
     assert_count_cached(&rs, proto, join, 2, "bob+acme (1 todo x 2 orders)").await;
@@ -2067,9 +2212,11 @@ async fn run_aggregate_count(proto: Protocol) {
         .await
         .expect("set role");
     let count = "SELECT count(*) FROM api.todos";
-    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {count}"))
-        .await
-        .expect("create cache");
+    rs.simple_query(&format!(
+        "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {count}"
+    ))
+    .await
+    .expect("create cache");
 
     set_sub_claim(&rs, proto, "bob").await;
     assert_count_cached(&rs, proto, count, 1, "bob counts only his row").await;
@@ -2156,8 +2303,13 @@ async fn run_policy_change_invalidation(proto: Protocol) {
     );
 
     // After re-keying, the new (tenant-keyed) partition is served from cache.
-    assert_served_from_cache(&rs, proto, &["alice", "alice"], "after change: re-keyed to tenant")
-        .await;
+    assert_served_from_cache(
+        &rs,
+        proto,
+        &["alice", "alice"],
+        "after change: re-keyed to tenant",
+    )
+    .await;
 
     shutdown_tx.shutdown().await;
 }
@@ -2202,14 +2354,23 @@ async fn run_enable_rls_drops_plain_cache(proto: Protocol) {
         .await
         .expect("set role");
     set_sub_claim(&rs, proto, "bob").await;
-    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {docs}"))
-        .await
-        .expect("create cache");
+    rs.simple_query(&format!(
+        "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {docs}"
+    ))
+    .await
+    .expect("create cache");
 
     // No RLS yet: the Plain cache serves every row, from Readyset (a repeat read
     // hits ReadysetShallow, proving it is cache-served, not an upstream
     // passthrough).
-    assert_owner_ids_cached(&rs, proto, docs, &["alice", "bob"], "plain cache before RLS").await;
+    assert_owner_ids_cached(
+        &rs,
+        proto,
+        docs,
+        &["alice", "bob"],
+        "plain cache before RLS",
+    )
+    .await;
 
     // Enable RLS and add a sub-keyed policy on the upstream.
     upstream
@@ -2273,9 +2434,11 @@ async fn run_search_path_resolution(proto: Protocol) {
         .await
         .expect("set role");
     let docs = "SELECT * FROM documents";
-    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {docs}"))
-        .await
-        .expect("create cache");
+    rs.simple_query(&format!(
+        "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {docs}"
+    ))
+    .await
+    .expect("create cache");
 
     // bob sees only his private row, served from a scoped cache.
     set_sub_claim(&rs, proto, "bob").await;
@@ -2328,9 +2491,11 @@ async fn run_search_path_in_rolled_back_transaction(proto: Protocol) {
         .await
         .expect("set role");
     let docs = "SELECT * FROM documents";
-    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {docs}"))
-        .await
-        .expect("create cache");
+    rs.simple_query(&format!(
+        "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {docs}"
+    ))
+    .await
+    .expect("create cache");
 
     run_stmt(&rs, proto, "BEGIN").await;
     run_stmt(&rs, proto, "SET search_path = public").await;
@@ -2339,7 +2504,14 @@ async fn run_search_path_in_rolled_back_transaction(proto: Protocol) {
     set_sub_claim(&rs, proto, "bob").await;
     assert_owner_ids_cached(&rs, proto, docs, &["bob"], "bob after ROLLBACK").await;
     set_sub_claim(&rs, proto, "alice").await;
-    assert_owner_ids_cached(&rs, proto, docs, &["alice", "alice"], "alice after ROLLBACK").await;
+    assert_owner_ids_cached(
+        &rs,
+        proto,
+        docs,
+        &["alice", "alice"],
+        "alice after ROLLBACK",
+    )
+    .await;
 
     shutdown_tx.shutdown().await;
 }
@@ -2377,9 +2549,11 @@ async fn run_search_path_set_local(proto: Protocol, stmts: &[&str]) {
         .await
         .expect("set role");
     let docs = "SELECT * FROM documents";
-    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {docs}"))
-        .await
-        .expect("create cache");
+    rs.simple_query(&format!(
+        "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {docs}"
+    ))
+    .await
+    .expect("create cache");
     set_sub_claim(&rs, proto, "bob").await;
     run_stmt(&rs, proto, "SET search_path = public").await;
     assert_owner_ids_cached(&rs, proto, docs, &["decoy"], "decoy before SET LOCAL").await;
@@ -2459,9 +2633,11 @@ async fn run_search_path_reset(proto: Protocol, reset: &str) {
         .await
         .expect("set role");
     let docs = "SELECT * FROM documents";
-    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {docs}"))
-        .await
-        .expect("create cache");
+    rs.simple_query(&format!(
+        "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {docs}"
+    ))
+    .await
+    .expect("create cache");
     set_sub_claim(&rs, proto, "bob").await;
     assert_owner_ids_cached(&rs, proto, docs, &["bob"], "bob before reset").await;
 
@@ -2518,9 +2694,11 @@ async fn run_search_path_reset_all_in_rolled_back_transaction(proto: Protocol) {
         .await
         .expect("set role");
     let docs = "SELECT * FROM documents";
-    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {docs}"))
-        .await
-        .expect("create cache");
+    rs.simple_query(&format!(
+        "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {docs}"
+    ))
+    .await
+    .expect("create cache");
 
     run_stmt(&rs, proto, "BEGIN").await;
     run_stmt(&rs, proto, "RESET ALL").await;
@@ -2605,7 +2783,10 @@ async fn run_view_created_after_startup(proto: Protocol) {
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
-    assert!(cached, "a view created after startup never became cacheable");
+    assert!(
+        cached,
+        "a view created after startup never became cacheable"
+    );
 
     // Check per-tenant isolation.
     set_sub_claim(&rs, proto, "alice").await;
@@ -2665,13 +2846,21 @@ async fn run_nested_view_leaf_redefined(proto: Protocol) {
         .await
         .expect("set role");
     set_sub_claim(&rs, proto, "bob").await;
-    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {top}"))
-        .await
-        .expect("create cache");
+    rs.simple_query(&format!(
+        "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {top}"
+    ))
+    .await
+    .expect("create cache");
 
     // Nothing beneath v_top is RLS-active, so the cache is plain and serves every row.
-    assert_owner_ids_cached(&rs, proto, top, &["alice", "bob"], "plain cache before redefine")
-        .await;
+    assert_owner_ids_cached(
+        &rs,
+        proto,
+        top,
+        &["alice", "bob"],
+        "plain cache before redefine",
+    )
+    .await;
 
     // Redefine the leaf to read the RLS-active api.todos (same column names and types).
     upstream
@@ -2695,7 +2884,10 @@ async fn run_nested_view_leaf_redefined(proto: Protocol) {
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
-    assert!(cached, "bob's scoped read after redefining the leaf never came from the cache");
+    assert!(
+        cached,
+        "bob's scoped read after redefining the leaf never came from the cache"
+    );
 
     assert_owner_ids_cached(&rs, proto, top, &["bob"], "bob after redefine").await;
 
@@ -2754,9 +2946,11 @@ async fn run_rls_enabled_beneath_view_hierarchy(proto: Protocol) {
         .await
         .expect("set role");
     set_sub_claim(&rs, proto, "bob").await;
-    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {top}"))
-        .await
-        .expect("create cache");
+    rs.simple_query(&format!(
+        "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {top}"
+    ))
+    .await
+    .expect("create cache");
     assert_owner_ids_cached(&rs, proto, top, &["alice", "bob"], "plain cache before RLS").await;
 
     // Enable RLS and add the policy in one transaction, so no poll observes RLS without a policy.
@@ -2785,7 +2979,10 @@ async fn run_rls_enabled_beneath_view_hierarchy(proto: Protocol) {
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
-    assert!(cached, "bob's scoped read after enabling RLS never came from the cache");
+    assert!(
+        cached,
+        "bob's scoped read after enabling RLS never came from the cache"
+    );
     assert_owner_ids_cached(&rs, proto, top, &["bob"], "bob after RLS").await;
 
     set_sub_claim(&rs, proto, "alice").await;
@@ -2868,10 +3065,19 @@ async fn run_rls_enabled_beneath_view_function(proto: Protocol) {
         .await
         .expect("set role");
     set_sub_claim(&rs, proto, "bob").await;
-    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {view}"))
-        .await
-        .expect("create cache");
-    assert_owner_ids_cached(&rs, proto, view, &["alice", "bob"], "plain cache before RLS").await;
+    rs.simple_query(&format!(
+        "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {view}"
+    ))
+    .await
+    .expect("create cache");
+    assert_owner_ids_cached(
+        &rs,
+        proto,
+        view,
+        &["alice", "bob"],
+        "plain cache before RLS",
+    )
+    .await;
 
     // Enable RLS and add the policy in one transaction, so no poll observes RLS without a policy.
     upstream
@@ -2935,12 +3141,20 @@ async fn run_function_redefined_beneath_view(proto: Protocol) {
         .await
         .expect("set role");
     set_sub_claim(&rs, proto, "bob").await;
-    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {view}"))
-        .await
-        .expect("create cache");
+    rs.simple_query(&format!(
+        "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {view}"
+    ))
+    .await
+    .expect("create cache");
     // api.projects has no RLS, so the cache is plain and serves every row.
-    assert_owner_ids_cached(&rs, proto, view, &["alice", "bob"], "plain cache before redefine")
-        .await;
+    assert_owner_ids_cached(
+        &rs,
+        proto,
+        view,
+        &["alice", "bob"],
+        "plain cache before redefine",
+    )
+    .await;
 
     upstream
         .simple_query(
@@ -2952,7 +3166,14 @@ async fn run_function_redefined_beneath_view(proto: Protocol) {
 
     wait_for_bob_scoped(&rs, proto, view, "after redefining the function").await;
     set_sub_claim(&rs, proto, "alice").await;
-    assert_owner_ids_cached(&rs, proto, view, &["alice", "alice"], "alice after redefine").await;
+    assert_owner_ids_cached(
+        &rs,
+        proto,
+        view,
+        &["alice", "alice"],
+        "alice after redefine",
+    )
+    .await;
 
     shutdown_tx.shutdown().await;
 }
@@ -2981,7 +3202,9 @@ async fn assert_cache_refused(
     expected: &[&str],
 ) {
     let err = rs
-        .simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {query}"))
+        .simple_query(&format!(
+            "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {query}"
+        ))
         .await
         .expect_err("the cache must be refused");
     assert!(
@@ -2990,7 +3213,11 @@ async fn assert_cache_refused(
         "{query}: unexpected refusal: {err:?}",
     );
     for read in ["first read", "repeat"] {
-        assert_eq!(read_owner_ids(rs, proto, query).await, expected, "{query}: {read}");
+        assert_eq!(
+            read_owner_ids(rs, proto, query).await,
+            expected,
+            "{query}: {read}"
+        );
         assert_dest(rs, QueryDestination::Upstream, &format!("{query}: {read}")).await;
     }
 }
@@ -3079,13 +3306,28 @@ async fn run_security_definer_function_beneath_view(proto: Protocol) {
     set_sub_claim(&rs, proto, "bob").await;
 
     let plain = "SELECT * FROM api.doc_owners_v";
-    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {plain}"))
-        .await
-        .expect("create cache");
-    assert_owner_ids_cached(&rs, proto, plain, &["alice", "bob"], "bob over a plain table").await;
+    rs.simple_query(&format!(
+        "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {plain}"
+    ))
+    .await
+    .expect("create cache");
+    assert_owner_ids_cached(
+        &rs,
+        proto,
+        plain,
+        &["alice", "bob"],
+        "bob over a plain table",
+    )
+    .await;
     set_sub_claim(&rs, proto, "alice").await;
-    assert_owner_ids_cached(&rs, proto, plain, &["alice", "bob"], "alice over a plain table")
-        .await;
+    assert_owner_ids_cached(
+        &rs,
+        proto,
+        plain,
+        &["alice", "bob"],
+        "alice over a plain table",
+    )
+    .await;
 
     // The function's owner is the superuser that created it, so upstream returns every row.
     set_sub_claim(&rs, proto, "bob").await;
@@ -3145,9 +3387,11 @@ async fn run_view_security_invoker_toggled(proto: Protocol) {
         .await
         .expect("set role");
     set_sub_claim(&rs, proto, "bob").await;
-    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {view}"))
-        .await
-        .expect("create cache");
+    rs.simple_query(&format!(
+        "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {view}"
+    ))
+    .await
+    .expect("create cache");
     assert_owner_ids_cached(&rs, proto, view, &["bob"], "scoped before toggle").await;
 
     // Owner-context is not representable per session, so once the poller observes the change
@@ -3174,7 +3418,9 @@ async fn run_view_security_invoker_toggled(proto: Protocol) {
 
     // An upstream read only shows the old cache is gone; the analyzer must also refuse a new one.
     let err = rs
-        .simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {view}"))
+        .simple_query(&format!(
+            "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {view}"
+        ))
         .await
         .expect_err("a cache over an owner-context view must be refused");
     assert!(
@@ -3183,7 +3429,12 @@ async fn run_view_security_invoker_toggled(proto: Protocol) {
         "unexpected refusal: {err:?}",
     );
     read_owner_ids(&rs, proto, view).await;
-    assert_dest(&rs, QueryDestination::Upstream, "owner-context view stays upstream").await;
+    assert_dest(
+        &rs,
+        QueryDestination::Upstream,
+        "owner-context view stays upstream",
+    )
+    .await;
 
     // Back to invoker: Postgres scopes the rows at once, and once the poller observes the change
     // the next read re-creates a per-tenant cache. Wait on the routing, since the rows are already
@@ -3195,7 +3446,11 @@ async fn run_view_security_invoker_toggled(proto: Protocol) {
     let mut cached = false;
     for _ in 0..40 {
         let rows = read_owner_ids(&rs, proto, view).await;
-        assert_eq!(rows, ["bob"], "bob sees only his row through the invoker view");
+        assert_eq!(
+            rows,
+            ["bob"],
+            "bob sees only his row through the invoker view"
+        );
         if matches!(
             psql_helpers::last_query_info(&rs).await.destination,
             QueryDestination::ReadysetShallow(_)
@@ -3205,11 +3460,20 @@ async fn run_view_security_invoker_toggled(proto: Protocol) {
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
-    assert!(cached, "turning security_invoker back on was never observed");
+    assert!(
+        cached,
+        "turning security_invoker back on was never observed"
+    );
     assert_owner_ids_cached(&rs, proto, view, &["bob"], "bob after toggle back").await;
     set_sub_claim(&rs, proto, "alice").await;
-    assert_owner_ids_cached(&rs, proto, view, &["alice", "alice"], "alice after toggle back")
-        .await;
+    assert_owner_ids_cached(
+        &rs,
+        proto,
+        view,
+        &["alice", "alice"],
+        "alice after toggle back",
+    )
+    .await;
 
     shutdown_tx.shutdown().await;
 }
@@ -3259,9 +3523,11 @@ async fn run_view_renamed_swap(proto: Protocol) {
         .await
         .expect("set role");
     set_sub_claim(&rs, proto, "bob").await;
-    rs.simple_query(&format!("CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {query}"))
-        .await
-        .expect("create cache");
+    rs.simple_query(&format!(
+        "CREATE SHALLOW CACHE POLICY TTL 300 SECONDS FROM {query}"
+    ))
+    .await
+    .expect("create cache");
 
     // api.docs has no RLS, so the cache is plain and serves every row.
     let mut cached = false;
@@ -3278,7 +3544,10 @@ async fn run_view_renamed_swap(proto: Protocol) {
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
-    assert!(cached, "read before swapping view names never came from the cache");
+    assert!(
+        cached,
+        "read before swapping view names never came from the cache"
+    );
 
     // Swap the names: api.plain_v now reads the RLS-active api.todos.
     upstream
@@ -3305,7 +3574,10 @@ async fn run_view_renamed_swap(proto: Protocol) {
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
-    assert!(cached, "bob's scoped read after swapping view names never came from the cache");
+    assert!(
+        cached,
+        "bob's scoped read after swapping view names never came from the cache"
+    );
 
     set_sub_claim(&rs, proto, "alice").await;
     assert_owner_ids_cached(&rs, proto, query, &["alice", "alice"], "alice after rename").await;

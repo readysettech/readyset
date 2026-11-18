@@ -35,23 +35,26 @@ async fn prepared_reresolves_after_use_db() {
     let upstream_opts = mysql_helpers::upstream_config();
     let mut upstream = Conn::new(upstream_opts).await.unwrap();
     for stmt in [
-        format!("CREATE TABLE {db_a}.items (id BIGINT AUTO_INCREMENT PRIMARY KEY, label TEXT NOT NULL)"),
-        format!("CREATE TABLE {db_b}.items (id BIGINT AUTO_INCREMENT PRIMARY KEY, label TEXT NOT NULL)"),
+        format!(
+            "CREATE TABLE {db_a}.items (id BIGINT AUTO_INCREMENT PRIMARY KEY, label TEXT NOT NULL)"
+        ),
+        format!(
+            "CREATE TABLE {db_b}.items (id BIGINT AUTO_INCREMENT PRIMARY KEY, label TEXT NOT NULL)"
+        ),
         format!("INSERT INTO {db_a}.items (label) VALUES ('a-one'), ('a-two')"),
         format!("INSERT INTO {db_b}.items (label) VALUES ('b-one'), ('b-two'), ('b-three')"),
     ] {
         upstream.query_drop(&stmt).await.unwrap();
     }
 
-    let (rs_opts, _handle, shutdown_tx) = TestBuilder::new(
-        BackendBuilder::default().require_authentication(false),
-    )
-    .recreate_database(false)
-    .replicate_db(&db_a)
-    .fallback(true)
-    .migration_mode(MigrationMode::OutOfBand)
-    .build::<MySQLAdapter>()
-    .await;
+    let (rs_opts, _handle, shutdown_tx) =
+        TestBuilder::new(BackendBuilder::default().require_authentication(false))
+            .recreate_database(false)
+            .replicate_db(&db_a)
+            .fallback(true)
+            .migration_mode(MigrationMode::OutOfBand)
+            .build::<MySQLAdapter>()
+            .await;
 
     // Disable the client statement cache so each `exec` re-prepares.
     let opts = OptsBuilder::from_opts(rs_opts).stmt_cache_size(0);

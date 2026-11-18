@@ -8,11 +8,13 @@
 use readyset_adapter::backend::MigrationMode;
 use readyset_adapter::query_status_cache::{MigrationStyle, QueryStatusCache};
 use readyset_client_metrics::QueryDestination;
+use readyset_client_test_helpers::TestShutdownSender;
 use readyset_client_test_helpers::psql_helpers::PostgreSQLAdapter;
-use readyset_client_test_helpers::{Adapter, TestBuilder, sleep, wait_for_schema_generation_change};
+use readyset_client_test_helpers::{
+    Adapter, TestBuilder, sleep, wait_for_schema_generation_change,
+};
 use readyset_server::Handle;
 use readyset_util::eventually;
-use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 use tokio_postgres::{Client, SimpleQueryMessage};
 
@@ -30,7 +32,11 @@ async fn last_target(client: &Client) -> (QueryDestination, String) {
             _ => None,
         })
         .expect("EXPLAIN LAST STATEMENT row");
-    let destination = row.get(0).expect("destination").parse::<QueryDestination>().unwrap();
+    let destination = row
+        .get(0)
+        .expect("destination")
+        .parse::<QueryDestination>()
+        .unwrap();
     (destination, row.get(1).unwrap_or_default().to_owned())
 }
 
@@ -172,8 +178,9 @@ async fn a_kept_literal_cache_survives_a_new_type() {
         upstream.simple_query(stmt).await.unwrap();
     }
 
-    let query_status_cache: &'static QueryStatusCache =
-        Box::leak(Box::new(QueryStatusCache::new().style(MigrationStyle::Explicit)));
+    let query_status_cache: &'static QueryStatusCache = Box::leak(Box::new(
+        QueryStatusCache::new().style(MigrationStyle::Explicit),
+    ));
     let (rs_opts, mut handle, shutdown_tx) = TestBuilder::default()
         .recreate_database(false)
         .migration_mode(MigrationMode::OutOfBand)

@@ -48,7 +48,9 @@ async fn create_table(db: &str, b: i32) -> Client {
     config.dbname(db);
     let upstream = psql_helpers::connect(config).await;
     upstream
-        .simple_query(&format!("CREATE TABLE t (a INT, b INT); INSERT INTO t VALUES (1, {b})"))
+        .simple_query(&format!(
+            "CREATE TABLE t (a INT, b INT); INSERT INTO t VALUES (1, {b})"
+        ))
         .await
         .unwrap();
     upstream
@@ -95,7 +97,13 @@ async fn shallow_caches_are_per_database() {
         .map(|row| (row.get("name").unwrap(), row.get("database").unwrap()))
         .collect();
     shown.sort();
-    assert_eq!(shown, [("other_cache", other_db.as_str()), ("url_cache", url_db.as_str())]);
+    assert_eq!(
+        shown,
+        [
+            ("other_cache", other_db.as_str()),
+            ("url_cache", url_db.as_str())
+        ]
+    );
 
     for (conn, name) in caches {
         let explained = conn.simple_query("EXPLAIN CACHES").await.unwrap();
@@ -108,9 +116,14 @@ async fn shallow_caches_are_per_database() {
             .map(|row| (row.get("database").unwrap(), row.get("query").unwrap()))
             .collect();
         assert_eq!(explained.len(), 2, "{explained:?}");
-        for (database, name) in [(url_db.as_str(), "url_cache"), (other_db.as_str(), "other_cache")] {
+        for (database, name) in [
+            (url_db.as_str(), "url_cache"),
+            (other_db.as_str(), "other_cache"),
+        ] {
             assert!(
-                explained.iter().any(|(d, q)| *d == database && q.contains(name)),
+                explained
+                    .iter()
+                    .any(|(d, q)| *d == database && q.contains(name)),
                 "{explained:?}"
             );
         }
@@ -119,10 +132,18 @@ async fn shallow_caches_are_per_database() {
     for (conn, b) in [(&url_conn, "100"), (&other_conn, "200")] {
         let (value, info) = query_b(conn).await;
         assert_eq!(value, b);
-        assert_matches!(info.destination, QueryDestination::ReadysetThenUpstream(_), "{info:?}");
+        assert_matches!(
+            info.destination,
+            QueryDestination::ReadysetThenUpstream(_),
+            "{info:?}"
+        );
         let (value, info) = query_b(conn).await;
         assert_eq!(value, b);
-        assert_matches!(info.destination, QueryDestination::ReadysetShallow(_), "{info:?}");
+        assert_matches!(
+            info.destination,
+            QueryDestination::ReadysetShallow(_),
+            "{info:?}"
+        );
     }
 
     // Refreshes run on the refresh pool, which must access the correct database.
@@ -168,7 +189,10 @@ async fn shallow_mode_connects_to_session_database() {
         .await;
 
     let url_conn = psql_helpers::connect(rs_opts.clone()).await;
-    let rows = url_conn.simple_query("SELECT current_database()").await.unwrap();
+    let rows = url_conn
+        .simple_query("SELECT current_database()")
+        .await
+        .unwrap();
     assert_eq!(first_value(&rows), url_db);
 
     rs_opts.dbname(session_db);
@@ -203,9 +227,15 @@ async fn session_database_defaults_to_user_name() {
         .await;
 
     let mut rs_config = tokio_postgres::Config::new();
-    rs_config.host("127.0.0.1").port(rs_opts.get_ports()[0]).user(&user);
+    rs_config
+        .host("127.0.0.1")
+        .port(rs_opts.get_ports()[0])
+        .user(&user);
     let conn = psql_helpers::connect(rs_config).await;
-    let rows = conn.simple_query("SELECT current_database()").await.unwrap();
+    let rows = conn
+        .simple_query("SELECT current_database()")
+        .await
+        .unwrap();
     assert_eq!(first_value(&rows), user);
 
     shutdown_tx.shutdown().await;
@@ -232,7 +262,10 @@ async fn shallow_mode_upstream_url_without_database() {
     for db in ["postgres", db.as_str()] {
         rs_opts.dbname(db);
         let conn = psql_helpers::connect(rs_opts.clone()).await;
-        let rows = conn.simple_query("SELECT current_database()").await.unwrap();
+        let rows = conn
+            .simple_query("SELECT current_database()")
+            .await
+            .unwrap();
         assert_eq!(first_value(&rows), db);
     }
 
@@ -412,12 +445,20 @@ async fn rls_scopes_caches_for_earlier_sessions() {
         assert_eq!(rows(&result).count(), 1);
         assert_eq!(first_value(&result), tenant);
         let info = psql_helpers::last_query_info(conn).await;
-        assert_matches!(info.destination, QueryDestination::ReadysetThenUpstream(_), "{info:?}");
+        assert_matches!(
+            info.destination,
+            QueryDestination::ReadysetThenUpstream(_),
+            "{info:?}"
+        );
         let result = conn.simple_query(TENANT_QUERY).await.unwrap();
         assert_eq!(rows(&result).count(), 1);
         assert_eq!(first_value(&result), tenant);
         let info = psql_helpers::last_query_info(conn).await;
-        assert_matches!(info.destination, QueryDestination::ReadysetShallow(_), "{info:?}");
+        assert_matches!(
+            info.destination,
+            QueryDestination::ReadysetShallow(_),
+            "{info:?}"
+        );
     }
 
     shutdown_tx.shutdown().await;
@@ -493,12 +534,20 @@ async fn rls_role_defaults_key_only_later_sessions() {
     assert_eq!(rows(&result).count(), 1);
     assert_eq!(first_value(&result), "acme");
     let info = psql_helpers::last_query_info(&late).await;
-    assert_matches!(info.destination, QueryDestination::ReadysetThenUpstream(_), "{info:?}");
+    assert_matches!(
+        info.destination,
+        QueryDestination::ReadysetThenUpstream(_),
+        "{info:?}"
+    );
     let result = late.simple_query(TENANT_QUERY).await.unwrap();
     assert_eq!(rows(&result).count(), 1);
     assert_eq!(first_value(&result), "acme");
     let info = psql_helpers::last_query_info(&late).await;
-    assert_matches!(info.destination, QueryDestination::ReadysetShallow(_), "{info:?}");
+    assert_matches!(
+        info.destination,
+        QueryDestination::ReadysetShallow(_),
+        "{info:?}"
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -616,7 +665,11 @@ async fn acl_probes_each_database() {
     url_conn.simple_query(&create).await.unwrap();
     other_conn.simple_query(&create).await.unwrap();
 
-    for (conn, b) in [(&url_conn, "100"), (&other_conn, "200"), (&limited_url_conn, "100")] {
+    for (conn, b) in [
+        (&url_conn, "100"),
+        (&other_conn, "200"),
+        (&limited_url_conn, "100"),
+    ] {
         eventually!(run_test: {
             let result = query_b(conn).await;
             AssertUnwindSafe(move || result)

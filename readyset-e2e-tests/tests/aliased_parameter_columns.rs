@@ -3,13 +3,13 @@
 
 use std::panic::AssertUnwindSafe;
 
-use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter};
 use readyset_client_test_helpers::TestBuilder;
+use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter};
 use readyset_tracing::init_test_logging;
 use readyset_util::eventually;
 use test_utils::{tags, upstream};
-use tokio_postgres::types::{ToSql, Type};
 use tokio_postgres::Client;
+use tokio_postgres::types::{ToSql, Type};
 
 type Param<'a> = &'a (dyn ToSql + Sync);
 
@@ -56,8 +56,18 @@ async fn aliased_parameter_columns_postgres() {
 
     let bob = || ("bob".to_owned(), 2);
     let cases = [
-        (QUERY, [&"bob" as Param, &2i32], [Type::TEXT, Type::INT4], vec![bob(), bob()]),
-        (LIMIT_FIRST, [&1i64, &"bob"], [Type::INT8, Type::TEXT], vec![bob()]),
+        (
+            QUERY,
+            [&"bob" as Param, &2i32],
+            [Type::TEXT, Type::INT4],
+            vec![bob(), bob()],
+        ),
+        (
+            LIMIT_FIRST,
+            [&1i64, &"bob"],
+            [Type::INT8, Type::TEXT],
+            vec![bob()],
+        ),
     ];
     for (query, params, types, rows) in cases {
         eventually!(run_test: {

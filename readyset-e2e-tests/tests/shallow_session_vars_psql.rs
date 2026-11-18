@@ -18,7 +18,13 @@ use tokio_postgres::{Client, Config, SimpleQueryMessage};
 async fn setup(
     query: &str,
     options: &str,
-) -> (Client, Client, Config, Handle, TestShutdownSender<PostgreSQLAdapter>) {
+) -> (
+    Client,
+    Client,
+    Config,
+    Handle,
+    TestShutdownSender<PostgreSQLAdapter>,
+) {
     readyset_tracing::init_test_logging();
     let (opts, handle, shutdown_tx) = TestBuilder::default()
         .fallback(true)

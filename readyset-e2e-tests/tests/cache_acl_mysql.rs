@@ -17,12 +17,12 @@ use readyset_adapter::backend::AllowedUsers;
 use readyset_client::CacheMode;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::TestBuilder;
-use readyset_sql_parsing::ParsingPreset;
-use readyset_server::Handle;
+use readyset_client_test_helpers::TestShutdownSender;
 use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter, last_query_info};
+use readyset_server::Handle;
+use readyset_sql_parsing::ParsingPreset;
 use readyset_tracing::init_test_logging;
 use readyset_util::eventually;
-use readyset_client_test_helpers::TestShutdownSender;
 use test_utils::{tags, upstream};
 
 const ACL_INTERVAL: Duration = Duration::from_secs(2);
@@ -30,7 +30,12 @@ const DB: &str = "noria";
 
 /// Provision a table `alice` and `bob` may read and start Readyset with
 /// authentication on and a short ACL freshness interval.
-async fn setup() -> (mysql_async::Opts, Handle, TestShutdownSender<MySQLAdapter>, Conn) {
+async fn setup() -> (
+    mysql_async::Opts,
+    Handle,
+    TestShutdownSender<MySQLAdapter>,
+    Conn,
+) {
     let mut users = HashMap::new();
     users.insert("acl_alice".to_string(), "pass".into());
     users.insert("acl_bob".to_string(), "pass".into());
@@ -298,7 +303,7 @@ async fn acl_probe_renders_original_shallow_query() {
         .query_drop(format!("CREATE SHALLOW CACHE FROM {query}"))
         .await
         .unwrap();
-    eventually!{
+    eventually! {
         attempts: 40,
         sleep: Duration::from_millis(250),
         message: "alice was never served from the cache she created",

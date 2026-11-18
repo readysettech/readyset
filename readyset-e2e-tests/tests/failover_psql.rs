@@ -97,10 +97,7 @@ async fn psql_stop_start_replication_updates_status() {
         .unwrap();
 
     // Replication Status should be "Stopped".
-    let rows = rs_conn
-        .simple_query("SHOW READYSET STATUS")
-        .await
-        .unwrap();
+    let rows = rs_conn.simple_query("SHOW READYSET STATUS").await.unwrap();
     assert_eq!(replication_status_from(&rows), "Stopped");
 
     // Stopping again should error.
@@ -388,13 +385,9 @@ async fn psql_change_cdc_url() {
         .await
         .unwrap();
 
-    let pg_host =
-        std::env::var("PGHOST").unwrap_or_else(|_| "localhost".into());
-    let pg_port =
-        std::env::var("PGPORT").unwrap_or_else(|_| "5432".into());
-    let bad_url = format!(
-        "postgresql://bad_user:bad_pass@{pg_host}:{pg_port}/{db_name}"
-    );
+    let pg_host = std::env::var("PGHOST").unwrap_or_else(|_| "localhost".into());
+    let pg_port = std::env::var("PGPORT").unwrap_or_else(|_| "5432".into());
+    let bad_url = format!("postgresql://bad_user:bad_pass@{pg_host}:{pg_port}/{db_name}");
 
     let position = upstream_wal_position(&upstream_conn).await;
     rs_conn

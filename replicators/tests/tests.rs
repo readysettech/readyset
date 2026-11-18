@@ -1274,10 +1274,12 @@ async fn mysql_create_table_like_with_ignored() {
         ]
     );
 
-    assert!(!ctx.noria.tables().await.unwrap().contains_key(&Relation::new(
-        Some("public".into()),
-        "like_table".into(),
-    )));
+    assert!(!ctx
+        .noria
+        .tables()
+        .await
+        .unwrap()
+        .contains_key(&Relation::new(Some("public".into()), "like_table".into(),)));
 
     let non_replicated_rels = ctx.noria.non_replicated_relations().await.unwrap();
     let relation = Relation::new(Some("public".into()), "like_table".into());
@@ -3112,7 +3114,9 @@ async fn postgresql_cleanup_publication_with_server_id() {
         .unwrap();
 
     assert!(postgresql_publication_exists(&client, "readyset").await);
-    assert!(postgresql_slot_state(&client, "readyset_cleanup").await.is_some());
+    assert!(postgresql_slot_state(&client, "readyset_cleanup")
+        .await
+        .is_some());
 
     ctx.stop().await;
     shutdown_tx.shutdown().await;
@@ -3132,7 +3136,10 @@ async fn postgresql_cleanup_publication_with_server_id() {
     replicators::cleanup(cleanup_config.clone()).await.unwrap();
 
     assert!(postgresql_publication_exists(&client, "readyset").await);
-    assert_eq!(postgresql_slot_state(&client, "readyset_cleanup").await, None);
+    assert_eq!(
+        postgresql_slot_state(&client, "readyset_cleanup").await,
+        None
+    );
 
     client
         .simple_query("SELECT pg_drop_replication_slot('readyset_other')")
@@ -4979,8 +4986,10 @@ async fn alter_table_add_key_mysql() {
     assert!(tables.contains_key(&relation));
     assert_eq!(caches.len(), 1);
     let table_id = tables.get(&relation).unwrap();
-    let bogus_table =
-        Relation::new(Some("public".into()), "test_alter_table_add_key_bogus".into());
+    let bogus_table = Relation::new(
+        Some("public".into()),
+        "test_alter_table_add_key_bogus".into(),
+    );
     let bogus_table_id = tables.get(&bogus_table).unwrap();
 
     let verify_tables_and_caches =
@@ -5240,20 +5249,15 @@ async fn mysql_batch_replication_then_crash_recovery() {
         .unwrap();
 
     // Verify snapshot
-    ctx.get_results(
-        "batch_then_crash",
-        &[&[DfValue::Int(0), DfValue::Int(100)]],
-    )
-    .await
-    .unwrap();
+    ctx.get_results("batch_then_crash", &[&[DfValue::Int(0), DfValue::Int(100)]])
+        .await
+        .unwrap();
 
     // Transaction A: 5 rows, committed normally (no failpoint yet)
     client.query("START TRANSACTION;").await.unwrap();
     for i in 1..=5 {
         client
-            .query(&format!(
-                "INSERT INTO batch_then_crash VALUES ({i}, {i});"
-            ))
+            .query(&format!("INSERT INTO batch_then_crash VALUES ({i}, {i});"))
             .await
             .unwrap();
     }
@@ -5282,10 +5286,7 @@ async fn mysql_batch_replication_then_crash_recovery() {
 
     fail::cfg_callback(failpoints::MYSQL_GTID_ROW_EVENT, move || {
         let count = BATCH_ROW_EVENT_COUNT.fetch_add(1, Ordering::SeqCst);
-        info!(
-            "FAILPOINT: batch-then-crash row event, count={}",
-            count + 1
-        );
+        info!("FAILPOINT: batch-then-crash row event, count={}", count + 1);
         if count >= 3 {
             panic!("Injected crash after {} row events", count + 1);
         }
@@ -5298,9 +5299,7 @@ async fn mysql_batch_replication_then_crash_recovery() {
     client.query("START TRANSACTION;").await.unwrap();
     for i in 6..=10 {
         client
-            .query(&format!(
-                "INSERT INTO batch_then_crash VALUES ({i}, {i});"
-            ))
+            .query(&format!("INSERT INTO batch_then_crash VALUES ({i}, {i});"))
             .await
             .unwrap();
     }
@@ -5419,12 +5418,9 @@ async fn mysql_group_commit_crash_recovery() {
         ..Default::default()
     };
 
-    let (mut ctx, shutdown_tx) = TestHandle::start_noria(
-        url.to_string(),
-        Some(config),
-    )
-    .await
-    .unwrap();
+    let (mut ctx, shutdown_tx) = TestHandle::start_noria(url.to_string(), Some(config))
+        .await
+        .unwrap();
     ctx.controller_rx
         .as_mut()
         .unwrap()
@@ -5481,10 +5477,7 @@ async fn mysql_group_commit_crash_recovery() {
 
     fail::cfg_callback(failpoints::MYSQL_GTID_ROW_EVENT, move || {
         let count = GC_ROW_EVENT_COUNT.fetch_add(1, Ordering::SeqCst);
-        info!(
-            "FAILPOINT: gc-crash row event, count={}",
-            count + 1
-        );
+        info!("FAILPOINT: gc-crash row event, count={}", count + 1);
         if count >= 3 {
             panic!("Injected crash after {} row events", count + 1);
         }
@@ -5628,8 +5621,10 @@ async fn alter_table_add_key_postgres() {
     assert!(tables.contains_key(&relation));
     assert_eq!(caches.len(), 1);
     let table_id = tables.get(&relation).unwrap();
-    let bogus_table =
-        Relation::new(Some("public".into()), "test_alter_table_add_key_bogus".into());
+    let bogus_table = Relation::new(
+        Some("public".into()),
+        "test_alter_table_add_key_bogus".into(),
+    );
     let bogus_table_id = tables.get(&bogus_table).unwrap();
 
     let verify_tables_and_caches =
@@ -6094,9 +6089,7 @@ async fn mysql_invisible_column_inner() {
 
     // 3) Replication: insert a new row via binlog and verify both caches update
     client
-        .query(
-            "INSERT INTO `invisible_col` (id, visible_col, hidden_col) VALUES (3, 30, 300);",
-        )
+        .query("INSERT INTO `invisible_col` (id, visible_col, hidden_col) VALUES (3, 30, 300);")
         .await
         .unwrap();
 
@@ -6389,10 +6382,7 @@ async fn pgsql_truncate_during_group_commit() {
         .query("INSERT INTO gc_trunc_a VALUES (2, 20)")
         .await
         .unwrap();
-    client
-        .query("TRUNCATE TABLE gc_trunc_b")
-        .await
-        .unwrap();
+    client.query("TRUNCATE TABLE gc_trunc_b").await.unwrap();
 
     // Table A should have both rows (original + new insert).
     check_results!(
@@ -6643,10 +6633,7 @@ async fn pgsql_group_commit_truncate_preserves_pending_position() {
     // TRUNCATE. The flush is the critical code path exercised by this
     // test: BEGIN of this transaction clobbers `cur_pos` to
     // `(T2.final_lsn, 0)` before the Truncate arm is reached.
-    client
-        .query("TRUNCATE TABLE gc_pos_b")
-        .await
-        .unwrap();
+    client.query("TRUNCATE TABLE gc_pos_b").await.unwrap();
 
     // Wait for the replicator to hit the failpoint and panic, then stop
     // the replicator task so we can inspect the controller state without

@@ -1,8 +1,8 @@
 use std::panic::AssertUnwindSafe;
 
 use mysql_async::{Conn, Row, prelude::Queryable};
-use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
 use readyset_client_test_helpers::TestBuilder;
+use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter};
 use readyset_sql_parsing::ParsingPreset;
 use readyset_util::eventually;
 use test_utils::{tags, upstream};

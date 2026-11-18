@@ -7,12 +7,12 @@ use readyset_adapter::backend::MigrationMode;
 use readyset_adapter::query_status_cache::MigrationStyle;
 use readyset_client_metrics::QueryDestination;
 use readyset_client_test_helpers::TestBuilder;
+use readyset_client_test_helpers::TestShutdownSender;
 use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter, last_query_info};
 use readyset_client_test_helpers::wait_for_schema_generation_change;
 use readyset_server::Handle;
-use readyset_util::failpoints;
-use readyset_client_test_helpers::TestShutdownSender;
 use readyset_util::eventually;
+use readyset_util::failpoints;
 use std::time::Duration;
 use test_utils::{tags, upstream};
 use tokio::time::sleep;
@@ -557,8 +557,7 @@ async fn create_cache_by_query_id_text_protocol() {
 async fn create_cache_by_query_id_prepared() {
     readyset_tracing::init_test_logging();
 
-    let (rs_opts, _handle, shutdown_tx) =
-        TestBuilder::default().build::<MySQLAdapter>().await;
+    let (rs_opts, _handle, shutdown_tx) = TestBuilder::default().build::<MySQLAdapter>().await;
 
     let db_name = rs_opts.db_name().unwrap().to_string();
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(db_name));
@@ -613,10 +612,7 @@ async fn create_cache_by_query_id_prepared() {
     // records the current schema generation.
     let mut rs_conn2 = mysql_async::Conn::new(rs_opts).await.unwrap();
     rs_conn2
-        .exec_drop(
-            "SELECT * FROM cache_by_id_prep WHERE id = ?",
-            (1,),
-        )
+        .exec_drop("SELECT * FROM cache_by_id_prep WHERE id = ?", (1,))
         .await
         .unwrap();
 

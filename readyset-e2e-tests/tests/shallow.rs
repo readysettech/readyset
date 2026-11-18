@@ -338,12 +338,30 @@ async fn show_shallow_caches() {
     let count: u64 = count.parse().unwrap();
     assert!(count >= 1, "expected at least one shallow hit, got {count}");
 
-    let mut properties: HashSet<_> = properties.split(",").map(|p| p.trim().to_string()).collect();
-    assert!(properties.remove("shallow"), "missing expected shallow property: {properties:?}");
-    assert!(properties.remove("ttl 32000 ms"), "missing expected ttl: {properties:?}");
-    assert!(properties.remove("refresh 8000 ms"), "missing expected refresh: {properties:?}");
-    assert!(properties.remove("coalesce 2000 ms"), "missing expected coalesce: {properties:?}");
-    assert!(properties.is_empty(), "unexpected properties remaining: {properties:?}");
+    let mut properties: HashSet<_> = properties
+        .split(",")
+        .map(|p| p.trim().to_string())
+        .collect();
+    assert!(
+        properties.remove("shallow"),
+        "missing expected shallow property: {properties:?}"
+    );
+    assert!(
+        properties.remove("ttl 32000 ms"),
+        "missing expected ttl: {properties:?}"
+    );
+    assert!(
+        properties.remove("refresh 8000 ms"),
+        "missing expected refresh: {properties:?}"
+    );
+    assert!(
+        properties.remove("coalesce 2000 ms"),
+        "missing expected coalesce: {properties:?}"
+    );
+    assert!(
+        properties.is_empty(),
+        "unexpected properties remaining: {properties:?}"
+    );
 
     // Check the shallow_caches vrel.
     #[allow(clippy::type_complexity)]
@@ -368,13 +386,24 @@ async fn show_shallow_caches() {
     assert_eq!(*always, false);
     assert_eq!(*schedule, false);
     assert!(*hits >= 1, "expected at least one shallow hit, got {hits}");
-    assert!(*misses >= 1, "expected at least one shallow miss, got {misses}");
+    assert!(
+        *misses >= 1,
+        "expected at least one shallow miss, got {misses}"
+    );
 
     // Check the shallow_cache_refresh_stats vrel: this cache is neither adaptive nor scheduled, so
     // the load and scheduler stats are NULL; wasted_refreshes and dropped_refreshes are counters, so
     // they read 0.
     #[allow(clippy::type_complexity)]
-    let rows: Vec<(String, u64, u64, Option<u64>, Option<u64>, Option<bool>, Option<u64>)> = readyset
+    let rows: Vec<(
+        String,
+        u64,
+        u64,
+        Option<u64>,
+        Option<u64>,
+        Option<bool>,
+        Option<u64>,
+    )> = readyset
         .query(
             "SELECT query_id, wasted_refreshes, dropped_refreshes, load_actual_ppm,
                     load_baseline_ppm, over_cap, scheduler_queue_len
@@ -565,7 +594,10 @@ async fn shallow_coalesce_stats() {
         .unwrap();
     assert_eq!(rows.len(), 1, "expected exactly one shallow cache");
     let (coalesces,) = rows[0];
-    assert!(coalesces >= 1, "expected coalesced requests, got {coalesces}");
+    assert!(
+        coalesces >= 1,
+        "expected coalesced requests, got {coalesces}"
+    );
 
     #[allow(clippy::type_complexity)]
     let rows: Vec<(u64, u64, u64, u64, u64, u64, u64, u64)> = readyset
@@ -592,7 +624,10 @@ async fn shallow_coalesce_stats() {
         total_us > 0,
         "expected positive total coalesce wait, got {total_us}"
     );
-    assert!(avg_us > 0, "expected positive avg coalesce wait, got {avg_us}");
+    assert!(
+        avg_us > 0,
+        "expected positive avg coalesce wait, got {avg_us}"
+    );
     assert_eq!(timeouts, 0, "expected no coalesce timeouts, got {timeouts}");
     assert_eq!(aborts, 0, "expected no coalesce aborts, got {aborts}");
     assert_eq!(
@@ -718,7 +753,10 @@ async fn shallow_coalesce_timeout_stats() {
         "expected positive timeout wait, got {timeout_total_us}"
     );
     assert_eq!(aborts, 0, "expected no coalesce aborts, got {aborts}");
-    assert_eq!(abort_total_us, 0, "expected no abort wait, got {abort_total_us}");
+    assert_eq!(
+        abort_total_us, 0,
+        "expected no abort wait, got {abort_total_us}"
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -862,8 +900,11 @@ async fn coalescing_handles_query_burst() {
     let barrier = Arc::new(tokio::sync::Barrier::new(24));
     let readers: Vec<_> = (0..24)
         .map(|_| {
-            let (opts, db, barrier) =
-                (readyset_opts.clone(), test_name.clone(), Arc::clone(&barrier));
+            let (opts, db, barrier) = (
+                readyset_opts.clone(),
+                test_name.clone(),
+                Arc::clone(&barrier),
+            );
             tokio::spawn(async move {
                 let mut conn = mysql_async::Conn::new(opts).await.unwrap();
                 conn.query_drop(format!("USE {db}")).await.unwrap();
@@ -1055,7 +1096,10 @@ async fn shallow_cache_entry_bytes() {
         let entries: Vec<(String, String, String, String, String, String, String)> =
             readyset.query("SHOW SHALLOW CACHE ENTRIES").await.unwrap();
         assert_eq!(entries.len(), 1);
-        let bytes: u64 = entries[0].6.parse().expect("bytes column should be numeric");
+        let bytes: u64 = entries[0]
+            .6
+            .parse()
+            .expect("bytes column should be numeric");
         assert!((low..high).contains(&bytes), "unexpected size: {bytes}");
 
         // Verify bytes via vrel.
@@ -1128,7 +1172,9 @@ async fn mysql_change_upstream() {
 
     let url_a = MySQLAdapter::upstream_url(&db_a);
     let url_b = MySQLAdapter::upstream_url(&db_b);
-    let upstream_config = Arc::new(RwLock::new(UpstreamConfig::from_url(&url_a).expect("valid upstream URL")));
+    let upstream_config = Arc::new(RwLock::new(
+        UpstreamConfig::from_url(&url_a).expect("valid upstream URL"),
+    ));
 
     let backend_builder = BackendBuilder::default()
         .require_authentication(false)
@@ -1570,7 +1616,9 @@ async fn pg_change_upstream() {
 
     let url_a = PostgreSQLAdapter::upstream_url(&db_a);
     let url_b = PostgreSQLAdapter::upstream_url(&db_b);
-    let upstream_config = Arc::new(RwLock::new(UpstreamConfig::from_url(&url_a).expect("valid upstream URL")));
+    let upstream_config = Arc::new(RwLock::new(
+        UpstreamConfig::from_url(&url_a).expect("valid upstream URL"),
+    ));
 
     let backend_builder = BackendBuilder::default()
         .require_authentication(false)
@@ -1762,9 +1810,9 @@ async fn hint_idempotent_when_cache_exists() {
             .unwrap();
         assert_eq!(rows, vec![(1,)]);
         assert_matches!(
-        last_query_info(&mut readyset).await.destination,
-        QueryDestination::ReadysetShallow(_)
-    );
+            last_query_info(&mut readyset).await.destination,
+            QueryDestination::ReadysetShallow(_)
+        );
     }
 
     shutdown_tx.shutdown().await;
@@ -2297,7 +2345,11 @@ async fn skip_cache_hint_bypasses_shallow_cache() {
         .query("SELECT /*rs+ SKIP CACHE */ id, val FROM t WHERE id = 1")
         .await
         .unwrap();
-    assert_eq!(rows, vec![(1, 999)], "SKIP CACHE should return fresh data from upstream");
+    assert_eq!(
+        rows,
+        vec![(1, 999)],
+        "SKIP CACHE should return fresh data from upstream"
+    );
     assert_eq!(
         last_query_info(&mut readyset).await.destination,
         QueryDestination::Upstream,
@@ -2309,7 +2361,11 @@ async fn skip_cache_hint_bypasses_shallow_cache() {
         .query("SELECT id, val FROM t WHERE id = 1")
         .await
         .unwrap();
-    assert_eq!(rows, vec![(1, 100)], "Without hint, cache should still serve stale data");
+    assert_eq!(
+        rows,
+        vec![(1, 100)],
+        "Without hint, cache should still serve stale data"
+    );
     assert_matches!(
         last_query_info(&mut readyset).await.destination,
         QueryDestination::ReadysetShallow(_),
@@ -2400,7 +2456,11 @@ async fn skip_cache_hint_bypasses_shallow_cache_prepared() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(row, (1, 999), "SKIP CACHE prepared exec should return fresh data from upstream");
+    assert_eq!(
+        row,
+        (1, 999),
+        "SKIP CACHE prepared exec should return fresh data from upstream"
+    );
     assert_eq!(
         last_query_info(&mut readyset).await.destination,
         QueryDestination::Upstream,
@@ -2413,7 +2473,11 @@ async fn skip_cache_hint_bypasses_shallow_cache_prepared() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(row, (1, 100), "Without hint, cache should still serve stale data");
+    assert_eq!(
+        row,
+        (1, 100),
+        "Without hint, cache should still serve stale data"
+    );
     assert_matches!(
         last_query_info(&mut readyset).await.destination,
         QueryDestination::ReadysetShallow(_),
@@ -2485,7 +2549,10 @@ async fn shallow_prepared_statement_survives_drop(create: &str, drop: &str, othe
     readyset.query_drop(create).await.unwrap();
 
     // Hold the statement handle so the executes reuse the same server-side statement.
-    let stmt = readyset.prep("SELECT val FROM t WHERE id = ?").await.unwrap();
+    let stmt = readyset
+        .prep("SELECT val FROM t WHERE id = ?")
+        .await
+        .unwrap();
     assert_prepared_fills_then_hits(&mut readyset, &stmt, "initial cache").await;
 
     dropper
@@ -2696,7 +2763,10 @@ async fn pg_show_shallow_cache_entries() {
     let refresh_time_ms: i64 = first_row_col(&rows, 4)
         .parse()
         .expect("refresh_time_ms should be numeric");
-    assert!(refresh_time_ms < 60_000, "refresh should be well under the 60s TTL");
+    assert!(
+        refresh_time_ms < 60_000,
+        "refresh should be well under the 60s TTL"
+    );
     let refresh_period_ms: i64 = first_row_col(&rows, 5)
         .parse()
         .expect("refresh_period_ms should be numeric, not NULL, given REFRESH EVERY 30 SECONDS");
@@ -2942,10 +3012,7 @@ async fn pg_skip_cache_hint_bypasses_shallow_cache_prepared() {
         .prepare("SELECT /*rs+ SKIP CACHE */ id, val FROM t WHERE id = $1")
         .await
         .expect("prepare skip");
-    let row = rs
-        .query_one(&skip_stmt, &[&1i32])
-        .await
-        .expect("skip exec");
+    let row = rs.query_one(&skip_stmt, &[&1i32]).await.expect("skip exec");
     assert_eq!(row.get::<_, i32>(1), 999);
     assert_eq!(
         psql_helpers::last_query_info(&rs).await.destination,
@@ -2985,15 +3052,20 @@ async fn coalesce_upstream_query_failure_midflight() {
     let mut upstream = mysql_async::Conn::new(upstream_opts).await.unwrap();
     let mut readyset_a = mysql_async::Conn::new(readyset_opts.clone()).await.unwrap();
     let mut readyset_b = mysql_async::Conn::new(readyset_opts.clone()).await.unwrap();
-    readyset_a.query_drop(format!("USE {test_name}")).await.unwrap();
-    readyset_b.query_drop(format!("USE {test_name}")).await.unwrap();
+    readyset_a
+        .query_drop(format!("USE {test_name}"))
+        .await
+        .unwrap();
+    readyset_b
+        .query_drop(format!("USE {test_name}"))
+        .await
+        .unwrap();
 
     let create_table = "CREATE TABLE foo (a INT); INSERT INTO foo VALUES (42)";
     let drop_table = "DROP TABLE foo";
     let query = "SELECT a FROM foo WHERE a = 42";
-    let create_cache = format!(
-        "CREATE SHALLOW CACHE POLICY TTL 60 SECONDS COALESCE 5 SECONDS FROM {query}",
-    );
+    let create_cache =
+        format!("CREATE SHALLOW CACHE POLICY TTL 60 SECONDS COALESCE 5 SECONDS FROM {query}",);
 
     // Create the cache.
     upstream.query_drop(create_table).await.unwrap();
@@ -3040,18 +3112,23 @@ async fn refresh_resumes_after_upstream_failure() {
     let upstream_opts = mysql_helpers::upstream_config().db_name(Some(&test_name));
     let mut upstream = mysql_async::Conn::new(upstream_opts).await.unwrap();
     let mut readyset = mysql_async::Conn::new(readyset_opts).await.unwrap();
-    readyset.query_drop(format!("USE {test_name}")).await.unwrap();
+    readyset
+        .query_drop(format!("USE {test_name}"))
+        .await
+        .unwrap();
 
     let create_table = "CREATE TABLE foo (a INT)";
     let drop_table = "DROP TABLE foo";
     let query = "SELECT * FROM foo";
-    let create_cache = format!(
-        "CREATE SHALLOW CACHE POLICY TTL 60 SECONDS REFRESH 1 SECONDS FROM {query}"
-    );
+    let create_cache =
+        format!("CREATE SHALLOW CACHE POLICY TTL 60 SECONDS REFRESH 1 SECONDS FROM {query}");
 
     // Create and fill the cache, and then let the entry go stale.
     upstream.query_drop(create_table).await.unwrap();
-    upstream.query_drop("INSERT INTO foo VALUES (1)").await.unwrap();
+    upstream
+        .query_drop("INSERT INTO foo VALUES (1)")
+        .await
+        .unwrap();
     readyset.query_drop(create_cache).await.unwrap();
     let (v,): (i32,) = readyset.query_first(query).await.unwrap().unwrap();
     assert_eq!(v, 1);
@@ -3075,7 +3152,10 @@ async fn refresh_resumes_after_upstream_failure() {
 
     // Restore the table so the next hit can trigger a refresh (of a new table value).
     upstream.query_drop(create_table).await.unwrap();
-    upstream.query_drop("INSERT INTO foo VALUES (2)").await.unwrap();
+    upstream
+        .query_drop("INSERT INTO foo VALUES (2)")
+        .await
+        .unwrap();
     let (v,): (i32,) = readyset.query_first(query).await.unwrap().unwrap();
     assert_eq!(v, 1);
     assert_matches!(
@@ -3100,13 +3180,21 @@ async fn refresh_resumes_after_upstream_failure() {
         .query("SELECT dropped_refreshes FROM readyset.shallow_cache_refresh_stats")
         .await
         .unwrap();
-    assert!(rows[0].0 >= 1, "expected a dropped refresh, got {}", rows[0].0);
+    assert!(
+        rows[0].0 >= 1,
+        "expected a dropped refresh, got {}",
+        rows[0].0
+    );
 
     let rows: Vec<(u64,)> = readyset
         .query("SELECT refreshes FROM readyset.shallow_caches")
         .await
         .unwrap();
-    assert!(rows[0].0 >= 1, "expected a successful refresh, got {}", rows[0].0);
+    assert!(
+        rows[0].0 >= 1,
+        "expected a successful refresh, got {}",
+        rows[0].0
+    );
 
     shutdown_tx.shutdown().await;
 }
@@ -3464,10 +3552,7 @@ async fn explain_caches_renders_original_shallow_query() {
         .await
         .unwrap();
 
-    let rows: Vec<mysql_async::Row> = readyset
-        .query("EXPLAIN CACHES")
-        .await
-        .unwrap();
+    let rows: Vec<mysql_async::Row> = readyset.query("EXPLAIN CACHES").await.unwrap();
 
     assert_eq!(rows.len(), 1);
     let create: String = rows.first().unwrap().get(0).unwrap();
@@ -3477,14 +3562,8 @@ async fn explain_caches_renders_original_shallow_query() {
         readyset.query_drop(stmt).await.unwrap();
     }
 
-    readyset
-        .query_drop(query)
-        .await
-        .unwrap();
-    readyset
-        .query_drop(query)
-        .await
-        .unwrap();
+    readyset.query_drop(query).await.unwrap();
+    readyset.query_drop(query).await.unwrap();
     assert_matches!(
         last_query_info(&mut readyset).await.destination,
         QueryDestination::ReadysetShallow(..)
@@ -3541,9 +3620,7 @@ async fn explain_caches_prefixes_schema_before_create() {
         .await;
     let rs = psql_helpers::connect(rs_opts).await;
 
-    rs.simple_query("SET search_path = public")
-        .await
-        .unwrap();
+    rs.simple_query("SET search_path = public").await.unwrap();
     rs.simple_query("CREATE SHALLOW CACHE FROM SELECT 1")
         .await
         .unwrap();

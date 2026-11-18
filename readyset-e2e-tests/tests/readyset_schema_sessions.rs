@@ -75,7 +75,9 @@ async fn assert_readyset_schema_session_psql(conn: &Client) {
     conn.simple_query("SHOW READYSET VERSION").await.unwrap();
     conn.simple_query("SHOW READYSET STATUS").await.unwrap();
 
-    conn.simple_query("SET search_path TO public").await.unwrap();
+    conn.simple_query("SET search_path TO public")
+        .await
+        .unwrap();
     conn.simple_query("SET search_path TO readyset")
         .await
         .unwrap();
@@ -203,7 +205,9 @@ async fn set_search_path_runs_readyset_commands_psql() {
         .unwrap();
     assert_readyset_schema_session_psql(&conn).await;
 
-    conn.simple_query("SET search_path TO public").await.unwrap();
+    conn.simple_query("SET search_path TO public")
+        .await
+        .unwrap();
     conn.simple_query("SELECT a FROM search_path_test")
         .await
         .unwrap();
@@ -266,9 +270,9 @@ async fn readyset_schema_session_with_unreachable_upstream_mysql() {
 
     let backend_builder = BackendBuilder::default()
         .require_authentication(false)
-        .upstream_config(Some(Arc::new(RwLock::new(UpstreamConfig::from_url(
-            UNREACHABLE_MYSQL_UPSTREAM,
-        ).expect("valid upstream URL")))));
+        .upstream_config(Some(Arc::new(RwLock::new(
+            UpstreamConfig::from_url(UNREACHABLE_MYSQL_UPSTREAM).expect("valid upstream URL"),
+        ))));
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::new(backend_builder)
         .recreate_database(false)
         .replicate_db(&test_name)
@@ -306,9 +310,9 @@ async fn readyset_schema_session_with_unreachable_upstream_psql() {
 
     let backend_builder = BackendBuilder::default()
         .require_authentication(false)
-        .upstream_config(Some(Arc::new(RwLock::new(UpstreamConfig::from_url(
-            UNREACHABLE_PSQL_UPSTREAM,
-        ).expect("valid upstream URL")))));
+        .upstream_config(Some(Arc::new(RwLock::new(
+            UpstreamConfig::from_url(UNREACHABLE_PSQL_UPSTREAM).expect("valid upstream URL"),
+        ))));
     let (rs_opts, _handle, shutdown_tx) = TestBuilder::new(backend_builder)
         .recreate_database(false)
         .replicate_db(&test_name)

@@ -114,7 +114,11 @@ async fn admin_port_session_mysql() {
         .unwrap_err();
     assert!(err.to_string().contains("Readyset schema"), "{err}");
 
-    assert!(conn.query_drop("SELECT a FROM missing_table").await.is_err());
+    assert!(
+        conn.query_drop("SELECT a FROM missing_table")
+            .await
+            .is_err()
+    );
     conn.query_drop("SHOW READYSET VERSION").await.unwrap();
 
     shutdown_tx.shutdown().await;
@@ -165,7 +169,11 @@ async fn admin_port_session_psql() {
         .unwrap();
     assert_eq!(single_value(&messages), ADMIN_USER);
 
-    assert!(conn.simple_query("SET search_path TO public").await.is_err());
+    assert!(
+        conn.simple_query("SET search_path TO public")
+            .await
+            .is_err()
+    );
     let messages = conn.simple_query("SELECT database()").await.unwrap();
     assert_eq!(single_value(&messages), "readyset");
 

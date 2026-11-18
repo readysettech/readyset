@@ -42,12 +42,12 @@ use proptest_stateful::{
 use readyset_client::SingleKeyEviction;
 use readyset_client_test_helpers::psql_helpers::{self, PostgreSQLAdapter};
 use readyset_client_test_helpers::TestBuilder;
+use readyset_client_test_helpers::TestShutdownSender;
 use readyset_data::{DfValue, TimestampTz};
 use readyset_server::Handle;
 use readyset_sql::ast::SqlType;
 use readyset_sql::DialectDisplay;
 use readyset_util::eventually;
-use readyset_client_test_helpers::TestShutdownSender;
 use tokio_postgres::config::Host;
 use tokio_postgres::{Client, Config, NoTls, Row};
 
