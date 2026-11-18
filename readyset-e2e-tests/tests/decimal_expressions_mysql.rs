@@ -3,19 +3,11 @@
 //! column, then reads it through Readyset and from MySQL and compares each expression's type and
 //! values.
 
-use futures::{StreamExt, stream};
-use mysql_async::consts::ColumnType;
-use mysql_async::prelude::Queryable;
-use mysql_async::{Conn, Error, Opts, Pool, Row, Value};
-use readyset_adapter::backend::MigrationMode;
-use readyset_client_metrics::QueryDestination;
-use readyset_client_test_helpers::mysql_helpers::{self, MySQLAdapter, last_query_info};
-use readyset_client_test_helpers::{TestBuilder, derive_test_name, sleep};
-use readyset_sql_parsing::ParsingPreset;
+use mysql_async::Conn;
+use readyset_client_test_helpers::mysql_helpers;
 use test_utils::{tags, upstream};
 
-/// How many statements run at once.
-const PARALLEL: usize = 16;
+use crate::oracle;
 
 /// Each integer type, signed and unsigned, DECIMALs of several sizes, the floats and a string.
 const COLUMNS: &[(&str, &str)] = &[
@@ -69,166 +61,10 @@ fn decimal_pairs() -> impl Iterator<Item = (&'static str, &'static str)> {
         .filter(|(a, b)| is_decimal(a) || is_decimal(b))
 }
 
-/// An expression's result: its type, its digits after the point, and its value in each row.
-#[derive(PartialEq)]
-struct Column {
-    ty: ColumnType,
-    decimals: u8,
-    values: Vec<Value>,
-}
-
-impl Column {
-    /// Drops the trailing zeros after the point of each decimal value.
-    fn trim_zeros(&mut self) {
-        for value in &mut self.values {
-            if let Value::Bytes(bytes) = value
-                && let Ok(text) = std::str::from_utf8(bytes)
-                && text.contains('.')
-            {
-                *value = Value::from(text.trim_end_matches('0').trim_end_matches('.'));
-            }
-        }
-    }
-}
-
-impl std::fmt::Debug for Column {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let values: Vec<String> = self
-            .values
-            .iter()
-            .map(|value| value.as_sql(false))
-            .collect();
-        write!(
-            f,
-            "{:?}({}) [{}]",
-            self.ty,
-            self.decimals,
-            values.join(", ")
-        )
-    }
-}
-
-/// Returns the statement selecting the id and `exprs` from the table.
-fn select(exprs: &[String]) -> String {
-    format!("SELECT id, {} FROM m", exprs.join(", "))
-}
-
-/// Reads `sql` and returns each column after the id, with the rows in id order, or the error.
-async fn read(conn: &mut Conn, sql: &str) -> Result<Vec<Column>, String> {
-    let mut rows: Vec<Row> = match conn.exec(sql, ()).await {
-        Ok(rows) => rows,
-        Err(Error::Server(err)) => return Err(format!("error {}", err.code)),
-        Err(err) => return Err(err.to_string()),
-    };
-    rows.sort_by_key(|row| row.get::<i32, _>(0));
-    let columns = rows[0].columns_ref();
-    Ok((1..columns.len())
-        .map(|i| Column {
-            ty: columns[i].column_type(),
-            decimals: columns[i].decimals(),
-            values: rows.iter().map(|row| row[i].clone()).collect(),
-        })
-        .collect())
-}
-
-/// Reads the statement selecting `exprs` through Readyset and from MySQL, and returns each
-/// expression with a different type or values, and whether Readyset sent the read to MySQL.
-async fn check(readyset: &mut Conn, upstream: &mut Conn, exprs: Vec<String>) -> Vec<String> {
-    let sql = select(&exprs);
-    let want = read(upstream, &sql).await;
-    let got = read(readyset, &sql).await;
-    let (got, want) = match (got, want) {
-        (Ok(got), Ok(want)) => (got, want),
-        (got, want) if got == want => return Vec::new(),
-        (got, want) => return vec![format!("{sql}: Readyset {got:?}, MySQL {want:?}")],
-    };
-    let mut mismatches = Vec::new();
-    let destination = last_query_info(readyset).await.destination;
-    if !matches!(destination, QueryDestination::Readyset(_)) {
-        mismatches.push(format!("{sql}: Readyset sent it to MySQL"));
-    }
-    for ((expr, mut got), mut want) in exprs.iter().zip(got).zip(want) {
-        // TODO(REA-7193): MySQL writes each value of a CASE with its own branch's digits after
-        // the point, and Readyset with the CASE's, so the test compares a CASE's values as
-        // numbers.
-        if expr.starts_with("CASE") {
-            got.trim_zeros();
-            want.trim_zeros();
-        }
-        if got != want {
-            mismatches.push(format!("{expr}: Readyset {got:?}, MySQL {want:?}"));
-        }
-    }
-    mismatches
-}
-
-/// Caches a statement selecting each list of expressions, reads each through Readyset and from
-/// MySQL, and fails with every difference.
+/// Fills the table `m` of [`COLUMNS`] with [`ROWS`], and compares each list of expressions selected
+/// from it with MySQL.
 async fn compare(statements: Vec<Vec<String>>) {
-    readyset_tracing::init_test_logging();
-    let db = derive_test_name();
-    mysql_helpers::recreate_database(&db).await;
-    let upstream_opts: Opts = mysql_helpers::upstream_config().db_name(Some(&db)).into();
-    let mut upstream = Conn::new(upstream_opts.clone()).await.unwrap();
-    let columns = COLUMNS
-        .iter()
-        .map(|(name, ty)| format!("{name} {ty}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let rows = ROWS
-        .iter()
-        .enumerate()
-        .map(|(id, row)| format!("({id}, {row})"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    upstream
-        .query_drop(format!(
-            "CREATE TABLE m (id int PRIMARY KEY, {columns}); INSERT INTO m VALUES {rows}"
-        ))
-        .await
-        .unwrap();
-    let (opts, _handle, shutdown_tx) = TestBuilder::default()
-        .recreate_database(false)
-        .migration_mode(MigrationMode::OutOfBand)
-        .fallback(true)
-        .parsing_preset(ParsingPreset::for_prod())
-        .replicate_db(&db)
-        .build::<MySQLAdapter>()
-        .await;
-    let mut readyset = Conn::new(opts.clone()).await.unwrap();
-
-    let mut mismatches = Vec::new();
-    let mut cached = Vec::new();
-    for exprs in statements {
-        let sql = select(&exprs);
-        match readyset
-            .query_drop(format!("CREATE CACHE FROM {sql}"))
-            .await
-        {
-            Ok(()) => cached.push(exprs),
-            Err(err) => mismatches.push(format!("{sql}: Readyset doesn't cache it: {err}")),
-        }
-    }
-    sleep().await;
-
-    let (readyset, upstream) = (Pool::new(opts), Pool::new(upstream_opts));
-    let found: Vec<String> = stream::iter(cached)
-        .map(|exprs| {
-            let (readyset, upstream) = (readyset.clone(), upstream.clone());
-            async move {
-                let mut readyset = readyset.get_conn().await.unwrap();
-                let mut upstream = upstream.get_conn().await.unwrap();
-                check(&mut readyset, &mut upstream, exprs).await
-            }
-        })
-        .buffer_unordered(PARALLEL)
-        .concat()
-        .await;
-    mismatches.extend(found);
-    mismatches.sort();
-    assert!(mismatches.is_empty(), "\n{}", mismatches.join("\n"));
-
-    shutdown_tx.shutdown().await;
+    oracle::mysql::compare(COLUMNS, ROWS, "m", statements).await
 }
 
 #[tokio::test]
