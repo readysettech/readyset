@@ -492,3 +492,366 @@ mod extract {
         compare_eval_numeric(expr.as_str(), &mut client, &re);
     }
 }
+
+/// Checks the comparison of two columns against PostgreSQL, for each pair of types and each
+/// comparison operator and its negation. Readyset must fail to lower a pair of types that
+/// PostgreSQL refuses to compare.
+mod type_comparison {
+    use dataflow_expression::{Expr, LowerContext};
+    use readyset_data::{Collation, DfType};
+    use readyset_errors::{internal, ReadySetResult};
+    use readyset_sql::ast::{Column, Relation, SqlType, SqlTypeArbitraryOptions};
+    use readyset_sql::postgres_literals::{
+        arbitrary_postgres_literal, postgres_edge_literals, postgres_representative_types,
+        postgres_setup_sql, POSTGRES_TEST_ENUM, POSTGRES_TEST_ENUM_LABELS,
+    };
+    use readyset_sql::{Dialect as SqlDialect, DialectDisplay};
+    use readyset_sql_parsing::{parse_expr_with_config, ParsingPreset};
+
+    use super::*;
+
+    const OPS: [&str; 8] = [
+        "=",
+        "<>",
+        "<",
+        "<=",
+        ">",
+        ">=",
+        "IS DISTINCT FROM",
+        "IS NOT DISTINCT FROM",
+    ];
+
+    fn connect() -> Client {
+        let mut client = config().connect(NoTls).unwrap();
+        client
+            .simple_query(&format!("SET TIME ZONE 'UTC'; {}", postgres_setup_sql()))
+            .unwrap();
+        client
+    }
+
+    fn type_name(ty: &SqlType) -> String {
+        ty.display(SqlDialect::PostgreSQL).to_string()
+    }
+
+    /// The type that Readyset gives a replicated column of `ty`. The test enum resolves to its
+    /// labels, and a string type takes the database's collation.
+    fn df_type(client: &mut Client, ty: &SqlType) -> ReadySetResult<DfType> {
+        let dialect = readyset_data::Dialect::DEFAULT_POSTGRESQL;
+        let resolve = |relation: Relation| {
+            (relation.schema.is_none() && relation.name.as_str() == POSTGRES_TEST_ENUM).then(|| {
+                DfType::from_enum_variants(
+                    POSTGRES_TEST_ENUM_LABELS
+                        .iter()
+                        .map(|l| l.to_string())
+                        .collect::<Vec<_>>(),
+                    None,
+                )
+            })
+        };
+        let datcollate: String = client
+            .query_one(
+                "SELECT datcollate FROM pg_database WHERE datname = current_database()",
+                &[],
+            )
+            .unwrap()
+            .get(0);
+        let collation = Collation::get_or_default(dialect, &datcollate);
+        DfType::from_sql_type(ty, dialect, resolve, Some(collation))
+    }
+
+    fn is_number(ty: &SqlType) -> bool {
+        use SqlType::*;
+        matches!(
+            ty,
+            SmallInt(_)
+                | Int2
+                | Int(_)
+                | Int4
+                | Serial
+                | BigInt(_)
+                | Int8
+                | BigSerial
+                | Real
+                | Double
+                | Float
+                | Numeric(_)
+                | Decimal(..)
+        )
+    }
+
+    #[derive(Debug, Clone)]
+    struct Columns(DfType, DfType);
+
+    impl LowerContext for Columns {
+        fn resolve_column(&self, col: Column) -> ReadySetResult<(usize, DfType)> {
+            match col.table.as_ref().map(|t| t.name.as_str()) {
+                Some("l") => Ok((0, self.0.clone())),
+                Some("r") => Ok((1, self.1.clone())),
+                _ => internal!("unexpected column {col:?}"),
+            }
+        }
+
+        fn resolve_type(&self, _ty: Relation) -> Option<DfType> {
+            None
+        }
+    }
+
+    /// One side of a comparison: a column type and values of that type, each with its literal.
+    struct Operand {
+        sql: SqlType,
+        df: DfType,
+        values: Vec<(String, DfValue)>,
+    }
+
+    /// Reads `literals` of type `ty` from PostgreSQL, except those that PostgreSQL rejects, such as
+    /// a NUMERIC infinity before PostgreSQL 14. `None` if no value remains.
+    fn operand(
+        client: &mut Client,
+        ty: &SqlType,
+        literals: &[String],
+        findings: &mut Vec<String>,
+    ) -> Option<Operand> {
+        let df = df_type(client, ty)
+            .map_err(|e| findings.push(format!("unrepresentable type {}: {e}", type_name(ty))))
+            .ok()?;
+        let mut values = Vec::new();
+        for lit in literals {
+            let row = match client.query_one(&format!("SELECT {lit}"), &[]) {
+                Ok(row) => row,
+                Err(e) if e.as_db_error().is_some() => continue,
+                Err(e) => panic!("PostgreSQL failed on {lit}: {e}"),
+            };
+            // Convert what `FromSql` reads to what a column stores: an enum label to its variant,
+            // and a string to its column's collation.
+            let value = row.try_get::<_, DfValue>(0).map(|v| match &df {
+                DfType::Enum { .. } => v.coerce_to(&df, &DfType::Unknown).unwrap(),
+                DfType::Array(element) if matches!(**element, DfType::Enum { .. }) => {
+                    v.coerce_to(&df, &DfType::Unknown).unwrap()
+                }
+                DfType::Text(collation)
+                | DfType::VarChar(_, collation)
+                | DfType::Char(_, collation) => match <&str>::try_from(&v) {
+                    Ok(text) => DfValue::from_str_and_collation(text, *collation),
+                    Err(_) => v,
+                },
+                _ => v,
+            });
+            match value {
+                Ok(value) => values.push((lit.clone(), value)),
+                Err(e) => findings.push(format!("unrepresentable {lit}: {e}")),
+            }
+        }
+        (!values.is_empty()).then(|| Operand {
+            sql: ty.clone(),
+            df,
+            values,
+        })
+    }
+
+    /// Each operator and its negation, over `l.v` and `r.v`, or over rows that carry them.
+    fn predicates(rows: bool) -> Vec<String> {
+        let operands = |op: &str| {
+            if rows {
+                format!("ROW(l.v, 1) {op} ROW(r.v, 1)")
+            } else {
+                format!("l.v {op} r.v")
+            }
+        };
+        OPS.iter()
+            .map(|op| operands(op))
+            .chain(OPS.iter().map(|op| format!("NOT ({})", operands(op))))
+            .collect()
+    }
+
+    /// Compares every value of `left` with every value of `right`, under each operator and its
+    /// negation, and records every result that differs from PostgreSQL's. With `rows` set, each
+    /// comparison is between rows that carry the two values.
+    fn compare(
+        client: &mut Client,
+        left: &Operand,
+        right: &Operand,
+        rows: bool,
+        findings: &mut Vec<String>,
+    ) {
+        let pair = if rows {
+            format!(
+                "ROW({}) vs ROW({})",
+                type_name(&left.sql),
+                type_name(&right.sql)
+            )
+        } else {
+            format!("{} vs {}", type_name(&left.sql), type_name(&right.sql))
+        };
+        let ctx = Columns(left.df.clone(), right.df.clone());
+        let mut checked = Vec::new();
+        for pred in predicates(rows) {
+            let ast = parse_expr_with_config(
+                ParsingPreset::BothPreferSqlparser,
+                readyset_sql::Dialect::PostgreSQL,
+                &pred,
+            )
+            .unwrap();
+            let expr = Expr::lower(ast, dataflow_expression::Dialect::DEFAULT_POSTGRESQL, &ctx);
+            let probe = format!(
+                "SELECT {pred} FROM (VALUES ({})) AS l(v), (VALUES ({})) AS r(v)",
+                left.values[0].0, right.values[0].0
+            );
+            match (client.prepare(&probe), expr) {
+                (Ok(_), Ok(expr)) => checked.push((pred, expr)),
+                (Ok(_), Err(e)) => findings.push(format!("refused {pair}: {pred}: {e}")),
+                (Err(_), Ok(_)) => {
+                    findings.push(format!("accepted {pair}: {pred}, which PostgreSQL rejects"))
+                }
+                (Err(_), Err(_)) => {}
+            }
+        }
+        if checked.is_empty() {
+            return;
+        }
+
+        let values = |vals: &[(String, DfValue)]| {
+            vals.iter()
+                .enumerate()
+                .map(|(i, (lit, _))| format!("({i}, {lit})"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let preds = checked.iter().map(|(p, _)| p.as_str()).collect::<Vec<_>>();
+        let query = format!(
+            "SELECT l.i, r.i, {} FROM (VALUES {}) AS l(i, v) CROSS JOIN (VALUES {}) AS r(i, v)",
+            preds.join(", "),
+            values(&left.values),
+            values(&right.values),
+        );
+        let rows = match client.query(&query, &[]) {
+            Ok(rows) => rows,
+            // PostgreSQL fails to evaluate a comparison, as with a NUMERIC outside a float's range.
+            Err(e) if e.as_db_error().is_some() => return,
+            Err(e) => panic!("PostgreSQL failed `{query}`: {e}"),
+        };
+        for row in rows {
+            let l = &left.values[row.get::<_, i32>(0) as usize];
+            let r = &right.values[row.get::<_, i32>(1) as usize];
+            let record = [l.1.clone(), r.1.clone()];
+            for (i, (pred, expr)) in checked.iter().enumerate() {
+                let expected: Option<bool> = row.get(i + 2);
+                let ours = expr
+                    .eval::<DfValue>(&record)
+                    .map(|v| (!v.is_none()).then(|| v.is_truthy()));
+                if ours.as_ref().ok() != Some(&expected) {
+                    findings.push(format!(
+                        "wrong {pair}: {pred} with l.v = {}, r.v = {}: postgres {expected:?}, \
+                         readyset {ours:?}",
+                        l.0, r.0
+                    ));
+                }
+            }
+        }
+    }
+
+    fn assert_no_findings(findings: &[String]) {
+        assert!(
+            findings.is_empty(),
+            "{} findings:\n{}",
+            findings.len(),
+            findings.join("\n")
+        );
+    }
+
+    fn edge_values_compare_as_in_postgres(keep: fn(&SqlType) -> bool) {
+        let mut client = connect();
+        let mut findings = Vec::new();
+        let types = postgres_representative_types()
+            .iter()
+            .filter(|ty| keep(ty))
+            .filter_map(|ty| operand(&mut client, ty, &postgres_edge_literals(ty), &mut findings))
+            .collect::<Vec<_>>();
+        for left in &types {
+            for right in &types {
+                compare(&mut client, left, right, false, &mut findings);
+            }
+        }
+        assert_no_findings(&findings);
+    }
+
+    fn arbitrary_values_compare_as_in_postgres(keep: fn(&SqlType) -> bool, rows: bool) {
+        let typed_literal = any_with::<SqlType>(SqlTypeArbitraryOptions {
+            dialect: SqlDialect::PostgreSQL,
+            ..Default::default()
+        })
+        .prop_filter("kept", keep)
+        .prop_flat_map(|ty| {
+            let literal =
+                arbitrary_postgres_literal(&ty).unwrap_or_else(|| panic!("no literals for {ty:?}"));
+            (Just(ty), literal)
+        });
+        let client = RefCell::new(connect());
+        proptest!(|((lt, l) in typed_literal.clone(), (rt, r) in typed_literal)| {
+            let mut client = client.borrow_mut();
+            let mut findings = Vec::new();
+            let left = operand(&mut client, &lt, &[l], &mut findings);
+            let right = operand(&mut client, &rt, &[r], &mut findings);
+            if let (Some(left), Some(right)) = (left, right) {
+                compare(&mut client, &left, &right, rows, &mut findings);
+            }
+            // Acceptance depends only on the pair of types, which the edge-value tests cover.
+            findings.retain(|f| !f.starts_with("accepted"));
+            prop_assert!(findings.is_empty(), "{}", findings.join("\n"));
+        });
+    }
+
+    #[upstream(postgres, all)]
+    #[test]
+    fn number_edge_values() {
+        edge_values_compare_as_in_postgres(is_number);
+    }
+
+    #[upstream(postgres, all)]
+    #[test]
+    fn arbitrary_number_values() {
+        arbitrary_values_compare_as_in_postgres(is_number, false);
+    }
+
+    #[upstream(postgres, all)]
+    #[test]
+    fn arbitrary_number_row_values() {
+        arbitrary_values_compare_as_in_postgres(is_number, true);
+    }
+
+    /// Compares rows that carry one value of each number type, position by position.
+    fn number_rows_compare_as_in_postgres() {
+        let mut client = connect();
+        let mut findings = Vec::new();
+        let types = postgres_representative_types()
+            .iter()
+            .filter(|ty| is_number(ty))
+            .filter_map(|ty| operand(&mut client, ty, &postgres_edge_literals(ty), &mut findings))
+            .collect::<Vec<_>>();
+        for left in &types {
+            for right in &types {
+                compare(&mut client, left, right, true, &mut findings);
+            }
+        }
+        assert_no_findings(&findings);
+    }
+
+    #[upstream(postgres, all)]
+    #[test]
+    fn number_row_values() {
+        number_rows_compare_as_in_postgres();
+    }
+
+    #[upstream(postgres, all)]
+    #[ignore = "REA-7274: Readyset disagrees with PostgreSQL on some type comparisons"]
+    #[test]
+    fn edge_values() {
+        edge_values_compare_as_in_postgres(|_| true);
+    }
+
+    #[upstream(postgres, all)]
+    #[ignore = "REA-7274: Readyset disagrees with PostgreSQL on some type comparisons"]
+    #[test]
+    fn arbitrary_values() {
+        arbitrary_values_compare_as_in_postgres(|_| true, false);
+    }
+}
