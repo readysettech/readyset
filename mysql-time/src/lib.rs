@@ -343,12 +343,24 @@ impl PartialOrd for MySqlTime {
 
 impl Ord for MySqlTime {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.is_positive()
-            .cmp(&other.is_positive())
-            .then(self.hour().cmp(&other.hour()))
-            .then(self.minutes().cmp(&other.minutes()))
-            .then(self.seconds().cmp(&other.seconds()))
-            .then(self.microseconds().cmp(&other.microseconds()))
+        match (self.is_positive(), other.is_positive()) {
+            (true, false) => Ordering::Greater,
+            (false, true) => Ordering::Less,
+            // Both times have the same sign, so a larger magnitude is a larger value
+            // for positive times and a smaller value for negative times.
+            (true, true) => self
+                .hour()
+                .cmp(&other.hour())
+                .then_with(|| self.minutes().cmp(&other.minutes()))
+                .then_with(|| self.seconds().cmp(&other.seconds()))
+                .then_with(|| self.microseconds().cmp(&other.microseconds())),
+            (false, false) => other
+                .hour()
+                .cmp(&self.hour())
+                .then_with(|| other.minutes().cmp(&self.minutes()))
+                .then_with(|| other.seconds().cmp(&self.seconds()))
+                .then_with(|| other.microseconds().cmp(&self.microseconds())),
+        }
     }
 }
 
@@ -774,6 +786,21 @@ mod tests {
 
         assert!(mysql_time2 < mysql_time3);
         assert!(mysql_time1 < mysql_time3)
+    }
+
+    #[test]
+    fn ord_negative_times() {
+        let one_second_ago = MySqlTime::from_hmsus(false, 0, 0, 1, 0);
+        let two_seconds_ago = MySqlTime::from_hmsus(false, 0, 0, 2, 0);
+        let zero = MySqlTime::from_hmsus(true, 0, 0, 0, 0);
+        let one_second = MySqlTime::from_hmsus(true, 0, 0, 1, 0);
+
+        assert!(two_seconds_ago < one_second_ago);
+        assert!(one_second_ago > two_seconds_ago);
+        assert!(one_second_ago < zero);
+        assert!(zero > one_second_ago);
+        assert!(zero < one_second);
+        assert!(one_second_ago < one_second);
     }
 
     #[tags(no_retry)]
