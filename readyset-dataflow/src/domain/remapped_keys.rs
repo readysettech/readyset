@@ -146,39 +146,6 @@ impl RemappedKeys {
         self.len += 1;
     }
 
-    pub fn get(
-        &self,
-        destination_node: LocalNodeIndex,
-        destination_columns: &[usize],
-        source_node: LocalNodeIndex,
-        source_columns: &[usize],
-        source_keys: &[KeyComparison],
-    ) -> Option<Vec<KeyComparison>> {
-        // Try looking up each source key individually since remapped keys are inserted
-        // one at a time during upqueries
-        let mut all_destination_keys = Vec::new();
-        let destination_columns: Arc<[_]> = destination_columns.into();
-        let source_columns: Arc<[_]> = source_columns.into();
-
-        for single_source_key in source_keys.iter() {
-            let lookup_key = RemappingKey {
-                destination_node,
-                destination_columns: Arc::clone(&destination_columns),
-                source_node,
-                source_columns: Arc::clone(&source_columns),
-                source_keys: vec![single_source_key.clone()],
-            };
-            if let Some(remapping_info) = self.remappings.get(&lookup_key) {
-                all_destination_keys.extend(remapping_info.destination_keys.clone());
-            }
-        }
-        if !all_destination_keys.is_empty() {
-            Some(all_destination_keys)
-        } else {
-            None
-        }
-    }
-
     /// If `node` rewrites some of its downstream keys into upstream upqueries to `column` in a
     /// `target` node, look up the set of downstream keys which have been rewritten to
     /// `keys`.

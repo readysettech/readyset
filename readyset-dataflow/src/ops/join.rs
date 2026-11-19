@@ -143,10 +143,6 @@ impl Join {
         node == *self.left
     }
 
-    pub fn node_is_rhs(&self, node: LocalNodeIndex) -> bool {
-        node == *self.right
-    }
-
     /// Recompute all `#[serde(skip)]` emit-related metadata from `self.emit`.
     /// Called from `new()` and `post_deserialize()`.
     fn recompute_emit_metadata(&mut self) {

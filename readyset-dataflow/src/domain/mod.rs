@@ -2883,6 +2883,8 @@ impl Domain {
                 };
                 let keys = if is_generated {
                     // No need to store remapping; if it's not there, we don't have the key.
+                    // A join upqueries each input whose state is partial on that input's part of
+                    // a straddled key, so that part is the key to evict there.
                     let mut missed_keys = self.nodes[src].borrow_mut().handle_upquery(m)?;
                     missed_keys.retain(|upstream_miss| {
                         self.state
@@ -2890,55 +2892,10 @@ impl Domain {
                             .map(|state| state.is_partial())
                             .unwrap_or(false)
                     });
-
-                    if let Some(Join(join)) = self.nodes[src].borrow_mut().as_mut_internal() {
-                        let other_side = join.side_to_trigger_upquery().other_side();
-                        missed_keys.iter_mut().for_each(|miss| {
-                            match other_side {
-                                Side::Left => {
-                                    if join.node_is_lhs(miss.node) {
-                                        // lookup the remapped key for the right side
-                                        if let Some(remapped_keys) = self.remapped_keys.get(
-                                            src,
-                                            cols,
-                                            miss.node,
-                                            &miss.column_indices,
-                                            &miss.missed_keys,
-                                        ) {
-                                            let mut column_indices = join.on_left();
-                                            column_indices.extend_from_slice(&miss.column_indices);
-                                            miss.column_indices = column_indices.into();
-                                            if let Ok(remapped_keys_vec1) =
-                                                Vec1::try_from_vec(remapped_keys)
-                                            {
-                                                miss.missed_keys = remapped_keys_vec1;
-                                            }
-                                        }
-                                    }
-                                }
-                                Side::Right => {
-                                    if join.node_is_rhs(miss.node) {
-                                        // lookup the remapped key for the left side
-                                        if let Some(remapped_keys) = self.remapped_keys.get(
-                                            src,
-                                            cols,
-                                            miss.node,
-                                            &miss.column_indices,
-                                            &miss.missed_keys,
-                                        ) {
-                                            let mut column_indices = join.on_right();
-                                            column_indices.extend_from_slice(&miss.column_indices);
-                                            miss.column_indices = column_indices.into();
-                                            if let Ok(remapped_keys_vec1) =
-                                                Vec1::try_from_vec(remapped_keys)
-                                            {
-                                                miss.missed_keys = remapped_keys_vec1;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        });
+                    if !missed_keys.is_empty()
+                        && self.nodes[src].borrow().is_join().unwrap_or(false)
+                    {
+                        assert_reachable!("an eviction splits a straddled key onto a join input");
                     }
                     missed_keys
                 } else {

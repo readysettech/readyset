@@ -7452,6 +7452,123 @@ async fn join_straddled_columns() {
     shutdown_tx.shutdown().await;
 }
 
+/// Caches a join whose right input holds partial state of its own, a join, a union or a DISTINCT
+/// view, keyed on a column of each input. A flush of every partial state, which is what memory
+/// pressure evicts, makes the reader ask the join's domain to evict each part of its keys from the
+/// join's inputs.
+/// Each read must give the rows of a model before and after the flush.
+///
+/// The flush visits the domains in an order that differs from server to server, so each shape runs
+/// on several servers.
+#[tokio::test(flavor = "multi_thread")]
+async fn straddled_join_over_a_partial_input_reads_its_rows_after_a_flush() {
+    let recipe =
+        |sql: &[&str]| ChangeList::from_strings(sql.to_vec(), Dialect::DEFAULT_POSTGRESQL).unwrap();
+    // Each of `t`, `u` and `w` holds the rows (c0, c0 % 2) for c0 in 0..3.
+    let rows = || (0..3).map(|c0: i32| [c0, c0 % 2]);
+    let chain = rows()
+        .cartesian_product(rows())
+        .cartesian_product(rows())
+        .filter(|((t, u), w)| t[1] == u[0] && u[1] == w[1])
+        .map(|((t, _), w)| (t[0], w[0]));
+    let union = rows()
+        .cartesian_product(rows().chain(rows()))
+        .filter(|(t, r)| t[1] == r[1])
+        .map(|(t, r)| (t[0], r[0]));
+    let distinct = rows()
+        .cartesian_product(rows())
+        .filter(|(t, d)| t[1] == d[1])
+        .map(|(t, d)| (t[0], d[0]));
+    let shapes = [
+        (
+            "SELECT t.c0 AS a, w.c0 AS b FROM t JOIN u ON t.g = u.c0 JOIN w ON u.g = w.g \
+             WHERE t.c0 = $1 AND w.c0 = $2",
+            chain.collect::<Vec<_>>(),
+        ),
+        (
+            "SELECT t.c0 AS a, r.c0 AS b FROM t JOIN r ON t.g = r.g \
+             WHERE t.c0 = $1 AND r.c0 = $2",
+            union.collect(),
+        ),
+        (
+            "SELECT t.c0 AS a, d.c0 AS b FROM t JOIN d ON t.g = d.g \
+             WHERE t.c0 = $1 AND d.c0 = $2",
+            distinct.collect(),
+        ),
+    ];
+    for (query, pairs) in shapes {
+        for trial in 0..4 {
+            let (mut g, shutdown_tx) =
+                start_simple_unsharded(&format!("straddled_join_over_a_partial_input_{trial}"))
+                    .await;
+            g.extend_recipe(recipe(&[
+                "CREATE TABLE t (c0 int PRIMARY KEY, g int);",
+                "CREATE TABLE u (c0 int PRIMARY KEY, g int);",
+                "CREATE TABLE w (c0 int PRIMARY KEY, g int);",
+                "CREATE VIEW r AS (SELECT c0, g FROM u WHERE c0 >= 0) \
+                 UNION ALL (SELECT c0, g FROM w WHERE c0 >= 0);",
+                "CREATE VIEW d AS SELECT DISTINCT c0, g FROM u;",
+                &format!("CREATE CACHE q FROM {query};"),
+            ]))
+            .await
+            .unwrap();
+            for table in ["t", "u", "w"] {
+                let rows = rows().map(|r| r.map(DfValue::from).to_vec());
+                g.table(table)
+                    .await
+                    .unwrap()
+                    .perform_all(rows)
+                    .await
+                    .unwrap();
+            }
+            for phase in ["before the flush", "after the flush"] {
+                for (a, b) in (0..3).cartesian_product(0..3) {
+                    let expected = pairs.iter().filter(|p| **p == (a, b)).map(|_| vec![a, b]);
+                    let expected = expected.collect::<Vec<_>>();
+                    eventually!(
+                        run_test: { read_sorted(&mut g, "q", &[a, b], &["a", "b"]).await },
+                        then_assert: |rows| assert_eq!(rows, expected, "{query} {phase} {a} {b}")
+                    );
+                }
+                g.flush_partial().await.unwrap();
+            }
+            shutdown_tx.shutdown().await;
+        }
+    }
+}
+
+/// Reads `columns` of the rows of `cache` for `params`, sorted. `params[0]` is the value of `$1`.
+/// The key map of the reader gives the order of the key. A cache without parameters has the
+/// generated key 0.
+async fn read_sorted(
+    g: &mut crate::Handle,
+    cache: &str,
+    params: &[i32],
+    columns: &[&str],
+) -> Vec<Vec<i32>> {
+    let mut q = g.view(cache).await.unwrap().into_reader_handle().unwrap();
+    let key = q
+        .key_map()
+        .iter()
+        .map(|(placeholder, _)| match placeholder {
+            ViewPlaceholder::OneToOne(idx, _) => DfValue::from(params[idx - 1]),
+            ViewPlaceholder::Generated => DfValue::from(0),
+            other => panic!("unexpected reader key column {other:?}"),
+        })
+        .collect::<Vec<_>>();
+    let rows = q
+        .lookup(&key, Dialect::DEFAULT_POSTGRESQL)
+        .await
+        .unwrap()
+        .into_vec();
+    let mut rows = rows
+        .iter()
+        .map(|r| columns.iter().map(|&c| get_col!(q, r, c, i32)).collect())
+        .collect::<Vec<Vec<i32>>>();
+    rows.sort();
+    rows
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[ignore] // with full materialization, needs post-lookup filters or it returns too many rows
 async fn straddled_join_range_query() {
