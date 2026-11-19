@@ -50,6 +50,7 @@ mod mysql_long_data;
 mod numeric_expressions_psql;
 mod online_index_build;
 mod opportunistic_ryw;
+mod oracle;
 mod psql_db_selection;
 mod psql_min_persisted_rpc_nonfatal;
 mod query_stats_vrel;
