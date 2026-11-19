@@ -86,7 +86,12 @@ const MYSQL_VERSIONS: &[(u32, &str)] = &[
 ];
 
 /// Known PostgreSQL versions, as (numeric_id, variant_name) pairs.
-const POSTGRES_VERSIONS: &[(u32, &str)] = &[(13, "postgres13"), (15, "postgres15")];
+const POSTGRES_VERSIONS: &[(u32, &str)] = &[
+    (13, "postgres13"),
+    (15, "postgres15"),
+    (16, "postgres16"),
+    (17, "postgres17"),
+];
 
 /// Minimum MySQL version that supports flags (gtid, mrbr, etc.).
 const MYSQL_MODERN_MIN: u32 = 80;

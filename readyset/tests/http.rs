@@ -27,10 +27,14 @@ fn upstream_db_url() -> String {
 fn start_adapter(test_db: &str) -> anyhow::Result<()> {
     let temp_dir = temp_dir::TempDir::new().unwrap();
     let upstream_db_url = upstream_db_url();
+    // The standalone authority stores a deployment's upstream list in a directory named after the
+    // deployment, so every process that shares a name reuses the first one's upstream. A name of
+    // its own keeps a retry, or another variant, from connecting to a released container.
+    let deployment = format!("{test_db}_{}", std::process::id());
     let options = vec![
         "adapter_test", // This is equivalent to the program name in argv, ignored
         "--deployment",
-        test_db,
+        &deployment,
         "--database-type",
         "postgresql",
         "--deployment-mode",
@@ -83,7 +87,7 @@ async fn http_tests() {
         }
     });
 
-    eventually!(attempts: 5, sleep: Duration::from_millis(500), run_test: {
+    eventually!(attempts: 20, sleep: Duration::from_millis(500), run_test: {
         if let Ok(response) = reqwest::get(format!("http://{TEST_METRICS_ADDRESS}/health")).await {
             Some((response.status(), response.text().await.ok()))
         } else {

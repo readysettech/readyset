@@ -121,7 +121,7 @@ mod _verify_expansion {
     use super::mysql_modern_nogtid::{mysql80_nogtid, mysql84_nogtid, mysql97_nogtid};
     use super::mysql_single_gtid::mysql84_gtid as _s84g;
     use super::mysql_single_mrbr_gtid::mysql84_mrbr_gtid as _s84mg;
-    use super::postgres_all::{postgres13, postgres15};
+    use super::postgres_all::{postgres13, postgres15, postgres16, postgres17};
     use super::postgres_single::postgres15 as _p15;
 
     // ── __xp_ auto-expansion for unflagged modern MySQL ──

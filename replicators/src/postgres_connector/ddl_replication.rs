@@ -784,13 +784,18 @@ mod tests {
                     assert_eq!(name, Relation::new(Some("public".into()), "v".into()));
                     match *definition.unwrap() {
                         SelectSpecification::Simple(select_stmt) => {
-                            assert_eq!(
-                                select_stmt.fields,
-                                vec![FieldDefinitionExpr::Expr {
-                                    expr: Expr::Column("t.x".into()),
-                                    alias: None
-                                }]
-                            );
+                            // PostgreSQL 16 and later render the only column unqualified.
+                            let [FieldDefinitionExpr::Expr {
+                                expr: Expr::Column(column),
+                                alias: None,
+                            }] = select_stmt.fields.as_slice()
+                            else {
+                                panic!("unexpected view definition: {select_stmt:?}")
+                            };
+                            assert_eq!(column.name.as_str(), "x");
+                            if let Some(table) = &column.table {
+                                assert_eq!(table.name.as_str(), "t");
+                            }
                             assert_eq!(
                                 select_stmt.tables,
                                 vec![TableExpr::from(Relation::from("t"))]
