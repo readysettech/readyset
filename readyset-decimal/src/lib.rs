@@ -121,7 +121,8 @@ macro_rules! impl_to_from_float {
 
                 fn try_from(value: &Decimal) -> Result<Self, Self::Error> {
                     match value {
-                        Decimal::Number(value) => value.[<to_ $ty>]().ok_or_else(|| ReadysetDecimalError::ConversionError {
+                        // Parse the digits, as PostgreSQL does, to round to the nearest float.
+                        Decimal::Number(value) => value.to_scientific_notation().parse().map_err(|_| ReadysetDecimalError::ConversionError {
                             from_ty: "Decimal",
                             to_ty: stringify!($ty),
                             value: format!("{value}"),
@@ -626,6 +627,38 @@ mod tests {
         assert!(Decimal::NegativeInfinity < Decimal::from(42));
         assert!(Decimal::from(42) < Decimal::Infinity);
         assert!(Decimal::Infinity < Decimal::NaN);
+    }
+
+    #[test]
+    fn number_converts_to_nearest_float() {
+        for (text, double, real) in [
+            ("1e300", 1e300, f32::INFINITY),
+            ("1e-300", 1e-300, 0.0),
+            ("0.1", 0.1, 0.1),
+            ("1004.3", 1004.3, 1004.3),
+            ("-1.5", -1.5, -1.5),
+            ("9007199254740993", 9007199254740992.0, 9007199254740992.0),
+            ("16777217", 16777217.0, 16777216.0),
+        ] {
+            let decimal = Decimal::from_str(text).unwrap();
+            assert_eq!(f64::try_from(&decimal).ok(), Some(double), "{text} as f64");
+            // An infinite `real` marks a number above f32's range, which has no nearest f32.
+            if real.is_finite() {
+                assert_eq!(f32::try_from(&decimal).ok(), Some(real), "{text} as f32");
+            }
+        }
+    }
+
+    #[test_strategy::proptest]
+    fn finite_f64_round_trips(#[filter(#f.is_finite())] f: f64) {
+        let decimal = Decimal::try_from(f).unwrap();
+        proptest::prop_assert_eq!(f64::try_from(&decimal).unwrap(), f);
+    }
+
+    #[test_strategy::proptest]
+    fn finite_f32_round_trips(#[filter(#f.is_finite())] f: f32) {
+        let decimal = Decimal::try_from(f).unwrap();
+        proptest::prop_assert_eq!(f32::try_from(&decimal).unwrap(), f);
     }
 
     #[test]
