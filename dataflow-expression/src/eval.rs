@@ -1,4 +1,4 @@
-use std::borrow::Borrow;
+use std::borrow::{Borrow, Cow};
 use std::sync::Arc;
 
 use cached::cached;
@@ -31,9 +31,9 @@ fn like_pattern(pattern: String, collation: Collation) -> Arc<LikePattern> {
 /// Compare two rows one position at a time. The first position whose operands differ decides an
 /// ordering comparison, and a NULL reached before it leaves the comparison undecided; an equality
 /// is decided by any differing position, so a NULL leaves it undecided only once the rest match.
+/// `IS [NOT] DISTINCT FROM` compares a NULL position as a value, as it does for two values.
 ///
-/// Other operators, `Is` above all, keep comparing the rows as whole values, the way an array
-/// does.
+/// Every other operator compares the rows as whole values, the way an array does.
 fn eval_row_comparison(
     op: BinaryOperator,
     left: &DfValue,
@@ -41,7 +41,10 @@ fn eval_row_comparison(
 ) -> ReadySetResult<DfValue> {
     use BinaryOperator::*;
 
-    if !matches!(op, Equal | Greater | GreaterOrEqual | Less | LessOrEqual) {
+    if !matches!(
+        op,
+        Equal | Is | Greater | GreaterOrEqual | Less | LessOrEqual
+    ) {
         return eval_binary_op(op, left, right);
     }
 
@@ -57,7 +60,15 @@ fn eval_row_comparison(
     let positions = left_row.values().zip(right_row.values());
 
     for (left, right) in positions {
-        if left.is_none() || right.is_none() {
+        if op == Is {
+            // `IS NOT DISTINCT FROM` treats a NULL position as a value.
+            if left.is_none() != right.is_none() {
+                return Ok(false.into());
+            }
+            if left.is_none() {
+                continue;
+            }
+        } else if left.is_none() || right.is_none() {
             if op == Equal {
                 undecided = true;
                 continue;
@@ -65,6 +76,7 @@ fn eval_row_comparison(
             return Ok(DfValue::None);
         }
 
+        let (left, right) = (sql_float(left), sql_float(right));
         if left != right {
             return Ok(match op {
                 Greater | GreaterOrEqual => left > right,
@@ -78,7 +90,20 @@ fn eval_row_comparison(
     if undecided {
         return Ok(DfValue::None);
     }
-    Ok(matches!(op, Equal | GreaterOrEqual | LessOrEqual).into())
+    Ok(matches!(op, Equal | Is | GreaterOrEqual | LessOrEqual).into())
+}
+
+/// `value` with -0.0 as 0.0 and every NaN as one positive NaN. As in SQL, the zeros are then
+/// equal, and NaN is equal to NaN and greater than every other float.
+fn sql_float(value: &DfValue) -> Cow<'_, DfValue> {
+    // A `0.0` pattern matches `-0.0` too.
+    match *value {
+        DfValue::Float(f) if f.is_nan() => Cow::Owned(DfValue::Float(f32::NAN)),
+        DfValue::Float(0.0) => Cow::Owned(DfValue::Float(0.0)),
+        DfValue::Double(f) if f.is_nan() => Cow::Owned(DfValue::Double(f64::NAN)),
+        DfValue::Double(0.0) => Cow::Owned(DfValue::Double(0.0)),
+        _ => Cow::Borrowed(value),
+    }
 }
 
 fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadySetResult<DfValue> {
@@ -124,12 +149,18 @@ fn eval_binary_op(op: BinaryOperator, left: &DfValue, right: &DfValue) -> ReadyS
             non_null!(right);
             Ok(false.into())
         }
-        Equal => Ok((non_null!(left) == non_null!(right)).into()),
-        Greater => Ok((non_null!(left) > non_null!(right)).into()),
-        GreaterOrEqual => Ok((non_null!(left) >= non_null!(right)).into()),
-        Less => Ok((non_null!(left) < non_null!(right)).into()),
-        LessOrEqual => Ok((non_null!(left) <= non_null!(right)).into()),
-        Is => Ok((left == right).into()),
+        Equal | Greater | GreaterOrEqual | Less | LessOrEqual => {
+            let (left, right) = (sql_float(non_null!(left)), sql_float(non_null!(right)));
+            Ok(match op {
+                Equal => left == right,
+                Greater => left > right,
+                GreaterOrEqual => left >= right,
+                Less => left < right,
+                _ => left <= right,
+            }
+            .into())
+        }
+        Is => Ok((sql_float(left) == sql_float(right)).into()),
         Like => like(std::convert::identity),
         ILike => like(Collation::to_insensitive),
 
@@ -558,6 +589,79 @@ mod tests {
         match result {
             Ok(value) => value,
             Err(error) => panic!("Failed to evaluate `{expr}`: {error}"),
+        }
+    }
+
+    #[test]
+    fn float_zeros_are_equal_and_nans_are_equal_and_greatest() {
+        use BinaryOperator::*;
+        let other_nan = f64::from_bits(f64::NAN.to_bits() | 1);
+        // Results for =, >, >=, < and <=.
+        let same = [true, false, true, false, true];
+        let above = [false, true, true, false, false];
+        let cases = [
+            (DfValue::Double(0.0), DfValue::Double(-0.0), same),
+            (DfValue::Float(-0.0), DfValue::Float(0.0), same),
+            (DfValue::Float(-0.0), DfValue::Double(0.0), same),
+            (DfValue::Double(f64::NAN), DfValue::Double(other_nan), same),
+            (DfValue::Double(-f64::NAN), DfValue::Double(f64::NAN), same),
+            (
+                DfValue::Double(-f64::NAN),
+                DfValue::Double(f64::INFINITY),
+                above,
+            ),
+            (
+                DfValue::Float(-f32::NAN),
+                DfValue::Float(f32::INFINITY),
+                above,
+            ),
+        ];
+        for (left, right, expected) in cases {
+            for (op, expected) in [Equal, Greater, GreaterOrEqual, Less, LessOrEqual]
+                .into_iter()
+                .zip(expected)
+            {
+                assert_eq!(
+                    eval_binary_op(op, &left, &right).unwrap(),
+                    DfValue::from(expected),
+                    "{left:?} {op} {right:?}"
+                );
+                let row = |v: &DfValue| DfValue::from(vec![v.clone()]);
+                assert_eq!(
+                    eval_row_comparison(op, &row(&left), &row(&right)).unwrap(),
+                    DfValue::from(expected),
+                    "ROW({left:?}) {op} ROW({right:?})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn float_zeros_and_nans_are_one_value_under_is_not_distinct_from() {
+        use BinaryOperator::*;
+        let other_nan = f64::from_bits(f64::NAN.to_bits() | 1);
+        let cases = [
+            (DfValue::Double(0.0), DfValue::Double(-0.0), true),
+            (DfValue::Float(-0.0), DfValue::Float(0.0), true),
+            (DfValue::Float(-0.0), DfValue::Double(0.0), true),
+            (DfValue::Double(f64::NAN), DfValue::Double(other_nan), true),
+            (DfValue::Double(-f64::NAN), DfValue::Double(f64::NAN), true),
+            (DfValue::None, DfValue::None, true),
+            (DfValue::None, DfValue::Double(0.0), false),
+            (DfValue::Double(0.0), DfValue::None, false),
+        ];
+        for (left, right, expected) in cases {
+            assert_eq!(
+                eval_binary_op(Is, &left, &right).unwrap(),
+                DfValue::from(expected),
+                "{left:?} IS NOT DISTINCT FROM {right:?}"
+            );
+            let row = |v: &DfValue| DfValue::from(vec![v.clone()]);
+            assert_eq!(
+                eval_row_comparison(Is, &row(&left), &row(&right)).unwrap(),
+                DfValue::from(expected),
+                "ROW({left:?}) IS NOT DISTINCT FROM ROW({right:?})"
+            );
         }
     }
 
