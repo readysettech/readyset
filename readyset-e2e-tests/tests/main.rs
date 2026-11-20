@@ -40,6 +40,7 @@ mod failover;
 mod failover_psql;
 mod functional_index_keys;
 mod group_concat_truncation;
+mod key_coercion_oracle_psql;
 mod left_join_mysql;
 mod limit_offset_placeholders_mysql;
 mod limit_offset_placeholders_psql;
