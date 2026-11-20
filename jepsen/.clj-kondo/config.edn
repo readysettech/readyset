@@ -1,4 +1,0 @@
-{:lint-as {dom-top.core/with-retry clojure.core/let}
- :linters
- {:unresolved-symbol
-  {:exclude [e retry]}}}
