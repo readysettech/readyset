@@ -1,8 +1,8 @@
 //! Join patterns: inner, left, self-join, cross join.
 
-use readyset_sql::ast::{BinaryOperator, JoinOperator};
+use readyset_sql::ast::{BinaryOperator, JoinOperator, SqlType};
 
-use crate::constraint::{Constraint, DialectSupport, TypeClass};
+use crate::constraint::{Constraint, DialectSupport, ExampleCell, ExampleValue, TypeClass};
 use crate::pattern::{Pattern, PatternBuilder};
 
 /// SELECT t0.c0, t1.c1 FROM t0 INNER JOIN t1 ON t0.c2 = t1.c3
@@ -27,6 +27,49 @@ pub fn inner_join() -> Pattern {
     b.project_column(c2, t2);
 
     b.tags(&["join"]);
+    b.build()
+}
+
+/// Project both join keys so the comparison includes trailing spaces in the returned values.
+pub fn pg_char_varchar_join(name: &'static str, varchar_width: Option<u16>) -> Pattern {
+    let mut b = PatternBuilder::new(name);
+    let left = b.table();
+    let right = b.table();
+    b.not_eq(left, right);
+    let char_key = b.column(left);
+    let varchar_key = b.column(right);
+    b.column_type_class(char_key, TypeClass::Exact(SqlType::Char(Some(5))));
+    b.column_type_class(
+        varchar_key,
+        TypeClass::Exact(SqlType::VarChar(varchar_width)),
+    );
+    b.from(left);
+    b.join_table(JoinOperator::InnerJoin, right, char_key, varchar_key);
+    b.project_column(char_key, left);
+    b.project_column(varchar_key, right);
+    for (note, var, value) in [
+        ("CHAR key", char_key, "dd"),
+        ("VARCHAR key with a trailing blank", varchar_key, "dd "),
+        ("VARCHAR key that should not match", varchar_key, "zz"),
+    ] {
+        b.example(
+            note,
+            DialectSupport::PostgresOnly,
+            vec![ExampleCell {
+                var,
+                value: ExampleValue::Literal(value),
+            }],
+        );
+    }
+    b.set_dialect_support(DialectSupport::PostgresOnly);
+    b.tags(&[
+        "join",
+        "string",
+        "mixed_type",
+        "type_reproducer",
+        "exclude-nightly",
+        "no-compose",
+    ]);
     b.build()
 }
 

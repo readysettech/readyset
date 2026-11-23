@@ -428,9 +428,11 @@ GLUTTON_DANTE_SELECTION=general \
 cargo run --manifest-path crates/Cargo.toml -p glutton -- fuzz
 ```
 
-The retired standalone harness's per-tag, single-pattern, seeded CLI is not
-ported. Keep a precise pattern regression in this crate, then use Glutton's
-`general` or `hoisting` campaign profile for whole-system exercise.
+Keep a precise pattern regression in this crate, then use Glutton's
+`general` or `hoisting` campaign profile for whole-system exercise. On a
+PostgreSQL deployment, set `GLUTTON_DANTE_SELECTION=type-reproducers` to draw
+the targeted type patterns. The nightly campaigns exclude these patterns
+through `GLUTTON_DANTE_EXCLUDED_TAGS=values,exclude-nightly`.
 
 ## Best practices
 

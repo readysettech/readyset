@@ -394,6 +394,11 @@ impl ConstraintRegistry {
 
         // Join patterns
         reg.register(joins::inner_join())?;
+        reg.register(joins::pg_char_varchar_join("pg_char_varchar_join", Some(5)))?;
+        reg.register(joins::pg_char_varchar_join(
+            "pg_char_unbounded_varchar_join",
+            None,
+        ))?;
         reg.register(joins::left_join())?;
         reg.register(joins::self_join())?;
         reg.register(joins::self_join_with_filter())?;
@@ -1058,6 +1063,107 @@ mod tests {
     }
 
     #[test]
+    fn postgres_char_varchar_joins_draw_both_widths_and_project_both_keys() {
+        use crate::constraint::{DialectSupport, ExampleValue};
+        use readyset_sql::ast::SqlType;
+
+        let dialect = Dialect::PostgreSQL;
+        let registry = ConstraintRegistry::default_registry();
+        let focused = SelectionFilter {
+            required_tags: vec!["type_reproducer", "join"],
+            ..Default::default()
+        };
+        let nightly = SelectionFilter {
+            excluded_tags: vec!["values", "exclude-nightly"],
+            ..Default::default()
+        };
+        for (name, width) in [
+            ("pg_char_varchar_join", Some(5)),
+            ("pg_char_unbounded_varchar_join", None),
+        ] {
+            let pattern = registry
+                .patterns
+                .iter()
+                .find(|p| p.name == name)
+                .expect(name);
+            assert_eq!(pattern.dialect_support, DialectSupport::PostgresOnly);
+            assert!(focused.matches(&pattern.tags, pattern.min_depth));
+            assert!(!nightly.matches(&pattern.tags, pattern.min_depth));
+            let config = GeneratorConfig {
+                reuse_preference: 0.0,
+                ..Default::default()
+            };
+            let mut state = GenerationState::new(dialect, config);
+            let mut rng = SmallRng::seed_from_u64(42);
+            let out = resolver::resolve(
+                &pattern.constraints,
+                &pattern.vars,
+                &mut state,
+                &mut Entropy::new(&mut rng),
+            )
+            .expect("join should resolve");
+            let sql = out.query.display(dialect).to_string();
+            let (projection, _) = sql.split_once(" FROM ").expect("projection");
+            let (_, on) = sql.split_once(" ON (").expect("join condition");
+            let (left, right) = on
+                .trim_end_matches(')')
+                .split_once(" = ")
+                .expect("equality keys");
+            assert!(
+                projection.contains(left) && projection.contains(right),
+                "{sql}"
+            );
+            for (ty, lit) in [
+                (SqlType::Char(Some(5)), "dd"),
+                (SqlType::VarChar(width), "dd "),
+            ] {
+                assert!(
+                    out.examples
+                        .iter()
+                        .flat_map(|e| &e.row_overrides)
+                        .any(|row| {
+                            row.value == ExampleValue::Literal(lit)
+                                && out.ddl.iter().any(|step| {
+                                    matches!(
+                                        step,
+                                        DdlStep::CreateTable { name, schema }
+                                            if *name == row.table
+                                                && schema.columns[&row.column].sql_type == ty
+                                    )
+                                })
+                        }),
+                    "{name}: missing seeded {ty:?} value {lit:?}, {:?}, {:?}",
+                    out.examples,
+                    out.ddl,
+                );
+            }
+        }
+
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+        let mut names = std::collections::BTreeSet::new();
+        for _ in 0..12 {
+            let mut generator = Generator::new(dialect, GeneratorConfig::default());
+            let output = generator
+                .generate_with_ddl_filtered(&mut entropy, &focused)
+                .expect("focused draw");
+            names.insert(
+                output
+                    .pattern_name
+                    .split('+')
+                    .next()
+                    .expect("base pattern")
+                    .to_owned(),
+            );
+        }
+        assert!(
+            names.contains("pg_char_varchar_join")
+                && names.contains("pg_char_unbounded_varchar_join"),
+            "{names:?}"
+        );
+    }
+
+    #[test]
     fn no_registered_pattern_carries_dialect_tags() {
         // Dialect is expressed via Pattern::dialect_support (structural) and
         // filtered via pick_random (structural). Dialect strings in the tag
@@ -1261,6 +1367,7 @@ mod tests {
             "mixed_type",
             "multi_aggregate",
             "multi_join",
+            "no-compose",
             "normalize_topk",
             "not_in",
             "numeric",
@@ -1280,6 +1387,7 @@ mod tests {
             "string",
             "subquery",
             "topk",
+            "type_reproducer",
             "union",
             "using",
             "values",
