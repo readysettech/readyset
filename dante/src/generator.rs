@@ -411,6 +411,7 @@ impl ConstraintRegistry {
         reg.register(ordering::topk())?;
         reg.register(ordering::order_by())?;
         reg.register(ordering::paginate())?;
+        reg.register(ordering::paginate_whole_page())?;
         reg.register(ordering::topk_unique_key_eq())?;
 
         // Subquery patterns

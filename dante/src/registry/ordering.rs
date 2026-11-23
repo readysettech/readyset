@@ -36,14 +36,23 @@ pub fn order_by() -> Pattern {
 /// ORDER BY + LIMIT + OFFSET triggers the Paginate dataflow node
 /// (as opposed to TopK which requires no OFFSET).
 pub fn paginate() -> Pattern {
-    let mut b = PatternBuilder::new("paginate");
+    paginate_at("paginate", 5)
+}
+
+/// Start at the second page with LIMIT 10 and OFFSET 10.
+pub fn paginate_whole_page() -> Pattern {
+    paginate_at("paginate_whole_page", 10)
+}
+
+fn paginate_at(name: &'static str, offset: u64) -> Pattern {
+    let mut b = PatternBuilder::new(name);
     let t = b.table();
     let c1 = b.column(t);
     let c2 = b.column(t);
     b.from(t);
     b.project_column(c1, t);
     b.order_by(c2, t, OrderType::OrderAscending, None);
-    b.limit(10, Some(5));
+    b.limit(10, Some(offset));
     b.tags(&["ordering", "limit", "paginate"]);
     b.build()
 }
@@ -134,6 +143,59 @@ mod tests {
                 order.contains("c0"),
                 "ORDER BY should append the PK (c0) as a tiebreaker: {sql}"
             );
+        }
+    }
+
+    #[test]
+    fn paginate_draws_page_boundaries_and_inside_pages() {
+        use rand::SeedableRng;
+        use rand::rngs::SmallRng;
+        use readyset_sql::ast::{Literal, SelectSpecification};
+
+        use crate::compat::SelectionFilter;
+        use crate::entropy::Entropy;
+        use crate::generator::Generator;
+        use crate::state::GeneratorConfig;
+
+        for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
+            let mut generator = Generator::new(
+                dialect,
+                GeneratorConfig {
+                    readyset_compatible: true,
+                    ..Default::default()
+                },
+            );
+            let mut rng = SmallRng::seed_from_u64(42);
+            let mut entropy = Entropy::new(&mut rng);
+            let filter = SelectionFilter {
+                required_tags: vec!["paginate"],
+                ..Default::default()
+            };
+            let mut seen = [false; 2];
+
+            for _ in 0..128 {
+                let Ok(out) = generator.generate_with_ddl_filtered(&mut entropy, &filter) else {
+                    continue;
+                };
+                let SelectSpecification::Simple(stmt) = out.query else {
+                    continue;
+                };
+                let (Some(Literal::Integer(limit)), Some(Literal::Integer(offset))) =
+                    (stmt.limit_clause.limit(), stmt.limit_clause.offset())
+                else {
+                    continue;
+                };
+                assert!(stmt.order.is_some());
+                match (*limit, *offset) {
+                    (10, 5) => seen[0] = true,
+                    (10, 10) => seen[1] = true,
+                    pair => panic!("unexpected pagination pair for {dialect:?}: {pair:?}"),
+                }
+                if seen == [true, true] {
+                    break;
+                }
+            }
+            assert_eq!(seen, [true, true], "{dialect:?} [inside page, at boundary]");
         }
     }
 
