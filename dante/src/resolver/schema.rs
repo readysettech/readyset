@@ -662,6 +662,23 @@ fn resolve_column_exists(
         |c| matches!(c, Constraint::Example { cells, .. } if cells.iter().any(|x| x.var == col)),
     );
 
+    let excluded_columns: Vec<_> = all_constraints
+        .iter()
+        .filter_map(|constraint| match constraint {
+            Constraint::NotEq(a, b) if *a == col => Some(*b),
+            Constraint::NotEq(a, b) if *b == col => Some(*a),
+            _ => None,
+        })
+        .filter_map(|partner| match env.get(partner) {
+            Some(Binding::Column {
+                name, table_var, ..
+            }) if matches!(env.get(*table_var), Some(Binding::Table { name, .. }) if *name == table_name) => {
+                Some(name)
+            }
+            _ => None,
+        })
+        .collect();
+
     let existing_col = table_schema.and_then(|ts| {
         if ts.columns.is_empty() || !entropy.probability(reuse) {
             return None;
@@ -675,6 +692,7 @@ fn resolve_column_exists(
                 None => true,
             })
             .filter(|(_, meta)| anchors.iter().all(|a| types_compatible(&meta.sql_type, a)))
+            .filter(|(name, _)| !excluded_columns.contains(name))
             .filter(|(name, _)| {
                 if example_pinned {
                     // Drop the PK from candidates so an example-pinned

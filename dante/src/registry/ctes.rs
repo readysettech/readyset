@@ -233,6 +233,69 @@ mod tests {
         assert!(sql.contains("= ?"), "expected parameter in sql: {sql}");
     }
 
+    #[test]
+    fn parameterized_cte_keeps_its_projection_and_filter_distinct_under_reuse() {
+        use data_generator::ColumnGenerationSpec;
+        use rand::SeedableRng;
+        use rand::rngs::SmallRng;
+        use readyset_sql::ast::{Expr, FieldDefinitionExpr, SelectSpecification, SqlType};
+
+        use crate::entropy::Entropy;
+        use crate::resolver::resolve;
+        use crate::state::{ColumnMeta, GenerationState, GeneratorConfig, TableSchema};
+
+        let p = cte_with_param();
+        for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
+            for seed in 0..16 {
+                let mut state = GenerationState::new(
+                    dialect,
+                    GeneratorConfig {
+                        reuse_preference: 1.0,
+                        ..Default::default()
+                    },
+                );
+                let mut table = TableSchema::new("existing".into());
+                table.add_column(
+                    "reused".into(),
+                    ColumnMeta {
+                        sql_type: SqlType::Int(None),
+                        gen_spec: ColumnGenerationSpec::Random,
+                    },
+                );
+                state.add_table(table);
+                let mut rng = SmallRng::seed_from_u64(seed);
+                let out = resolve(
+                    &p.constraints,
+                    &p.vars,
+                    &mut state,
+                    &mut Entropy::new(&mut rng),
+                )
+                .unwrap_or_else(|e| panic!("{dialect:?} seed {seed}: {e}"));
+
+                let SelectSpecification::Simple(stmt) = out.query else {
+                    panic!("expected SELECT");
+                };
+                let inner = &stmt.ctes[0].statement;
+                let FieldDefinitionExpr::Expr {
+                    expr: Expr::Column(projected),
+                    ..
+                } = &inner.fields[0]
+                else {
+                    panic!("expected projected column");
+                };
+                let Some(Expr::BinaryOp { lhs, .. }) = inner.where_clause.as_ref() else {
+                    panic!("expected WHERE comparison");
+                };
+                let Expr::Column(filtered) = lhs.as_ref() else {
+                    panic!("expected filtered column");
+                };
+                assert_eq!(projected.name, "reused");
+                assert_ne!(projected.name, filtered.name);
+                assert_eq!(projected.table, filtered.table);
+            }
+        }
+    }
+
     /// Regression: when a CTE pattern is composed with a partner that
     /// introduces additional columns on the unified primary table, the
     /// partner's column references end up qualified by the CTE alias even
