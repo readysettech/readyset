@@ -166,3 +166,35 @@ SELECT id FROM t1 WHERE NOT (i < d)
 1
 3
 4
+
+# A row comparison resolves each position like the scalar comparison of that position.
+
+query I rowsort
+SELECT c0 FROM t0 WHERE ROW(c0, 1) = ROW(c2, 1)
+----
+2
+
+query I rowsort
+SELECT c0 FROM t0 WHERE NOT (ROW(c0, 1) = ROW(c2, 1))
+----
+0
+1
+
+query I rowsort
+SELECT c0 FROM t0 WHERE ROW(c0, 1) < ROW(c2, 1)
+----
+0
+1
+
+query I rowsort
+SELECT id FROM t1 WHERE ROW(i, 0) = ROW(r, 0)
+----
+3
+
+query I rowsort
+SELECT id FROM t1 WHERE NOT (ROW(i, 0) = ROW(r, 0))
+----
+0
+1
+2
+4

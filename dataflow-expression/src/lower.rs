@@ -1576,8 +1576,7 @@ impl BinaryOperator {
             },
 
             // PostgreSQL resolves a row comparison one position at a time whichever comparison
-            // it is, so every operator that takes two rows shares the field-wise cast that turns
-            // an unknown-typed literal into the type standing opposite it.
+            // it is, so every operator that takes two rows shares the field-wise resolution.
             Equal | Is | Greater | GreaterOrEqual | Less | LessOrEqual
                 if let (SqlEngine::PostgreSQL, DfType::Row(left), DfType::Row(right)) =
                     (dialect.engine(), left_type, right_type) =>
@@ -1587,16 +1586,29 @@ impl BinaryOperator {
                 if left.len() != right.len() {
                     (None, None)
                 } else {
-                    let resolved: Box<[DfType]> = left
-                        .iter()
-                        .zip(right)
-                        .map(|(left, right)| if left.is_known() { left } else { right }.clone())
-                        .collect();
-                    let cast_to_resolved = |fields: &[DfType]| {
-                        (*fields != *resolved).then(|| DfType::Row(resolved.clone()))
+                    // A number position takes the casts that make its two numbers compare by
+                    // value, as a scalar comparison does. Any other position takes the type
+                    // standing opposite an unknown-typed literal.
+                    let mut left_types = Vec::with_capacity(left.len());
+                    let mut right_types = Vec::with_capacity(left.len());
+                    for (left, right) in left.iter().zip(right.iter()) {
+                        match pg_number_coercion(left, right) {
+                            Some((left_ty, right_ty)) => {
+                                left_types.push(left_ty.unwrap_or_else(|| left.clone()));
+                                right_types.push(right_ty.unwrap_or_else(|| right.clone()));
+                            }
+                            None => {
+                                let resolved = if left.is_known() { left } else { right };
+                                left_types.push(resolved.clone());
+                                right_types.push(resolved.clone());
+                            }
+                        }
+                    }
+                    let cast_to = |fields: &[DfType], types: Vec<DfType>| {
+                        (fields != types.as_slice()).then(|| DfType::Row(types.into()))
                     };
 
-                    (cast_to_resolved(left), cast_to_resolved(right))
+                    (cast_to(left, left_types), cast_to(right, right_types))
                 }
             }
 
@@ -4162,6 +4174,50 @@ pub(crate) mod tests {
                 .unwrap();
             assert_eq!(left, Some(row_ty(&COLUMNS)));
             assert_eq!(right, None);
+        }
+
+        #[test]
+        fn numeric_positions_need_no_cast_to_compare_by_value() {
+            // `(a, 1) = (b, 1)` with a INT and b NUMERIC: DfValue compares the two by value.
+            let (left, right) = BinaryOperator::Equal
+                .argument_type_coercions(
+                    &row_expr(&[DfType::Int, DfType::Int]),
+                    &row_expr(&[DfType::DEFAULT_NUMERIC, DfType::Int]),
+                    Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap();
+            assert_eq!(left, None);
+            assert_eq!(right, None);
+        }
+
+        #[test]
+        fn a_float_position_casts_the_other_side_to_double() {
+            // `(a, 1) = (b, 1)` with a INT and b REAL: the integer position casts to DOUBLE and
+            // compares with the REAL widened, as in PostgreSQL.
+            let (left, right) = BinaryOperator::Equal
+                .argument_type_coercions(
+                    &row_expr(&[DfType::Int, DfType::Int]),
+                    &row_expr(&[DfType::Float, DfType::Int]),
+                    Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap();
+            assert_eq!(left, Some(row_ty(&[DfType::Double, DfType::Int])));
+            assert_eq!(right, None);
+        }
+
+        #[test]
+        fn each_side_casts_to_its_own_position_types() {
+            // `(1, 2.5) = (3.5, 4)`: each position casts the side that is not the float, so the
+            // two rows resolve to different types.
+            let (left, right) = BinaryOperator::Equal
+                .argument_type_coercions(
+                    &row_expr(&[DfType::Int, DfType::Float]),
+                    &row_expr(&[DfType::Float, DfType::Int]),
+                    Dialect::DEFAULT_POSTGRESQL,
+                )
+                .unwrap();
+            assert_eq!(left, Some(row_ty(&[DfType::Double, DfType::Float])));
+            assert_eq!(right, Some(row_ty(&[DfType::Float, DfType::Double])));
         }
 
         #[test]
