@@ -1,8 +1,8 @@
 //! Filter patterns: between, in_list, like, is_null, compound_where.
 
-use readyset_sql::ast::BinaryOperator;
+use readyset_sql::ast::{BinaryOperator, SqlType};
 
-use crate::constraint::TypeClass;
+use crate::constraint::{DialectSupport, ExampleCell, ExampleValue, TypeClass};
 use crate::pattern::{Pattern, PatternBuilder};
 
 /// SELECT t.c1 FROM t WHERE t.c2 BETWEEN ? AND ?
@@ -28,6 +28,80 @@ pub fn in_list() -> Pattern {
     b.project_column(c1, t);
     b.where_in_param(c2, t, 3);
     b.tags(&["filter"]);
+    b.build()
+}
+
+/// Probe a three-character key with both the stored value and an overlong value that shares its
+/// prefix. Only the exact lookup should match the seeded row.
+pub fn pg_overlong_key(name: &'static str, key_type: SqlType) -> Pattern {
+    let mut b = PatternBuilder::new(name);
+    let table = b.table();
+    let key = b.column(table);
+    b.column_type_class(key, TypeClass::Exact(key_type));
+    b.from(table);
+    b.project_column(key, table);
+    let param = b.where_param(key, table, BinaryOperator::Equal);
+    let cell = |var, value| ExampleCell {
+        var,
+        value: ExampleValue::Literal(value),
+    };
+    b.example(
+        "overlong lookup",
+        DialectSupport::PostgresOnly,
+        vec![cell(key, "abc"), cell(param, "abcd")],
+    );
+    b.example(
+        "exact lookup",
+        DialectSupport::PostgresOnly,
+        vec![cell(param, "abc")],
+    );
+    b.set_dialect_support(DialectSupport::PostgresOnly);
+    b.tags(&[
+        "filter",
+        "parameter",
+        "string",
+        "type_reproducer",
+        "exclude-nightly",
+        "no-compose",
+    ]);
+    b.build()
+}
+
+/// PostgreSQL drops the CHAR padding when comparing with TEXT, while preserving the TEXT value.
+pub fn pg_char_text_compare() -> Pattern {
+    let mut b = PatternBuilder::new("pg_char_text_compare");
+    let table = b.table();
+    let fixed = b.column(table);
+    let text = b.column(table);
+    b.column_type_class(fixed, TypeClass::Exact(SqlType::Char(Some(3))));
+    b.column_type_class(text, TypeClass::Exact(SqlType::Text));
+    b.from(table);
+    b.project_column(text, table);
+    b.where_column_compare(fixed, table, BinaryOperator::Equal, text, table);
+    for value in ["ab", "ab "] {
+        b.example(
+            "CHAR compared with TEXT",
+            DialectSupport::PostgresOnly,
+            vec![
+                ExampleCell {
+                    var: fixed,
+                    value: ExampleValue::Literal("ab"),
+                },
+                ExampleCell {
+                    var: text,
+                    value: ExampleValue::Literal(value),
+                },
+            ],
+        );
+    }
+    b.set_dialect_support(DialectSupport::PostgresOnly);
+    b.tags(&[
+        "filter",
+        "string",
+        "type_reproducer",
+        "exclude-nightly",
+        "no-compose",
+    ]);
     b.build()
 }
 

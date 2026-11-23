@@ -325,6 +325,7 @@ impl ConstraintRegistry {
     /// [`Self::default_registry`], or the first default pattern that fails to register.
     fn try_default_registry() -> Result<Self, PatternRegistrationError> {
         use crate::registry::*;
+        use readyset_sql::ast::SqlType;
 
         let mut reg = Self::new();
 
@@ -391,6 +392,15 @@ impl ConstraintRegistry {
         reg.register(filters::like())?;
         reg.register(filters::is_null())?;
         reg.register(filters::compound_where())?;
+        reg.register(filters::pg_overlong_key(
+            "pg_overlong_char_key",
+            SqlType::Char(Some(3)),
+        ))?;
+        reg.register(filters::pg_overlong_key(
+            "pg_overlong_varchar_key",
+            SqlType::VarChar(Some(3)),
+        ))?;
+        reg.register(filters::pg_char_text_compare())?;
 
         // Join patterns
         reg.register(joins::inner_join())?;
@@ -1060,6 +1070,96 @@ mod tests {
                     .is_empty()
             );
         }
+    }
+
+    fn resolve_pg_type_reproducer(name: &str) -> ResolverOutput {
+        let registry = ConstraintRegistry::default_registry();
+        let pattern = registry
+            .patterns
+            .iter()
+            .find(|p| p.name == name)
+            .expect(name);
+        let focused = SelectionFilter {
+            required_tags: vec!["type_reproducer"],
+            ..Default::default()
+        };
+        let nightly = SelectionFilter {
+            excluded_tags: vec!["values", "exclude-nightly"],
+            ..Default::default()
+        };
+        assert!(focused.matches(&pattern.tags, pattern.min_depth));
+        assert!(!nightly.matches(&pattern.tags, pattern.min_depth));
+        assert_eq!(
+            pattern.dialect_support,
+            crate::constraint::DialectSupport::PostgresOnly
+        );
+        let config = GeneratorConfig {
+            reuse_preference: 0.0,
+            ..Default::default()
+        };
+        let mut state = GenerationState::new(Dialect::PostgreSQL, config);
+        let mut rng = SmallRng::seed_from_u64(42);
+        resolver::resolve(
+            &pattern.constraints,
+            &pattern.vars,
+            &mut state,
+            &mut Entropy::new(&mut rng),
+        )
+        .expect("type reproducer should resolve")
+    }
+
+    #[test]
+    fn postgres_char_comparisons_seed_padding_and_overlong_binds() {
+        use crate::constraint::ExampleValue::Literal;
+        use readyset_sql::ast::SqlType;
+
+        for (name, expected_key_type) in [
+            ("pg_overlong_char_key", SqlType::Char(Some(3))),
+            ("pg_overlong_varchar_key", SqlType::VarChar(Some(3))),
+        ] {
+            let output = resolve_pg_type_reproducer(name);
+            assert_eq!(output.params.len(), 1);
+            assert_eq!(output.params[0].sql_type, expected_key_type);
+            assert!(
+                output
+                    .query
+                    .display(Dialect::PostgreSQL)
+                    .to_string()
+                    .contains(" = $1)")
+            );
+            let [bait, control] = output.examples.as_slice() else {
+                panic!("{name}: expected two probes");
+            };
+            assert_eq!(bait.row_overrides[0].value, Literal("abc"));
+            assert_eq!(bait.param_overrides[0].placeholder_index, 0);
+            assert_eq!(bait.param_overrides[0].value, Literal("abcd"));
+            assert_eq!(control.param_overrides[0].value, Literal("abc"));
+        }
+
+        let output = resolve_pg_type_reproducer("pg_char_text_compare");
+        let sql = output.query.display(Dialect::PostgreSQL).to_string();
+        assert!(sql.contains(" WHERE (") && sql.contains(" = "), "{sql}");
+        let values: Vec<_> = output
+            .examples
+            .iter()
+            .map(|e| e.row_overrides.iter().map(|r| &r.value).collect::<Vec<_>>())
+            .collect();
+        assert_eq!(
+            values,
+            [
+                vec![&Literal("ab"), &Literal("ab")],
+                vec![&Literal("ab"), &Literal("ab ")]
+            ]
+        );
+        let DdlStep::CreateTable { schema, .. } = &output.ddl[0] else {
+            panic!("missing seed table");
+        };
+        let columns = &output.examples[0].row_overrides;
+        assert_eq!(
+            schema.columns[&columns[0].column].sql_type,
+            SqlType::Char(Some(3))
+        );
+        assert_eq!(schema.columns[&columns[1].column].sql_type, SqlType::Text);
     }
 
     #[test]
