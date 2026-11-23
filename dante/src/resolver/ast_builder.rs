@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use data_generator::ColumnGenerationSpec;
 use readyset_sql::Dialect;
+use readyset_sql::analysis::visit_mut::VisitorMut;
 use readyset_sql::ast::{
     BinaryOperator, Column, CommonTableExpr, CompoundSelectOperator, CompoundSelectStatement,
     DistinctOption, Expr, FieldDefinitionExpr, FieldReference, FunctionExpr, GroupByClause,
@@ -45,7 +46,7 @@ pub(super) fn build_select(
 ) -> SelectBuildResult {
     let mut placeholder_idx: u32 = 1;
     let mut param_map: Vec<Option<usize>> = vec![None; var_kinds.len()];
-    let (stmt, params) = build_select_inner(
+    let (mut stmt, params) = build_select_inner(
         env,
         constraints,
         var_kinds,
@@ -54,7 +55,113 @@ pub(super) fn build_select(
         &mut placeholder_idx,
         &mut param_map,
     )?;
+    let params = match state.dialect() {
+        Dialect::MySQL => mysql_binding_order(&mut stmt, params, &mut param_map)?,
+        Dialect::PostgreSQL => params,
+    };
     Ok((stmt, params, param_map))
+}
+
+struct MySqlPlaceholders {
+    next: usize,
+    positions: Vec<usize>,
+}
+
+impl<'ast> VisitorMut<'ast> for MySqlPlaceholders {
+    type Error = ResolveError;
+
+    fn visit_select_statement(
+        &mut self,
+        stmt: &'ast mut SelectStatement,
+    ) -> Result<(), Self::Error> {
+        // Visit clauses in the order SelectStatement displays them.
+        for cte in &mut stmt.ctes {
+            self.visit_common_table_expr(cte)?;
+        }
+        for field in &mut stmt.fields {
+            self.visit_field_definition_expr(field)?;
+        }
+        for table in &mut stmt.tables {
+            self.visit_table_expr(table)?;
+        }
+        for join in &mut stmt.join {
+            self.visit_join_clause(join)?;
+        }
+        if let Some(expr) = &mut stmt.where_clause {
+            self.visit_where_clause(expr)?;
+        }
+        if let Some(group) = &mut stmt.group_by {
+            self.visit_group_by_clause(group)?;
+        }
+        if let Some(expr) = &mut stmt.having {
+            self.visit_having_clause(expr)?;
+        }
+        if let Some(order) = &mut stmt.order {
+            self.visit_order_clause(order)?;
+        }
+        self.visit_limit_clause(&mut stmt.limit_clause)
+    }
+
+    fn visit_literal(&mut self, literal: &'ast mut Literal) -> Result<(), Self::Error> {
+        if let Literal::Placeholder(placeholder) = literal {
+            let ItemPlaceholder::DollarNumber(number) = *placeholder else {
+                return Err(ResolveError::InvalidParameterLayout);
+            };
+            let Some(position) = number
+                .checked_sub(1)
+                .and_then(|index| self.positions.get_mut(index as usize))
+                .filter(|position| **position == usize::MAX)
+            else {
+                return Err(ResolveError::InvalidParameterLayout);
+            };
+            *position = self.next;
+            self.next += 1;
+            *placeholder = ItemPlaceholder::QuestionMark;
+        }
+        Ok(())
+    }
+}
+
+/// MySQL binds each `?` in SQL text order. Move its metadata and example index together.
+/// Each ParamMeta represents one predicate, whose placeholders stay contiguous and ordered.
+fn mysql_binding_order(
+    stmt: &mut SelectStatement,
+    params: Vec<ParamMeta>,
+    param_map: &mut [Option<usize>],
+) -> Result<Vec<ParamMeta>, ResolveError> {
+    let count = params.iter().map(|param| param.count as usize).sum();
+    let mut visitor = MySqlPlaceholders {
+        next: 0,
+        positions: vec![usize::MAX; count],
+    };
+    visitor.visit_select_statement(stmt)?;
+    if visitor.next != count {
+        return Err(ResolveError::InvalidParameterLayout);
+    }
+
+    let mut ordered = Vec::with_capacity(params.len());
+    let mut start = 0;
+    for param in params {
+        let end = start + param.count as usize;
+        let Some((&first, rest)) = visitor.positions[start..end].split_first() else {
+            return Err(ResolveError::InvalidParameterLayout);
+        };
+        if rest
+            .iter()
+            .copied()
+            .ne(first + 1..first + param.count as usize)
+        {
+            return Err(ResolveError::InvalidParameterLayout);
+        }
+        ordered.push((first, param));
+        start = end;
+    }
+    ordered.sort_unstable_by_key(|(position, _)| *position);
+
+    for slot in param_map.iter_mut().flatten() {
+        *slot = visitor.positions[*slot];
+    }
+    Ok(ordered.into_iter().map(|(_, param)| param).collect())
 }
 
 /// Build a SelectStatement, threading a shared `placeholder_idx`.
@@ -263,8 +370,7 @@ fn build_select_inner(
             } => {
                 let (col_name, table_name) = get_col_table(env, *col, *table)?;
                 let col_type = get_col_type(env, *col)?;
-                let placeholder =
-                    make_and_record_placeholder(dialect, placeholder_idx, *param, param_map);
+                let placeholder = make_and_record_placeholder(placeholder_idx, *param, param_map);
                 where_clauses.push(Expr::BinaryOp {
                     lhs: Box::new(make_column_expr(&col_name, &table_name)),
                     op: *op,
@@ -287,7 +393,7 @@ fn build_select_inner(
                 let mut placeholders = Vec::new();
                 for slot_var in slot_vars {
                     placeholders.push(Expr::Literal(Literal::Placeholder(
-                        make_and_record_placeholder(dialect, placeholder_idx, *slot_var, param_map),
+                        make_and_record_placeholder(placeholder_idx, *slot_var, param_map),
                     )));
                 }
                 where_clauses.push(Expr::In {
@@ -304,8 +410,8 @@ fn build_select_inner(
             Constraint::WhereRangeParam { col, table, lo, hi } => {
                 let (col_name, table_name) = get_col_table(env, *col, *table)?;
                 let col_type = get_col_type(env, *col)?;
-                let p1 = make_and_record_placeholder(dialect, placeholder_idx, *lo, param_map);
-                let p2 = make_and_record_placeholder(dialect, placeholder_idx, *hi, param_map);
+                let p1 = make_and_record_placeholder(placeholder_idx, *lo, param_map);
+                let p2 = make_and_record_placeholder(placeholder_idx, *hi, param_map);
                 // col >= ? AND col <= ?
                 let ge = Expr::BinaryOp {
                     lhs: Box::new(make_column_expr(&col_name, &table_name)),
@@ -331,8 +437,8 @@ fn build_select_inner(
             Constraint::WhereBetweenParam { col, table, lo, hi } => {
                 let (col_name, table_name) = get_col_table(env, *col, *table)?;
                 let col_type = get_col_type(env, *col)?;
-                let p1 = make_and_record_placeholder(dialect, placeholder_idx, *lo, param_map);
-                let p2 = make_and_record_placeholder(dialect, placeholder_idx, *hi, param_map);
+                let p1 = make_and_record_placeholder(placeholder_idx, *lo, param_map);
+                let p2 = make_and_record_placeholder(placeholder_idx, *hi, param_map);
                 where_clauses.push(Expr::Between {
                     operand: Box::new(make_column_expr(&col_name, &table_name)),
                     min: Box::new(Expr::Literal(Literal::Placeholder(p1))),
@@ -353,8 +459,7 @@ fn build_select_inner(
             } => {
                 let (col_name, table_name) = get_col_table(env, *col, *table)?;
                 let col_type = get_col_type(env, *col)?;
-                let placeholder =
-                    make_and_record_placeholder(dialect, placeholder_idx, *param, param_map);
+                let placeholder = make_and_record_placeholder(placeholder_idx, *param, param_map);
                 let op = if *negated {
                     BinaryOperator::NotLike
                 } else {
@@ -423,12 +528,8 @@ fn build_select_inner(
                         } => {
                             let (col_name, table_name) = get_col_table(env, *col, *table)?;
                             let col_type = get_col_type(env, *col)?;
-                            let placeholder = make_and_record_placeholder(
-                                dialect,
-                                placeholder_idx,
-                                *param,
-                                param_map,
-                            );
+                            let placeholder =
+                                make_and_record_placeholder(placeholder_idx, *param, param_map);
                             or_parts.push(Expr::BinaryOp {
                                 lhs: Box::new(make_column_expr(&col_name, &table_name)),
                                 op: *op,
@@ -640,8 +741,7 @@ fn build_select_inner(
                 let (col_name, table_name) = get_col_table(env, *col, *table)?;
                 let col_expr = make_column_expr(&col_name, &table_name);
                 let func_expr = make_aggregate_expr(function, col_expr);
-                let placeholder =
-                    make_and_record_placeholder(dialect, placeholder_idx, *param, param_map);
+                let placeholder = make_and_record_placeholder(placeholder_idx, *param, param_map);
                 let new_expr = Expr::BinaryOp {
                     lhs: Box::new(Expr::Call(func_expr)),
                     op: *op,
@@ -667,8 +767,7 @@ fn build_select_inner(
             } => {
                 let (col_name, table_name) = get_col_table(env, *col, *table)?;
                 let col_expr = make_column_expr(&col_name, &table_name);
-                let placeholder =
-                    make_and_record_placeholder(dialect, placeholder_idx, *param, param_map);
+                let placeholder = make_and_record_placeholder(placeholder_idx, *param, param_map);
                 let new_expr = Expr::BinaryOp {
                     lhs: Box::new(col_expr),
                     op: *op,
@@ -1528,11 +1627,8 @@ fn make_column_expr(col_name: &SqlIdentifier, table_name: &SqlIdentifier) -> Exp
 }
 
 /// Make a placeholder for a query parameter.
-fn make_placeholder(dialect: Dialect, idx: &mut u32) -> ItemPlaceholder {
-    let p = match dialect {
-        Dialect::PostgreSQL => ItemPlaceholder::DollarNumber(*idx),
-        _ => ItemPlaceholder::QuestionMark,
-    };
+fn make_placeholder(idx: &mut u32) -> ItemPlaceholder {
+    let p = ItemPlaceholder::DollarNumber(*idx);
     *idx += 1;
     p
 }
@@ -1544,7 +1640,6 @@ fn make_placeholder(dialect: Dialect, idx: &mut u32) -> ItemPlaceholder {
 ///
 /// Callers must seed `idx >= 1`; seeding 0 would make `*idx - 1` underflow.
 fn make_and_record_placeholder(
-    dialect: Dialect,
     idx: &mut u32,
     param: VarId,
     param_map: &mut [Option<usize>],
@@ -1555,7 +1650,7 @@ fn make_and_record_placeholder(
         "placeholder_idx must be >= 1 before calling \
             make_and_record_placeholder; seeding 0 causes u32 underflow",
     ) as usize;
-    let p = make_placeholder(dialect, idx);
+    let p = make_placeholder(idx);
     param_map[param.0] = Some(zero_based);
     p
 }
@@ -3424,7 +3519,7 @@ mod tests {
         // both debug and release rather than a silent wrap to usize::MAX.
         let mut idx: u32 = 0;
         let mut param_map: Vec<Option<usize>> = vec![None; 1];
-        super::make_and_record_placeholder(Dialect::MySQL, &mut idx, VarId(0), &mut param_map);
+        super::make_and_record_placeholder(&mut idx, VarId(0), &mut param_map);
     }
 
     #[test]
@@ -3469,5 +3564,83 @@ mod tests {
             ),
             "expected Compound variant, got Simple"
         );
+    }
+
+    #[test]
+    fn nested_parameters_follow_the_dialects_binding_order() {
+        use crate::constraint::{DialectSupport, ExampleCell, ExampleValue};
+        use crate::pattern::PatternBuilder;
+        use readyset_sql::ast::JoinOperator;
+
+        for cte in [false, true] {
+            let mut b = PatternBuilder::new("nested_parameters");
+            let outer = b.table();
+            let key = b.column(outer);
+            let label = b.column(outer);
+            b.column_type_class(key, TypeClass::Integer);
+            b.column_type_class(label, TypeClass::String);
+            b.from(outer);
+            b.project_column(key, outer);
+            let list = b.where_in_param(label, outer, 3);
+
+            let mut nested = b.subquery();
+            let inner = nested.table();
+            let inner_key = nested.column(inner);
+            nested.column_type_class(inner_key, TypeClass::Integer);
+            nested.from(inner);
+            nested.project_column(inner_key, inner);
+            let nested_param = nested.where_param(inner_key, inner, BinaryOperator::Greater);
+            if cte {
+                let alias = nested.commit_as_cte();
+                b.from(alias);
+            } else {
+                nested.commit_as_join(JoinOperator::InnerJoin, key, inner_key);
+            }
+            b.example(
+                "distinct values at each slot",
+                DialectSupport::Both,
+                list.into_iter()
+                    .zip(["alpha", "beta", "gamma"])
+                    .chain([(nested_param, "42")])
+                    .map(|(var, value)| ExampleCell {
+                        var,
+                        value: ExampleValue::Literal(value),
+                    })
+                    .collect(),
+            );
+            let pattern = b.build();
+
+            for dialect in [Dialect::MySQL, Dialect::PostgreSQL] {
+                let (sql, out) =
+                    resolve_to_sql(pattern.constraints.clone(), pattern.vars.clone(), dialect);
+                let (nested_sql, list_sql, counts, integer_index, positions) = match dialect {
+                    Dialect::MySQL => ("> ?", "IN (?, ?, ?)", [1, 3], 0, [1, 2, 3, 0]),
+                    Dialect::PostgreSQL => ("> $4", "IN ($1, $2, $3)", [3, 1], 1, [0, 1, 2, 3]),
+                };
+                assert!(sql.find(nested_sql).expect(&sql) < sql.find(list_sql).expect(&sql));
+                assert_eq!(
+                    out.params.iter().map(|p| p.count).collect::<Vec<_>>(),
+                    counts,
+                    "{sql}",
+                );
+                assert!(
+                    TypeClass::Integer.matches(&out.params[integer_index].sql_type),
+                    "{sql}"
+                );
+                assert!(
+                    TypeClass::String.matches(&out.params[1 - integer_index].sql_type),
+                    "{sql}"
+                );
+                assert_eq!(
+                    out.examples[0]
+                        .param_overrides
+                        .iter()
+                        .map(|p| p.placeholder_index)
+                        .collect::<Vec<_>>(),
+                    positions,
+                    "{sql}",
+                );
+            }
+        }
     }
 }
