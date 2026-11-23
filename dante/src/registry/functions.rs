@@ -6,7 +6,7 @@
 
 use readyset_sql::ast::SqlType;
 
-use crate::constraint::{DialectSupport, ScalarFn, TypeClass};
+use crate::constraint::{DialectSupport, ExampleCell, ExampleValue, ScalarFn, TypeClass};
 use crate::pattern::{Pattern, PatternBuilder};
 
 /// SELECT COALESCE(t.c1, 0) FROM t
@@ -305,6 +305,48 @@ pub fn substring_in_list() -> Pattern {
     b.where_in_param(c_filter, t, 3);
     b.tags(&["function", "string", "post_lookup"]);
     b.build()
+}
+
+/// PostgreSQL GREATEST and LEAST over INT and BIGINT columns. The winning argument falls
+/// outside INT on each shape, so coercing it to the narrower type changes the answer.
+pub fn pg_int_bigint_extrema() -> [Pattern; 2] {
+    [
+        ("pg_greatest_int_bigint", ScalarFn::Greatest, "5000000000"),
+        ("pg_least_int_bigint", ScalarFn::Least, "-5000000000"),
+    ]
+    .map(|(name, function, value)| {
+        let mut b = PatternBuilder::new(name);
+        let table = b.table();
+        let narrow = b.column(table);
+        let wide = b.column(table);
+        b.column_type_class(narrow, TypeClass::Exact(SqlType::Int(None)));
+        b.column_type_class(wide, TypeClass::Exact(SqlType::BigInt(None)));
+        b.from(table);
+        b.project_function(function, vec![(narrow, table), (wide, table)]);
+        b.example(
+            "winning BIGINT exceeds INT width",
+            DialectSupport::PostgresOnly,
+            vec![
+                ExampleCell {
+                    var: narrow,
+                    value: ExampleValue::Literal("1"),
+                },
+                ExampleCell {
+                    var: wide,
+                    value: ExampleValue::Literal(value),
+                },
+            ],
+        );
+        b.set_dialect_support(DialectSupport::PostgresOnly);
+        b.tags(&[
+            "function",
+            "numeric",
+            "type_reproducer",
+            "exclude-nightly",
+            "no-compose",
+        ]);
+        b.build()
+    })
 }
 
 #[cfg(test)]

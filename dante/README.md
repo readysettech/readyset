@@ -431,8 +431,9 @@ cargo run --manifest-path crates/Cargo.toml -p glutton -- fuzz
 Keep a precise pattern regression in this crate, then use Glutton's
 `general` or `hoisting` campaign profile for whole-system exercise. On a
 PostgreSQL deployment, set `GLUTTON_DANTE_SELECTION=type-reproducers` to draw
-the targeted type patterns. The nightly campaigns exclude these patterns
-through `GLUTTON_DANTE_EXCLUDED_TAGS=values,exclude-nightly`.
+the type patterns without composition partners. Omit `exclude-nightly` from
+`GLUTTON_DANTE_EXCLUDED_TAGS` for this run. Local `general` runs can also draw
+the standalone patterns. The nightly campaigns use `exclude-nightly` to skip them.
 
 ## Best practices
 

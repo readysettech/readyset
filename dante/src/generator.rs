@@ -482,6 +482,9 @@ impl ConstraintRegistry {
         reg.register(functions::greatest())?;
         reg.register(functions::concat_ws())?;
         reg.register(functions::least())?;
+        for pattern in functions::pg_int_bigint_extrema() {
+            reg.register(pattern)?;
+        }
         reg.register(functions::ascii())?;
         reg.register(functions::split_part())?;
         reg.register(functions::date_trunc())?;
@@ -1160,6 +1163,71 @@ mod tests {
             SqlType::Char(Some(3))
         );
         assert_eq!(schema.columns[&columns[1].column].sql_type, SqlType::Text);
+    }
+
+    #[test]
+    fn postgres_extrema_reproducers_seed_a_winning_bigint_outside_int() {
+        use crate::constraint::ExampleValue::Literal;
+        use readyset_sql::ast::SqlType;
+
+        for (name, function, bigint) in [
+            ("pg_greatest_int_bigint", "GREATEST", "5000000000"),
+            ("pg_least_int_bigint", "LEAST", "-5000000000"),
+        ] {
+            let output = resolve_pg_type_reproducer(name);
+            let sql = output.query.display(Dialect::PostgreSQL).to_string();
+            assert!(sql.contains(&format!("{function}(")), "{sql}");
+            let DdlStep::CreateTable { schema, .. } = &output.ddl[0] else {
+                panic!("missing seed table");
+            };
+            let [int_seed, bigint_seed] = output.examples[0].row_overrides.as_slice() else {
+                panic!("expected both operands to be seeded");
+            };
+            assert_eq!(
+                schema.columns[&int_seed.column].sql_type,
+                SqlType::Int(None)
+            );
+            assert_eq!(int_seed.value, Literal("1"));
+            assert_eq!(
+                schema.columns[&bigint_seed.column].sql_type,
+                SqlType::BigInt(None)
+            );
+            assert_eq!(bigint_seed.value, Literal(bigint));
+        }
+
+        let filter = SelectionFilter {
+            required_tags: vec!["type_reproducer"],
+            excluded_tags: vec!["spatial"],
+            ..Default::default()
+        };
+        let expected: std::collections::BTreeSet<_> = [
+            "pg_char_varchar_join",
+            "pg_char_unbounded_varchar_join",
+            "pg_overlong_char_key",
+            "pg_overlong_varchar_key",
+            "pg_char_text_compare",
+            "pg_greatest_int_bigint",
+            "pg_least_int_bigint",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+        let mut reached = std::collections::BTreeSet::new();
+        for _ in 0..64 {
+            let config = GeneratorConfig {
+                readyset_compatible: true,
+                ..Default::default()
+            };
+            let mut generator = Generator::new(Dialect::PostgreSQL, config);
+            let out = generator
+                .generate_with_ddl_filtered(&mut entropy, &filter)
+                .expect("focused draw");
+            assert!(!out.pattern_name.contains('+'), "{}", out.pattern_name);
+            reached.insert(out.pattern_name);
+        }
+        assert_eq!(reached, expected);
     }
 
     #[test]
