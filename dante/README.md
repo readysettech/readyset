@@ -287,6 +287,9 @@ add new tags freely. Common conventions in the current tree:
 - **Example:** `example` whenever the pattern carries
   `Constraint::Example` cells.
 
+Tag a pattern `no-compose` to keep it standalone: it is never the base of a
+composition and never a composition partner.
+
 Browse current tags:
 
 ```bash

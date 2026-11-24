@@ -889,6 +889,10 @@ impl Generator {
         base: &Pattern,
         excluded_tags: &[&'static str],
     ) -> Vec<&'a Pattern> {
+        if base.tags.contains(&"no-compose") {
+            return Vec::new();
+        }
+
         // Geometric distribution: keep flipping until we get tails.
         // p=0.8 gives ~20% bare, ~16% depth-2, ~13% depth-3, and ~33%
         // depth-5+. Higher targets naturally saturate when the registry
@@ -914,15 +918,17 @@ impl Generator {
         // to avoid re-picking the same pattern.
         let mut tried_indices: Vec<usize> = Vec::new();
 
+        // Honor the run's excluded tags for partners too: an excluded pattern must never appear,
+        // as a base OR a composed partner. Standalone patterns never compose either way.
+        // (required_tags is intentionally NOT applied -- partners stay diverse; dialect is
+        // enforced via the `dialect` arg below.)
+        let mut excluded_tags = excluded_tags.to_vec();
+        excluded_tags.push("no-compose");
+        let filter = SelectionFilter {
+            excluded_tags,
+            ..Default::default()
+        };
         while partners.len() < target {
-            // Honor the run's excluded tags for partners too: an excluded
-            // pattern must never appear, as a base OR a composed partner.
-            // (required_tags is intentionally NOT applied -- partners stay
-            // diverse; dialect is enforced via the `dialect` arg below.)
-            let filter = SelectionFilter {
-                excluded_tags: excluded_tags.to_vec(),
-                ..Default::default()
-            };
             let candidate = self.registry.pick_random_excluding(
                 entropy,
                 &filter,
@@ -1016,6 +1022,39 @@ mod tests {
         let tags = reg.all_tags();
         assert!(tags.contains("expr_eval"), "expected expr_eval in {tags:?}");
         assert!(!tags.contains("definitely_not_a_real_tag"));
+    }
+
+    #[test]
+    fn no_compose_patterns_neither_base_nor_partner_a_composition() {
+        let mut standalone = crate::registry::basic::single_table();
+        standalone.tags.push("no-compose");
+        let mut rng = SmallRng::seed_from_u64(42);
+        let mut entropy = Entropy::new(&mut rng);
+
+        let mut registry = ConstraintRegistry::new();
+        registry.patterns.push(standalone.clone());
+        let generator =
+            Generator::new_with_registry(Dialect::PostgreSQL, GeneratorConfig::default(), registry);
+        let plain = crate::registry::basic::single_table();
+        for _ in 0..12 {
+            assert!(
+                generator
+                    .pick_composition_partners(&mut entropy, &plain, &[])
+                    .is_empty()
+            );
+        }
+
+        let mut registry = ConstraintRegistry::new();
+        registry.patterns.push(plain);
+        let generator =
+            Generator::new_with_registry(Dialect::PostgreSQL, GeneratorConfig::default(), registry);
+        for _ in 0..12 {
+            assert!(
+                generator
+                    .pick_composition_partners(&mut entropy, &standalone, &[])
+                    .is_empty()
+            );
+        }
     }
 
     #[test]
