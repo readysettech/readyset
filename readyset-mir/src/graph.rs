@@ -323,6 +323,26 @@ impl MirGraph {
                 }
                 columns
             }
+            MirNodeInner::Window {
+                group_by,
+                partition_by,
+                order_by,
+                args,
+                ..
+            } => {
+                let mut columns = self.columns(node);
+                for c in group_by
+                    .iter()
+                    .chain(partition_by)
+                    .chain(order_by.iter().map(|(c, _, _)| c))
+                    .chain(args)
+                {
+                    if !columns.contains(c) {
+                        columns.push(c.clone());
+                    }
+                }
+                columns
+            }
             _ => self.columns(node),
         }
     }

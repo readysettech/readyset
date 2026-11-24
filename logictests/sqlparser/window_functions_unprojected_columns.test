@@ -1,0 +1,355 @@
+# Window functions whose PARTITION BY, ORDER BY, or argument columns are not otherwise projected.
+# A literal argument or an expression in the window forces a projection node below the window,
+# which must still carry the window's plain-column references through.
+
+statement ok
+CREATE TABLE w (id INT PRIMARY KEY, g INT, amt INT);
+
+statement ok
+INSERT INTO w VALUES (1, 1, 10), (2, 1, 20), (3, 2, 30), (4, 2, 30), (5, 3, 50);
+
+# Literal argument, ORDER BY column not projected
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT count('x') OVER (ORDER BY g) FROM w;
+
+query I rowsort
+SELECT count('x') OVER (ORDER BY g) FROM w;
+----
+2
+2
+4
+4
+5
+
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT count(1) OVER (ORDER BY g) FROM w;
+
+query I rowsort
+SELECT count(1) OVER (ORDER BY g) FROM w;
+----
+2
+2
+4
+4
+5
+
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT sum(1) OVER (ORDER BY g) FROM w;
+
+query I rowsort
+SELECT sum(1) OVER (ORDER BY g) FROM w;
+----
+2
+2
+4
+4
+5
+
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT avg(1) OVER (ORDER BY g) FROM w;
+
+query R rowsort
+SELECT avg(1) OVER (ORDER BY g) FROM w;
+----
+1.0000
+1.0000
+1.0000
+1.0000
+1.0000
+
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT min(1) OVER (ORDER BY g) FROM w;
+
+query I rowsort
+SELECT min(1) OVER (ORDER BY g) FROM w;
+----
+1
+1
+1
+1
+1
+
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT max(1) OVER (ORDER BY g) FROM w;
+
+query I rowsort
+SELECT max(1) OVER (ORDER BY g) FROM w;
+----
+1
+1
+1
+1
+1
+
+# Aggregate argument differs from the unprojected ORDER BY column
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT sum(amt) OVER (ORDER BY g) FROM w;
+
+query I rowsort
+SELECT sum(amt) OVER (ORDER BY g) FROM w;
+----
+140
+30
+30
+90
+90
+
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT sum(amt + 0) OVER (ORDER BY g) FROM w;
+
+query I rowsort
+SELECT sum(amt + 0) OVER (ORDER BY g) FROM w;
+----
+140
+30
+30
+90
+90
+
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT max(amt) OVER (ORDER BY g) FROM w;
+
+query I rowsort
+SELECT max(amt) OVER (ORDER BY g) FROM w;
+----
+20
+20
+30
+30
+50
+
+# Ranking functions with an expression in PARTITION BY and an unprojected ORDER BY column
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT g, rank() OVER (PARTITION BY g + 1 ORDER BY id) FROM w;
+
+query II rowsort
+SELECT g, rank() OVER (PARTITION BY g + 1 ORDER BY id) FROM w;
+----
+1
+1
+1
+2
+2
+1
+2
+2
+3
+1
+
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT g, dense_rank() OVER (PARTITION BY g + 1 ORDER BY id) FROM w;
+
+query II rowsort
+SELECT g, dense_rank() OVER (PARTITION BY g + 1 ORDER BY id) FROM w;
+----
+1
+1
+1
+2
+2
+1
+2
+2
+3
+1
+
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT g, row_number() OVER (PARTITION BY g + 1 ORDER BY id) FROM w;
+
+query II rowsort
+SELECT g, row_number() OVER (PARTITION BY g + 1 ORDER BY id) FROM w;
+----
+1
+1
+1
+2
+2
+1
+2
+2
+3
+1
+
+# Neither the PARTITION BY nor the ORDER BY column is projected
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT rank() OVER (PARTITION BY g + 1 ORDER BY id) FROM w;
+
+query I rowsort
+SELECT rank() OVER (PARTITION BY g + 1 ORDER BY id) FROM w;
+----
+1
+1
+1
+2
+2
+
+# Unprojected PARTITION BY column with an expression in ORDER BY
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT id, row_number() OVER (PARTITION BY g ORDER BY id + 0) FROM w;
+
+query II rowsort
+SELECT id, row_number() OVER (PARTITION BY g ORDER BY id + 0) FROM w;
+----
+1
+1
+2
+2
+3
+1
+4
+2
+5
+1
+
+# Constant PARTITION BY and ORDER BY
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT sum(amt) OVER (PARTITION BY 1) FROM w;
+
+query I rowsort
+SELECT sum(amt) OVER (PARTITION BY 1) FROM w;
+----
+140
+140
+140
+140
+140
+
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT count(id) OVER (ORDER BY 1) FROM w;
+
+query I rowsort
+SELECT count(id) OVER (ORDER BY 1) FROM w;
+----
+5
+5
+5
+5
+5
+
+# Aggregate in ORDER BY with an expression in PARTITION BY
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT rank() OVER (PARTITION BY g + 0 ORDER BY sum(amt)) FROM w GROUP BY g;
+
+query I rowsort
+SELECT rank() OVER (PARTITION BY g + 0 ORDER BY sum(amt)) FROM w GROUP BY g;
+----
+1
+1
+1
+
+# Controls: no projection node, or the ORDER BY column is projected
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT count(*) OVER (ORDER BY g) FROM w;
+
+query I rowsort
+SELECT count(*) OVER (ORDER BY g) FROM w;
+----
+2
+2
+4
+4
+5
+
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT count(id) OVER (ORDER BY g) FROM w;
+
+query I rowsort
+SELECT count(id) OVER (ORDER BY g) FROM w;
+----
+2
+2
+4
+4
+5
+
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT max(g) OVER (ORDER BY g) FROM w;
+
+query I rowsort
+SELECT max(g) OVER (ORDER BY g) FROM w;
+----
+1
+1
+2
+2
+3
+
+onlyif readyset
+statement ok
+CREATE CACHE FROM SELECT g, count('x') OVER (ORDER BY g) FROM w;
+
+query II rowsort
+SELECT g, count('x') OVER (ORDER BY g) FROM w;
+----
+1
+2
+1
+2
+2
+4
+2
+4
+3
+5
+
+# Writes propagate through the window
+statement ok
+INSERT INTO w VALUES (6, 1, 60);
+
+query I rowsort
+SELECT count('x') OVER (ORDER BY g) FROM w;
+----
+3
+3
+3
+5
+5
+6
+
+query II rowsort
+SELECT g, rank() OVER (PARTITION BY g + 1 ORDER BY id) FROM w;
+----
+1
+1
+1
+2
+1
+3
+2
+1
+2
+2
+3
+1
+
+statement ok
+DELETE FROM w WHERE id = 5;
+
+query I rowsort
+SELECT count('x') OVER (ORDER BY g) FROM w;
+----
+3
+3
+3
+5
+5
