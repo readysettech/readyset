@@ -146,7 +146,10 @@ async fn create_table_with_slow_migration_keeps_later_rows() {
     fail::cfg(readyset_util::failpoints::EXTEND_RECIPE, "1*sleep(6000)").unwrap();
 
     upstream.query_drop("CREATE TABLE u (x INT)").await.unwrap();
-    upstream.query_drop("INSERT INTO u VALUES (1)").await.unwrap();
+    upstream
+        .query_drop("INSERT INTO u VALUES (1)")
+        .await
+        .unwrap();
     eventually!(run_test: {
         rs.query::<i32, _>("SELECT x FROM u").await.map_err(|e| e.to_string())
     }, then_assert: |rows| assert_eq!(rows, Ok(vec![1])));
