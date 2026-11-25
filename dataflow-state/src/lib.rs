@@ -38,9 +38,11 @@ static STATE: OnceLock<RandomState> = OnceLock::new();
 pub use crate::key::{PointKey, RangeKey};
 pub use crate::memory_state::MemoryState;
 pub use crate::persistent_state::{
-    clean_working_dir, example_serialized_keys, example_serialized_metas, example_serialized_row,
-    DurabilityMode, IndexBuildContext, IndexBuildStatus, PersistenceParameters, PersistenceType,
-    PersistentState, PersistentStateHandle, SnapshotMode,
+    block_cache_bytes_for_memory, clean_working_dir, example_serialized_keys,
+    example_serialized_metas, example_serialized_row, DurabilityMode, IndexBuildContext,
+    IndexBuildStatus, PersistenceParameters, PersistenceType, PersistentState,
+    PersistentStateHandle, SnapshotMode, BLOCK_CACHE_CAP_BYTES, BLOCK_CACHE_DEFAULT_PERCENT,
+    BLOCK_CACHE_FLOOR_BYTES,
 };
 
 pub fn init_parallel_row_pool() {
